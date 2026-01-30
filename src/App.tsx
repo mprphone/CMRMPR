@@ -59,6 +59,10 @@ export default function App() {
     fetchData();
   }, [globalSettings]);
 
+  useEffect(() => {
+    localStorage.setItem('globalSettings', JSON.stringify(globalSettings));
+  }, [globalSettings]);
+
   const fetchData = async () => {
     setIsLoadingData(true);
     try {

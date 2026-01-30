@@ -13,12 +13,8 @@ export default defineConfig(({ mode }) => {
       define: {
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_MODEL': JSON.stringify(env.GEMINI_MODEL || 'gemini-flash-latest'),
-        'process.env.VITE_SUPABASE_URL_CMR': JSON.stringify(env.VITE_SUPABASE_URL_CMR),
-        'process.env.VITE_SUPABASE_KEY_CMR': JSON.stringify(env.VITE_SUPABASE_KEY_CMR),
-        'process.env.VITE_SUPABASE_URL_IMPORT': JSON.stringify(env.VITE_SUPABASE_URL_IMPORT),
-        'process.env.VITE_SUPABASE_KEY_IMPORT': JSON.stringify(env.VITE_SUPABASE_KEY_IMPORT),
-        'process.env.SUPABASE_URL': JSON.stringify(env.SUPABASE_URL),
-        'process.env.SUPABASE_SERVICE_ROLE_KEY': JSON.stringify(env.SUPABASE_SERVICE_ROLE_KEY),
+        // As variáveis com prefixo VITE_ são automaticamente expostas pelo Vite em `import.meta.env`.
+        // As seguintes são para variáveis sem o prefixo que precisam de ser expostas no cliente.
         'process.env.SUPABASE_CLIENTS_SOURCE': JSON.stringify(env.SUPABASE_CLIENTS_SOURCE),
         'process.env.SUPABASE_STAFF_SOURCE': JSON.stringify(env.SUPABASE_FUNCIONARIOS_SOURCE || env.SUPABASE_STAFF_SOURCE),
       },

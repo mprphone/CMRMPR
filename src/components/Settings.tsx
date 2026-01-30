@@ -65,16 +65,6 @@ const Settings: React.FC<SettingsProps> = ({ globalSettings, setGlobalSettings, 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Mail size={18} /> Configuração de Email (Resend)</h3>
         <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">Resend API Key</label>
-            <input
-              type="password"
-              placeholder="re_..."
-              value={globalSettings.resendApiKey || ''}
-              onChange={(e) => handleGlobalChange('resendApiKey', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm font-mono"
-            />
-          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Nome do Remetente</label>
@@ -122,51 +112,6 @@ const Settings: React.FC<SettingsProps> = ({ globalSettings, setGlobalSettings, 
                 <img src={logo} alt="Logotipo" className="max-h-12" />
               </div>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Supabase Settings */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Database size={18} /> Ligação Supabase</h3>
-        <div className="space-y-4">
-          <h4 className="text-sm font-bold text-slate-600">Servidor de Gestão (Store)</h4>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">URL</label>
-            <input
-              type="text"
-              value={globalSettings.supabaseStoreUrl}
-              onChange={(e) => handleGlobalChange('supabaseStoreUrl', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">Chave Pública (Anon Key)</label>
-            <input
-              type="text"
-              value={globalSettings.supabaseStoreKey}
-              onChange={(e) => handleGlobalChange('supabaseStoreKey', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm"
-            />
-          </div>
-          <h4 className="text-sm font-bold text-slate-600 pt-4 border-t">Servidor de Origem (Import)</h4>
-           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">URL</label>
-            <input
-              type="text"
-              value={globalSettings.supabaseImportUrl}
-              onChange={(e) => handleGlobalChange('supabaseImportUrl', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">Chave Pública (Anon Key)</label>
-            <input
-              type="text"
-              value={globalSettings.supabaseImportKey}
-              onChange={(e) => handleGlobalChange('supabaseImportKey', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm"
-            />
           </div>
         </div>
       </div>
