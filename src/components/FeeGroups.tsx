@@ -1,12 +1,12 @@
 
-import React, { useState, useMemo } from 'react';
-import { FeeGroup, Client, Task, Staff } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { FeeGroup, Client, Task, Staff, TaskArea, TurnoverBracket } from '../types';
 import { calculateClientProfitability } from '../services/calculator';
-import { clientService, groupService } from '../services/supabase';
+import { clientService, groupService, ensureStoreClient } from '../services/supabase';
 import { analyzeClientWithAI } from '../services/geminiService';
 import { 
-  Plus, Users, FolderOpen, Trash2, ChevronRight, Save,
-  ArrowLeft, BrainCircuit, RefreshCcw, XCircle, Activity, UserPlus, Search, X, Filter
+  Plus, Users, FolderOpen, Trash2, ChevronRight, Save, Printer, ChevronUp, ChevronDown, CheckCircle,
+  ArrowLeft, BrainCircuit, RefreshCcw, XCircle, Activity, UserPlus, Search, X, TrendingUp,
 } from 'lucide-react';
 
 interface FeeGroupsProps {
@@ -18,10 +18,11 @@ interface FeeGroupsProps {
   tasks: Task[];
   staff: Staff[];
   areaCosts: Record<string, number>;
+  turnoverBrackets: TurnoverBracket[];
 }
 
 const FeeGroups: React.FC<FeeGroupsProps> = ({ 
-  groups, setGroups, clients, setClients, onSelectClient, tasks, staff, areaCosts 
+  groups, setGroups, clients, setClients, onSelectClient, tasks, staff, areaCosts, turnoverBrackets
 }) => {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
@@ -34,14 +35,91 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
   const [addClientSearch, setAddClientSearch] = useState('');
   const [addClientStaffFilter, setAddClientStaffFilter] = useState('all');
   const [addClientEntityTypeFilter, setAddClientEntityTypeFilter] = useState('all');
+  const [showChangeMapPreview, setShowChangeMapPreview] = useState(false);
+
+  type MapSortableKeys = 'name' | 'monthlyFee' | 'newFee' | 'difference';
+  const [mapClients, setMapClients] = useState<(Client & { newFee: number; difference: number; })[]>([]);
+  const [mapSortConfig, setMapSortConfig] = useState<{ key: MapSortableKeys; direction: 'ascending' | 'descending' }>({ key: 'name', direction: 'ascending' });
 
   const selectedGroup = groups.find(g => g.id === selectedGroupId);
   const groupClients = useMemo(() => selectedGroup ? clients.filter(c => selectedGroup.clientIds.includes(c.id)) : [], [clients, selectedGroup]);
+
+  const clientsWithNewFees = useMemo(() => {
+    return groupClients
+      .filter(c => newFees[c.id] !== undefined && newFees[c.id] > 0)
+      .map(c => ({
+        ...c,
+        newFee: newFees[c.id],
+        difference: newFees[c.id] - c.monthlyFee,
+      }));
+  }, [groupClients, newFees]);
 
   const uniqueEntityTypes = useMemo(() => {
     const types = new Set(clients.map(c => c.entityType).filter(Boolean));
     return Array.from(types) as string[];
   }, [clients]);
+
+  useEffect(() => {
+    if (selectedGroup) {
+        setNewFees(selectedGroup.proposed_fees || {});
+    }
+  }, [selectedGroup]);
+
+  useEffect(() => {
+    if (showChangeMapPreview) {
+      setMapClients(clientsWithNewFees);
+    }
+  }, [showChangeMapPreview, clientsWithNewFees]);
+
+  const handleRemoveFromMap = (clientId: string) => {
+    setMapClients(prev => prev.filter(c => c.id !== clientId));
+  };
+
+  const requestMapSort = (key: MapSortableKeys) => {
+    let direction: 'ascending' | 'descending' = 'ascending';
+    if (mapSortConfig && mapSortConfig.key === key && mapSortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setMapSortConfig({ key, direction });
+  };
+
+  const sortedMapClients = useMemo(() => {
+    let sortableItems = [...mapClients];
+    if (mapSortConfig !== null) {
+      sortableItems.sort((a, b) => {
+        if (a[mapSortConfig.key] < b[mapSortConfig.key]) {
+          return mapSortConfig.direction === 'ascending' ? -1 : 1;
+        }
+        if (a[mapSortConfig.key] > b[mapSortConfig.key]) {
+          return mapSortConfig.direction === 'ascending' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [mapClients, mapSortConfig]);
+
+  const mapTotals = useMemo(() => {
+    return mapClients.reduce((acc, client) => {
+      acc.current += client.monthlyFee;
+      acc.new += client.newFee;
+      acc.diff += client.difference;
+      return acc;
+    }, { current: 0, new: 0, diff: 0 });
+  }, [mapClients]);
+
+  const groupTotals = useMemo(() => {
+    if (!groupClients) return { current: 0, new: 0, diff: 0 };
+    return groupClients.reduce((acc, client) => {
+        const newFee = newFees[client.id];
+        const currentFee = client.monthlyFee;
+        const proposedFee = (newFee !== undefined && newFee > 0) ? newFee : currentFee;
+        
+        acc.current += currentFee;
+        acc.new += proposedFee;
+        return acc;
+    }, { current: 0, new: 0, diff: 0 });
+  }, [groupClients, newFees]);
 
   const handleAddGroup = async () => {
     if (!newGroupName) return;
@@ -68,15 +146,14 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
   const handleAddMultipleClientsToGroup = async () => {
     if (!selectedGroupId || clientsToAdd.length === 0) return;
     
-    const originalClients = [...clients];
     const originalGroups = [...groups];
     const groupToUpdate = originalGroups.find(g => g.id === selectedGroupId);
     if (!groupToUpdate) return;
 
-    const updatedGroup = { ...groupToUpdate, clientIds: [...new Set([...groupToUpdate.clientIds, ...clientsToAdd])] };
-    const updatedGroups = originalGroups.map(g => g.id === selectedGroupId ? updatedGroup : g);
+    const updatedClientIds = [...new Set([...groupToUpdate.clientIds, ...clientsToAdd])];
+    const updatedGroup = { ...groupToUpdate, clientIds: updatedClientIds };
 
-    setGroups(updatedGroups);
+    setGroups(originalGroups.map(g => g.id === selectedGroupId ? updatedGroup : g));
 
     // Close modal immediately for better UX
     setClientsToAdd([]);
@@ -85,7 +162,13 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
 
     // Persist changes to DB
     try {
-      await groupService.upsert(updatedGroup);
+      // Use a specific update instead of a full upsert to avoid schema cache issues
+      const storeClient = ensureStoreClient();
+      const { error } = await storeClient
+        .from('fee_groups')
+        .update({ client_ids: updatedClientIds })
+        .eq('id', selectedGroupId);
+      if (error) throw error;
     } catch (err: any) {
       alert("Erro ao adicionar clientes ao grupo: " + err.message);
       // Revert UI on failure
@@ -94,22 +177,26 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
   };
 
   const handleRemoveClientFromGroup = async (clientId: string) => {
-    const originalClients = [...clients];
     const originalGroups = [...groups];
-    const clientToUpdate = originalClients.find(c => c.id === clientId);
-    if (!clientToUpdate || !selectedGroup) return;
+    if (!selectedGroup) return;
 
     const groupToUpdate = originalGroups.find(g => g.id === selectedGroup.id);
+    if (!groupToUpdate) return;
 
-    // Optimistic UI update
-    const updatedGroup = groupToUpdate ? { ...groupToUpdate, clientIds: groupToUpdate.clientIds.filter(id => id !== clientId) } : null;
-    const updatedGroups = updatedGroup ? originalGroups.map(g => g.id === updatedGroup.id ? updatedGroup : g) : originalGroups;
+    const updatedClientIds = groupToUpdate.clientIds.filter(id => id !== clientId);
+    const updatedGroup = { ...groupToUpdate, clientIds: updatedClientIds };
 
-    setGroups(updatedGroups);
+    setGroups(originalGroups.map(g => g.id === selectedGroup.id ? updatedGroup : g));
 
     // Persist
     try {
-      if (updatedGroup) await groupService.upsert(updatedGroup);
+      // Use a specific update instead of a full upsert to avoid schema cache issues
+      const storeClient = ensureStoreClient();
+      const { error } = await storeClient
+        .from('fee_groups')
+        .update({ client_ids: updatedClientIds })
+        .eq('id', selectedGroup.id);
+      if (error) throw error;
     } catch(err: any) {
       alert("Erro ao remover cliente do grupo: " + err.message);
       setGroups(originalGroups);
@@ -118,20 +205,56 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
 
   const runAiAnalysis = async (client: Client) => {
     setAnalyzingClientId(client.id);
-    const stats = calculateClientProfitability(client, tasks, areaCosts, staff);
-    const analysisResult = await analyzeClientWithAI(client, stats);
-    const updatedClients = clients.map(c => 
-      c.id === client.id ? { ...c, aiAnalysisCache: analysisResult } : c
-    );
-    setClients(updatedClients);
-    setAnalyzingClientId(null);
+    const stats = calculateClientProfitability(client, tasks, areaCosts as Record<TaskArea, number>, staff, turnoverBrackets);
+    const analysisResult = await analyzeClientWithAI(client, stats);    
+    const updatedClientWithAI = { ...client, aiAnalysisCache: analysisResult };
+    
+    try {
+      // Persist the AI analysis to the client record
+      await clientService.upsert(updatedClientWithAI);
+      
+      // Update local state
+      const updatedClients = clients.map(c => 
+        c.id === client.id ? updatedClientWithAI : c
+      );
+      setClients(updatedClients);
+    } catch (err: any) {
+      alert("Erro ao gravar a análise da IA: " + err.message);
+    } finally {
+      setAnalyzingClientId(null);
+    }
   };
 
   const handleNewFeeChange = (clientId: string, value: string) => {
     setNewFees(prev => ({ ...prev, [clientId]: parseFloat(value) || 0 }));
   };
 
-  const handleSaveFees = async () => {
+  const handleSaveProposedFees = async () => {
+    if (!selectedGroup) return;
+    setIsSaving(true);
+    try {
+        const storeClient = ensureStoreClient();
+        // Call the RPC function to bypass client-side schema cache issues
+        const { error } = await storeClient.rpc('update_group_proposed_fees', {
+            group_id: selectedGroup.id,
+            fees_payload: newFees
+        });
+        
+        if (error) throw error;
+
+        // Optimistically update the UI with the data we just sent
+        const savedGroup = { ...selectedGroup, proposed_fees: newFees };
+        // Update the main groups state so the data is fresh
+        setGroups(prev => prev.map(g => g.id === savedGroup.id ? savedGroup : g));
+        alert('Propostas de avença gravadas com sucesso!');
+    } catch (err: any) {
+        alert('Erro ao gravar as propostas: ' + err.message);
+    } finally {
+        setIsSaving(false);
+    }
+  };
+
+  const handleApplyFees = async () => {
     setIsSaving(true);
     const clientsToUpdate = groupClients.filter(c => newFees[c.id] !== undefined && newFees[c.id] > 0);
     
@@ -198,7 +321,7 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {groups.map(group => {
-            const gClients = clients.filter(c => c.groupId === group.id);
+            const gClients = clients.filter(c => group.clientIds.includes(c.id));
             const totalRev = gClients.reduce((acc, c) => acc + c.monthlyFee, 0);
             return (
               <div 
@@ -235,6 +358,83 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
     );
   }
 
+  const MapSortableHeader = ({ children, sortKey }: { children: React.ReactNode, sortKey: MapSortableKeys }) => {
+    const isSorted = mapSortConfig?.key === sortKey;
+    return (
+        <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => requestMapSort(sortKey)}>
+            <div className="flex items-center gap-1">
+                {children}
+                {isSorted ? (
+                    mapSortConfig.direction === 'ascending' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+                ) : (
+                    <ChevronUp size={14} className="text-slate-300" />
+                )}
+            </div>
+        </th>
+    );
+  };
+
+  if (showChangeMapPreview) {
+    return (
+      <div className="animate-fade-in bg-white min-h-screen absolute top-0 left-0 w-full z-50 p-6 print:p-0">
+        <style>{`
+          @page { size: A4; margin: 1cm; }
+          @media print {
+            .no-print { display: none !important; }
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          }
+        `}</style>
+        <div className="max-w-4xl mx-auto flex justify-between items-center mb-6 no-print border-b pb-4">
+          <button onClick={() => setShowChangeMapPreview(false)} className="flex items-center gap-2 text-slate-500 hover:text-slate-800">
+            <ArrowLeft size={20}/> Voltar ao Workspace
+          </button>
+          <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
+            <Printer size={20}/> Guardar PDF
+          </button>
+        </div>
+        <div className="max-w-4xl mx-auto bg-white p-10 rounded-2xl print:p-0">
+          <h2 className="text-xl font-bold text-slate-800">Mapa de Alteração de Avenças</h2>
+          <p className="text-sm text-slate-500 mb-6">Grupo: {selectedGroup?.name}</p>
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+              <tr>
+                <MapSortableHeader sortKey="name">Cliente</MapSortableHeader>
+                <MapSortableHeader sortKey="monthlyFee">Avença Atual (€)</MapSortableHeader>
+                <MapSortableHeader sortKey="newFee">Nova Avença (€)</MapSortableHeader>
+                <MapSortableHeader sortKey="difference">Diferença (€)</MapSortableHeader>
+                <th className="px-4 py-3 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {sortedMapClients.map(client => (
+                <tr key={client.id}>
+                  <td className="px-4 py-3 font-medium">{client.name}</td>
+                  <td className="px-4 py-3 text-right">{client.monthlyFee.toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-blue-600">{client.newFee.toFixed(2)}</td>
+                  <td className={`px-4 py-3 text-right font-bold ${client.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>{client.difference >= 0 ? '+' : ''}{client.difference.toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => handleRemoveFromMap(client.id)} className="p-1 text-slate-300 hover:text-red-500" title="Remover do mapa">
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="bg-slate-50 font-bold text-slate-700">
+              <tr>
+                <td className="px-4 py-3">TOTAL</td>
+                <td className="px-4 py-3 text-right">{mapTotals.current.toFixed(2)}</td>
+                <td className="px-4 py-3 text-right text-blue-600">{mapTotals.new.toFixed(2)}</td>
+                <td className={`px-4 py-3 text-right ${mapTotals.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>{mapTotals.diff >= 0 ? '+' : ''}{mapTotals.diff.toFixed(2)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
   const isAvençasGroup = selectedGroup?.name.toLowerCase().includes('avenças');
   // View 2: Group Workspace (Detail)
   return (
@@ -257,6 +457,26 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
         </div>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-4 rounded-xl border border-slate-200">
+          <p className="text-xs text-slate-500 font-bold uppercase">Total Avenças Atuais</p>
+          <p className="text-2xl font-bold text-slate-800 mt-1">{groupTotals.current.toFixed(2)}€</p>
+        </div>
+        <div className="bg-white p-4 rounded-xl border border-slate-200">
+          <p className="text-xs text-blue-600 font-bold uppercase">Total Avenças Propostas</p>
+          <p className="text-2xl font-bold text-blue-700 mt-1">{groupTotals.new.toFixed(2)}€</p>
+        </div>
+        <div className="bg-white p-4 rounded-xl border border-slate-200">
+          <p className="text-xs text-slate-500 font-bold uppercase">Diferença Total</p>
+          <p className={`text-2xl font-bold mt-1 ${(groupTotals.new - groupTotals.current) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <span className="flex items-center gap-1">
+              {(groupTotals.new - groupTotals.current) >= 0 ? <TrendingUp size={20}/> : <TrendingUp size={20} className="transform -scale-y-100"/>}
+              {(groupTotals.new - groupTotals.current).toFixed(2)}€
+            </span>
+          </p>
+        </div>
+      </div>
+
       {isAvençasGroup ? (
         <>
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -265,8 +485,8 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
                 <thead className="text-[10px] text-slate-400 uppercase bg-slate-50 font-black tracking-widest">
                   <tr>
                     <th className="px-6 py-4">Cliente (NIF, Nome)</th>
-                    <th className="px-4 py-4">Email / Telefone</th>
                     <th className="px-4 py-4 text-center">Avença Atual (€)</th>
+                    <th className="px-4 py-4 text-center">Margem (%)</th>
                     <th className="px-4 py-4 text-center">Avença Sugerida IA (€)</th>
                     <th className="px-4 py-4 text-center">Nova Avença (€)</th>
                     <th className="px-6 py-4 text-right">Ações</th>
@@ -276,43 +496,59 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
                   {groupClients.length === 0 ? (
                     <tr><td colSpan={6} className="px-6 py-20 text-center text-slate-400 italic">Nenhum cliente neste grupo.</td></tr>
                   ) : (
-                    groupClients.map(client => (
-                      <tr key={client.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-bold text-slate-800 truncate max-w-[180px]">{client.name}</div>
-                          <div className="text-[10px] text-slate-400 font-medium">{client.nif}</div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="text-slate-600 text-xs">{client.email}</div>
-                          <div className="text-[10px] text-slate-400">{client.phone}</div>
-                        </td>
-                        <td className="px-4 py-4 text-center font-bold text-slate-700">{client.monthlyFee.toFixed(2)}€</td>
-                        <td className="px-4 py-4 text-center">
-                          {client.aiAnalysisCache ? (
-                            <span className="font-bold text-indigo-600">{client.aiAnalysisCache.avenca_sugerida.toFixed(0)}€</span>
-                          ) : (
-                            <button onClick={() => runAiAnalysis(client)} disabled={analyzingClientId === client.id} className="text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md text-[10px] font-bold hover:bg-indigo-100">
-                              {analyzingClientId === client.id ? <RefreshCcw size={12} className="animate-spin mx-auto"/> : 'Analisar'}
-                            </button>
-                          )}
-                        </td>
-                        <td className="px-4 py-4 text-center">
-                          <input type="number" placeholder={client.monthlyFee.toFixed(0)} value={newFees[client.id] || ''} onChange={(e) => handleNewFeeChange(client.id, e.target.value)} className="w-24 text-center border-slate-200 rounded-lg py-1 font-bold text-blue-600 focus:ring-blue-500" />
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                           <button onClick={() => onSelectClient(client)} className="text-slate-400 hover:text-blue-600 p-1" title="Ver Detalhes do Cliente"><Activity size={16}/></button>
-                           <button onClick={() => handleRemoveClientFromGroup(client.id)} className="text-slate-300 hover:text-red-500 p-1" title="Remover do grupo"><XCircle size={16}/></button>
-                        </td>
-                      </tr>
-                    ))
+                    groupClients.map(client => {
+                      const stats = calculateClientProfitability(client, tasks, areaCosts as Record<TaskArea, number>, staff, turnoverBrackets);
+                      return (
+                        <tr key={client.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="font-bold text-slate-800 truncate max-w-[180px]">{client.name}</div>
+                            <div className="text-[10px] text-slate-400 font-medium">{client.nif}</div>
+                          </td>
+                          <td className="px-4 py-4 text-center font-bold text-slate-700">{client.monthlyFee.toFixed(2)}€</td>
+                          <td className={`px-4 py-4 text-center font-bold ${stats.profitability < 15 ? 'text-red-500' : 'text-green-600'}`}>
+                            {stats.profitability.toFixed(1)}%
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            {client.aiAnalysisCache ? (
+                              <span className="font-bold text-indigo-600">{client.aiAnalysisCache.avenca_sugerida.toFixed(0)}€</span>
+                            ) : (
+                              <button onClick={() => runAiAnalysis(client)} disabled={analyzingClientId === client.id} className="text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md text-[10px] font-bold hover:bg-indigo-100">
+                                {analyzingClientId === client.id ? <RefreshCcw size={12} className="animate-spin mx-auto"/> : 'Analisar'}
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <input type="number" placeholder={client.monthlyFee.toFixed(0)} value={newFees[client.id] || ''} onChange={(e) => handleNewFeeChange(client.id, e.target.value)} className="w-24 text-center border-slate-200 rounded-lg py-1 font-bold text-blue-600 focus:ring-blue-500" />
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                             <button onClick={() => onSelectClient(client)} className="text-slate-400 hover:text-blue-600 p-1" title="Ver Detalhes do Cliente"><Activity size={16}/></button>
+                             <button onClick={() => handleRemoveClientFromGroup(client.id)} className="text-slate-300 hover:text-red-500 p-1" title="Remover do grupo"><XCircle size={16}/></button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
           </div>
-          <div className="flex justify-end gap-3">
-            <button onClick={handleSaveFees} disabled={isSaving || Object.keys(newFees).length === 0} className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
-              {isSaving ? <RefreshCcw size={18} className="animate-spin"/> : <Save size={18}/>} Gravar Novas Avenças
+          <div className="flex justify-end items-center gap-3 mt-6">
+            <button 
+              onClick={handleSaveProposedFees} 
+              disabled={isSaving || Object.keys(newFees).length === 0} 
+              className="bg-white text-slate-700 border border-slate-300 px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? <RefreshCcw size={18} className="animate-spin"/> : <Save size={18}/>} Gravar Propostas
+            </button>
+            <button 
+              onClick={() => setShowChangeMapPreview(true)} 
+              disabled={clientsWithNewFees.length === 0} 
+              className="bg-white text-slate-700 border border-slate-300 px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Printer size={18}/> Gerar Mapa
+            </button>
+            <button onClick={handleApplyFees} disabled={isSaving || clientsWithNewFees.length === 0} className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+              {isSaving ? <RefreshCcw size={18} className="animate-spin"/> : <CheckCircle size={18}/>} Aplicar Avenças
             </button>
           </div>
         </>

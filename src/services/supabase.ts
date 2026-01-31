@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -12,32 +12,64 @@ export const initSupabase = (settings: GlobalSettings) => {
 
   if (iUrl && iKey && iUrl.startsWith('http')) {
     importClient = createClient(iUrl, iKey);
+  } else {
+    importClient = null;
   }
   if (sUrl && sKey && sUrl.startsWith('http')) {
     storeClient = createClient(sUrl, sKey);
+  } else {
+    storeClient = null;
   }
+};
+
+// --- HELPER TO ENSURE CLIENT IS INITIALIZED ---
+// This helps prevent issues with HMR (Hot Module Replacement) during development,
+// where the client instance might be lost.
+export const ensureStoreClient = (): SupabaseClient => {
+  if (!storeClient) {
+    const savedSettingsRaw = localStorage.getItem('globalSettings');
+    if (savedSettingsRaw) {
+      const savedSettings = JSON.parse(savedSettingsRaw);
+      initSupabase(savedSettings);
+    }
+  }
+  if (!storeClient) {
+    throw new Error("Servidor de Gestão não configurado. Verifique as configurações e recarregue a página.");
+  }
+  return storeClient;
 };
 
 // --- MAPEAMENTOS ---
 const mapDbToClient = (db: any): Client => ({
   id: db.id,
-  name: db.nome || db.name || 'Sem Nome',
+  name: db.name || db.nome || db.Name || db.Nome || db.cliente || db.Cliente || 'Sem Nome',
   email: db.email || '',
   phone: db.phone || db.telefone || '',
-  address: db.morada || db.address || '',
+  address: db.address || db.morada || '',
   nif: db.nif || '',
-  sector: db.sector || db.cae_principal || 'Geral',
-  entityType: db.tipo_entidade || db.entity_type || 'SOCIEDADE',
-  responsibleStaff: db.responsavel_interno_id || db.responsavel || '',
-  status: db.estado || db.status || 'Ativo',
+  sector: db.sector || 'Geral',
+  entityType: db.entity_type || db.tipo_entidade || 'SOCIEDADE',
+  responsibleStaff: db.responsavel_interno_id || db.responsible_staff || '',
+  status: db.status || db.estado || 'Ativo',
   monthlyFee: Number(db.monthly_fee || 0),
   employeeCount: Number(db.employee_count || 0),
   turnover: Number(db.turnover || 0),
-  documentCount: Number(db.numero_documentos || db.document_count || 0),
+  documentCount: Number(db.document_count || db.numero_documentos || 0),
   establishments: Number(db.establishments || 1),
   banks: Number(db.banks || 1),
   callTimeBalance: Number(db.call_time_balance || 0),
   travelCount: Number(db.travel_count || 0),
+  deliversOrganizedDocs: db.delivers_organized_docs === null ? true : db.delivers_organized_docs,
+  vatRefunds: db.vat_refunds || false,
+  hasIneReport: db.has_ine_report || false,
+  hasCostCenters: db.has_cost_centers || false,
+  hasInternationalOps: db.has_international_ops || false,
+  hasManagementReports: db.has_management_reports || false,
+  supplierCount: Number(db.supplier_count || 0),
+  customerCount: Number(db.customer_count || 0),
+  communicationCount: Number(db.communication_count || 0),
+  meetingCount: Number(db.meeting_count || 0),
+  previousYearProfit: Number(db.previous_year_profit || 0),
   tasks: db.tasks || [],
   contractRenewalDate: db.contract_renewal_date || '',
   aiAnalysisCache: db.ai_analysis_cache || null
@@ -45,13 +77,13 @@ const mapDbToClient = (db: any): Client => ({
 
 const mapClientToDb = (c: Client) => ({
   id: c.id,
-  name: c.name, nome: c.name,
+  name: c.name,
   nif: c.nif,
-  address: c.address, morada: c.address,
+  address: c.address,
   email: c.email,
-  phone: c.phone, telefone: c.phone,
-  entity_type: c.entityType, tipo_entidade: c.entityType,
-  status: c.status, estado: c.status,
+  phone: c.phone,
+  entity_type: c.entityType,
+  status: c.status,
   sector: c.sector,
   responsavel_interno_id: (c.responsibleStaff && c.responsibleStaff.includes('-')) ? c.responsibleStaff : null,
   monthly_fee: c.monthlyFee,
@@ -59,9 +91,20 @@ const mapClientToDb = (c: Client) => ({
   establishments: c.establishments,
   banks: c.banks,
   turnover: c.turnover,
-  document_count: c.documentCount, numero_documentos: c.documentCount,
+  document_count: c.documentCount,
   call_time_balance: c.callTimeBalance,
   travel_count: c.travelCount,
+  delivers_organized_docs: c.deliversOrganizedDocs,
+  vat_refunds: c.vatRefunds,
+  has_ine_report: c.hasIneReport,
+  has_cost_centers: c.hasCostCenters,
+  has_international_ops: c.hasInternationalOps,
+  has_management_reports: c.hasManagementReports,
+  supplier_count: c.supplierCount,
+  customer_count: c.customerCount,
+  communication_count: c.communicationCount,
+  meeting_count: c.meetingCount,
+  previous_year_profit: c.previousYearProfit,
   tasks: c.tasks,
   contract_renewal_date: c.contractRenewalDate,
   ai_analysis_cache: c.aiAnalysisCache
@@ -69,9 +112,9 @@ const mapClientToDb = (c: Client) => ({
 
 const mapDbToStaff = (s: any): Staff => ({
   id: s.id,
-  name: s.nome || s.name || 'Sem Nome',
+  name: s.name || s.nome || s.Name || s.Nome || s.funcionario || s.Funcionario || 'Sem Nome',
   email: s.email || '',
-  phone: s.phone || s.telefone || '',
+  phone: s.phone || s.telefone || s.Phone || s.Telefone || '',
   role: s.role || 'Colaborador',
   baseSalary: Number(s.base_salary || 0),
   socialChargesPercent: Number(s.social_charges_percent || 23.75),
@@ -84,9 +127,9 @@ const mapDbToStaff = (s: any): Staff => ({
 
 const mapStaffToDb = (s: Staff) => ({
   id: s.id,
-  name: s.name, nome: s.name,
+  name: s.name,
   email: s.email,
-  phone: s.phone, telefone: s.phone,
+  phone: s.phone,
   role: s.role,
   base_salary: s.baseSalary,
   social_charges_percent: s.socialChargesPercent,
@@ -99,7 +142,7 @@ const mapStaffToDb = (s: Staff) => ({
 
 export const clientService = {
   async getAll(): Promise<Client[]> {
-    if (!storeClient) return [];
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('clients').select('*');
     if (error) throw error;
     return (data || []).map(mapDbToClient);
@@ -111,23 +154,24 @@ export const clientService = {
     return (data || []).map(mapDbToClient);
   },
   async bulkUpsert(clients: Client[]): Promise<void> {
-    if (!storeClient) return;
+    const storeClient = ensureStoreClient();
     // During sync, we only want to update core identification fields, not financial/operational data.
     const clientsToUpsert = clients.map(c => ({
-      nif: c.nif, // Conflict key
-      name: c.name, nome: c.name,
-      email: c.email,
-      phone: c.phone, telefone: c.phone,
-      address: c.address, morada: c.address,
-      entity_type: c.entityType, tipo_entidade: c.entityType,
-      sector: c.sector,
-      // By omitting other fields, upsert will not overwrite them on existing records.
+      nif: c.nif,          // Chave de conflito
+      name: c.name,        // OBRIGATÓRIO (para bater com a restrição NOT NULL)
+      email: c.email || '',
+      phone: c.phone || '',
+      address: c.address || '',
+      entity_type: c.entityType || 'SOCIEDADE',
+      sector: c.sector || 'Geral',
+      status: c.status || 'Ativo',
+      responsavel_interno_id: c.responsibleStaff || null
     }));
     const { error } = await storeClient.from('clients').upsert(clientsToUpsert, { onConflict: 'nif' });
     if (error) throw error;
   },
   async upsert(client: Client): Promise<Client> {
-    if (!storeClient) throw new Error("Servidor de Gestão não configurado.");
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('clients').upsert(mapClientToDb(client)).select().single();
     if (error) throw error;
     return mapDbToClient(data);
@@ -136,7 +180,7 @@ export const clientService = {
 
 export const staffService = {
   async getAll(): Promise<Staff[]> {
-    if (!storeClient) return [];
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('staff').select('*');
     if (error) throw error;
     return (data || []).map(mapDbToStaff);
@@ -149,13 +193,13 @@ export const staffService = {
     return (data || []).map(s => (mapDbToStaff(s)));
   },
   async bulkUpsert(members: Staff[]): Promise<void> {
-    if (!storeClient) return;
+    const storeClient = ensureStoreClient();
     // During sync, we only want to update core identification fields.
     const staffToUpsert = members.map(s => ({
       id: s.id, // Conflict key
-      name: s.name, nome: s.name,
+      name: s.name,
       email: s.email,
-      phone: s.phone, telefone: s.phone,
+      phone: s.phone,
       role: s.role,
       // Financial data is managed inside the app, so we don't overwrite it during sync.
     }));
@@ -163,7 +207,7 @@ export const staffService = {
     if (error) throw error;
   },
   async upsert(member: Staff): Promise<Staff> {
-    if (!storeClient) throw new Error("Servidor de Gestão não configurado.");
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('staff').upsert(mapStaffToDb(member)).select().single();
     if (error) throw error;
     return mapDbToStaff(data);
@@ -172,44 +216,119 @@ export const staffService = {
 
 export const groupService = {
   async getAll(): Promise<FeeGroup[]> {
-    if (!storeClient) return [];
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('fee_groups').select('*');
     if (error) throw error;
-    return (data || []).map(g => ({ id: g.id, name: g.name, description: g.description, clientIds: g.client_ids || [] }));
+    return (data || []).map(g => ({ id: g.id, name: g.name, description: g.description, clientIds: g.client_ids || [], proposed_fees: g.proposed_fees || {} }));
   },
   async upsert(group: FeeGroup): Promise<FeeGroup> {
-    if (!storeClient) throw new Error("Servidor de Gestão não configurado.");
-    const groupToSave = { id: group.id, name: group.name, description: group.description, client_ids: group.clientIds };
+    const storeClient = ensureStoreClient();
+    const groupToSave = { id: group.id, name: group.name, description: group.description, client_ids: group.clientIds, proposed_fees: group.proposed_fees || {} };
     const { data, error } = await storeClient.from('fee_groups').upsert(groupToSave).select().single();
     if (error) throw error;
     // Map back from DB schema to app schema
-    return { id: data.id, name: data.name, description: data.description, clientIds: data.client_ids || [] };
+    return { id: data.id, name: data.name, description: data.description, clientIds: data.client_ids || [], proposed_fees: data.proposed_fees || {} };
   }
 };
 
 export const templateService = {
   async getAll(): Promise<EmailTemplate[]> {
-    if (!storeClient) return [];
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('email_templates').select('*').order('name');
     if (error) throw error;
     return data || [];
   },
   async upsert(template: Partial<EmailTemplate>): Promise<EmailTemplate> {
-    if (!storeClient) throw new Error("Servidor de Gestão não configurado.");
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('email_templates').upsert(template).select().single();
     if (error) throw error;
     return data;
   },
   async delete(id: string): Promise<void> {
-    if (!storeClient) throw new Error("Servidor de Gestão não configurado.");
+    const storeClient = ensureStoreClient();
     const { error } = await storeClient.from('email_templates').delete().match({ id });
     if (error) throw error;
   }
 };
 
+const mapDbToWorkSafetyService = (p: any): WorkSafetyService => ({
+  id: p.id,
+  clientId: p.client_id,
+  clientName: p.clients?.name || 'Cliente Desconhecido',
+  serviceDate: p.service_date,
+  renewalTerm: p.renewal_term,
+  provider: p.provider,
+  totalValue: p.total_value,
+  hasCommission: p.has_commission,
+  isCommissionPaid: p.is_commission_paid,
+  proposalStatus: p.proposal_status,
+  attachment_url: p.attachment_url,
+});
+
+const mapWorkSafetyServiceToDb = (p: Partial<WorkSafetyService>) => ({
+  id: p.id,
+  client_id: p.clientId,
+  service_date: p.serviceDate,
+  renewal_term: p.renewalTerm,
+  provider: p.provider,
+  total_value: p.totalValue,
+  has_commission: p.hasCommission,
+  is_commission_paid: p.isCommissionPaid,
+  proposal_status: p.proposalStatus,
+  attachment_url: p.attachment_url,
+});
+
+export const workSafetyService = {
+  async getAll(): Promise<WorkSafetyService[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient.from('work_safety_services').select(`
+      *,
+      clients (id, name)
+    `).order('service_date', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapDbToWorkSafetyService);
+  },
+  async upsert(service: Partial<WorkSafetyService>): Promise<WorkSafetyService> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('work_safety_services')
+      .upsert(mapWorkSafetyServiceToDb(service))
+      .select('*, clients (id, name)')
+      .single();
+    if (error) throw error;
+    return mapDbToWorkSafetyService(data);
+  },
+  async delete(id: string): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient.from('work_safety_services').delete().match({ id });
+    if (error) throw error;
+  },
+  async uploadAttachment(file: File, serviceId: string): Promise<string> {
+    const storeClient = ensureStoreClient();
+    const filePath = `sht/${serviceId}/${file.name}`;
+    
+    const { error: uploadError } = await storeClient.storage
+      .from('attachments')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = storeClient.storage
+      .from('attachments')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  }
+};
+
 export const campaignHistoryService = {
   async getAll(): Promise<CampaignHistory[]> {
-    if (!storeClient) return [];
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient
       .from('email_campaign_history')
       .select('*')
@@ -218,7 +337,7 @@ export const campaignHistoryService = {
     return data || [];
   },
   async create(campaign: Partial<CampaignHistory>): Promise<CampaignHistory> {
-    if (!storeClient) throw new Error("Servidor de Gestão não configurado.");
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('email_campaign_history').insert(campaign).select().single();
     if (error) throw error;
     return data;
@@ -243,13 +362,13 @@ const mapTurnoverBracketToDb = (b: TurnoverBracket) => ({
 
 export const turnoverBracketService = {
   async getAll(): Promise<TurnoverBracket[]> {
-    if (!storeClient) return [];
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('turnover_brackets').select('*').order('min_turnover');
     if (error) throw error;
     return (data || []).map(mapDbToTurnoverBracket);
   },
   async replaceAll(brackets: TurnoverBracket[]): Promise<void> { // This function is more robust
-    if (!storeClient) throw new Error("Servidor de Gestão não configurado.");
+    const storeClient = ensureStoreClient();
     
     // Get all existing IDs from the DB to determine which ones to delete
     const { data: existingBrackets, error: fetchError } = await storeClient.from('turnover_brackets').select('id');
@@ -266,7 +385,9 @@ export const turnoverBracketService = {
 
     if (brackets.length === 0) return;
     // Upsert all current brackets. This will update existing ones and insert new ones.
-    const { error: upsertError } = await storeClient.from('turnover_brackets').upsert(brackets.map(mapTurnoverBracketToDb));
+    const { error: upsertError } = await storeClient
+      .from('turnover_brackets')
+      .upsert(brackets.map(mapTurnoverBracketToDb), { onConflict: 'id' });
     if (upsertError) throw upsertError;
   }
 };
@@ -277,6 +398,10 @@ const mapDbToQuoteHistory = (db: any): QuoteHistory => ({
   client_name: db.client_name,
   client_nif: db.client_nif,
   client_volume: db.client_volume,
+  employee_count: db.employee_count || 0,
+  document_count: db.document_count || 0,
+  establishments: db.establishments || 0,
+  banks: db.banks || 0,
   items: db.items,
   target_margin: db.target_margin,
   recommended_monthly_fee: db.recommended_monthly_fee,
@@ -289,6 +414,10 @@ const mapQuoteHistoryToDb = (q: Partial<QuoteHistory>) => ({
   client_name: q.client_name,
   client_nif: q.client_nif,
   client_volume: q.client_volume,
+  employee_count: q.employee_count,
+  document_count: q.document_count,
+  establishments: q.establishments,
+  banks: q.banks,
   items: q.items,
   target_margin: q.target_margin,
   recommended_monthly_fee: q.recommended_monthly_fee,
@@ -298,7 +427,7 @@ const mapQuoteHistoryToDb = (q: Partial<QuoteHistory>) => ({
 
 export const quoteHistoryService = {
   async getAll(): Promise<QuoteHistory[]> {
-    if (!storeClient) return [];
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient
       .from('quote_history')
       .select('*')
@@ -308,9 +437,91 @@ export const quoteHistoryService = {
     return (data || []).map(mapDbToQuoteHistory);
   },
   async create(quote: Partial<QuoteHistory>): Promise<QuoteHistory> {
-    if (!storeClient) throw new Error("Servidor de Gestão não configurado.");
+    const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('quote_history').insert(mapQuoteHistoryToDb(quote)).select().single();
     if (error) throw error;
     return mapDbToQuoteHistory(data);
+  },
+  async delete(id: string): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient.from('quote_history').delete().match({ id });
+    if (error) throw error;
+  }
+};
+
+const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
+  id: p.id,
+  clientId: p.client_id,
+  clientName: p.clients?.name || 'Cliente Desconhecido',
+  policyDate: p.policy_date,
+  policyNumber: p.policy_number,
+  insuranceProvider: p.insurance_provider,
+  paymentFrequency: p.payment_frequency,
+  policyType: p.policy_type,
+  premiumValue: p.premium_value,
+  commissionRate: p.commission_rate,
+  commissionPaid: p.commission_paid,
+  status: p.status || 'Proposta',
+  attachment_url: p.attachment_url,
+  communicationType: p.communication_type,
+});
+
+const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
+  id: p.id,
+  client_id: p.clientId,
+  policy_date: p.policyDate,
+  policy_number: p.policyNumber,
+  insurance_provider: p.insuranceProvider,
+  payment_frequency: p.paymentFrequency,
+  policy_type: p.policyType,
+  premium_value: p.premiumValue,
+  commission_rate: p.commissionRate,
+  commission_paid: p.commissionPaid,
+  status: p.status,
+  attachment_url: p.attachment_url,
+  communication_type: p.communicationType,
+});
+
+export const insuranceService = {
+  async getAll(): Promise<InsurancePolicy[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient.from('insurance_policies').select(`
+      *,
+      clients (id, name)
+    `).order('policy_date', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(mapDbToInsurancePolicy);
+  },
+  async upsert(policy: Partial<InsurancePolicy>): Promise<InsurancePolicy> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient.from('insurance_policies').upsert(mapInsurancePolicyToDb(policy)).select('*, clients (id, name)').single();
+    if (error) throw error;
+    return mapDbToInsurancePolicy(data);
+  },
+  async delete(id: string): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient.from('insurance_policies').delete().match({ id });
+    if (error) throw error;
+  },
+  async uploadAttachment(file: File, policyId: string): Promise<string> {
+    const storeClient = ensureStoreClient();
+    const filePath = `policies/${policyId}/${file.name}`;
+    
+    const { error: uploadError } = await storeClient.storage
+      .from('attachments')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = storeClient.storage
+      .from('attachments')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
   }
 };

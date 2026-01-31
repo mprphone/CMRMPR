@@ -83,8 +83,8 @@ export const DEFAULT_STAFF: Staff[] = [
 
 export const DEFAULT_TASKS: Task[] = [
   // Contabilidade - Base
-  { id: 't1', name: 'Lançar Contabilidade (Docs)', area: TaskArea.CONTABILIDADE, type: TaskType.OBRIGACAO, defaultTimeMinutes: 4, defaultFrequencyPerYear: 12 },
-  { id: 't2', name: 'Reconciliações Bancárias', area: TaskArea.CONTABILIDADE, type: TaskType.OBRIGACAO, defaultTimeMinutes: 30, defaultFrequencyPerYear: 12 },
+  { id: 't1', name: 'Lançar Contabilidade (Docs)', area: TaskArea.CONTABILIDADE, type: TaskType.OBRIGACAO, defaultTimeMinutes: 4, defaultFrequencyPerYear: 12, multiplierLogic: 'documentCount' },
+  { id: 't2', name: 'Reconciliações Bancárias', area: TaskArea.CONTABILIDADE, type: TaskType.OBRIGACAO, defaultTimeMinutes: 30, defaultFrequencyPerYear: 12, multiplierLogic: 'banks' },
   { id: 't3', name: 'Conferência de Contas', area: TaskArea.CONTABILIDADE, type: TaskType.OBRIGACAO, defaultTimeMinutes: 60, defaultFrequencyPerYear: 4 },
   { id: 't4', name: 'Pagamento IRC - Por Conta', area: TaskArea.CONTABILIDADE, type: TaskType.OBRIGACAO, defaultTimeMinutes: 15, defaultFrequencyPerYear: 3 },
   { id: 't5', name: 'Modelo 30', area: TaskArea.CONTABILIDADE, type: TaskType.OBRIGACAO, defaultTimeMinutes: 30, defaultFrequencyPerYear: 12 }, 
@@ -104,7 +104,7 @@ export const DEFAULT_TASKS: Task[] = [
   { id: 't17', name: 'IES / Dossier Fiscal', area: TaskArea.CONTABILIDADE, type: TaskType.OBRIGACAO, defaultTimeMinutes: 180, defaultFrequencyPerYear: 1 },
 
   // RH
-  { id: 't30', name: 'Processamento Salarial (por func.)', area: TaskArea.RH, type: TaskType.OBRIGACAO, defaultTimeMinutes: 15, defaultFrequencyPerYear: 14 },
+  { id: 't30', name: 'Processamento Salarial (por func.)', area: TaskArea.RH, type: TaskType.OBRIGACAO, defaultTimeMinutes: 15, defaultFrequencyPerYear: 14, multiplierLogic: 'employeeCount' },
   { id: 't31', name: 'DRI - Segurança Social', area: TaskArea.RH, type: TaskType.OBRIGACAO, defaultTimeMinutes: 15, defaultFrequencyPerYear: 12 },
   { id: 't32', name: 'DMR - Finanças', area: TaskArea.RH, type: TaskType.OBRIGACAO, defaultTimeMinutes: 15, defaultFrequencyPerYear: 12 },
   { id: 't33', name: 'Pagto Segurança Social', area: TaskArea.RH, type: TaskType.OBRIGACAO, defaultTimeMinutes: 10, defaultFrequencyPerYear: 12 },
@@ -116,7 +116,7 @@ export const DEFAULT_TASKS: Task[] = [
   { id: 't51', name: 'Envio SAFT Faturação', area: TaskArea.ADMINISTRATIVO, type: TaskType.OBRIGACAO, defaultTimeMinutes: 15, defaultFrequencyPerYear: 12 },
   { id: 't52', name: 'Comunicação Inventários', area: TaskArea.ADMINISTRATIVO, type: TaskType.OBRIGACAO, defaultTimeMinutes: 20, defaultFrequencyPerYear: 1 },
   { id: 't53', name: 'Renovação IAPMEI', area: TaskArea.ADMINISTRATIVO, type: TaskType.EXTRA, defaultTimeMinutes: 60, defaultFrequencyPerYear: 1 },
-  { id: 't54', name: 'Emissão Guias IUC', area: TaskArea.ADMINISTRATIVO, type: TaskType.OBRIGACAO, defaultTimeMinutes: 10, defaultFrequencyPerYear: 1 },
+  { id: 't54', name: 'Emissão Guias IUC', area: TaskArea.ADMINISTRATIVO, type: TaskType.OBRIGACAO, defaultTimeMinutes: 10, defaultFrequencyPerYear: 1, multiplierLogic: 'manual' },
 
   // Gestão / Estratégia
   { id: 't60', name: 'Orçamento Econ-Financeiro', area: TaskArea.GESTAO, type: TaskType.NECESSIDADE, defaultTimeMinutes: 240, defaultFrequencyPerYear: 1 },

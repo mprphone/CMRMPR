@@ -1,5 +1,5 @@
 
-import { Client, Task, AnalysisResult, Staff, StaffStats, TaskArea, TurnoverBracket } from '../types';
+import { Client, Task, AnalysisResult, Staff, StaffStats, TaskArea, TurnoverBracket, MultiplierLogic } from '../types';
 
 export function calculateClientProfitability(
   client: Client, 
@@ -12,28 +12,43 @@ export function calculateClientProfitability(
   let totalMinutes = 0;
 
   // Base Responsible Staff (Fallback)
-  const clientManager = staffList.find(s => s.name === client.responsibleStaff);
+  let clientManager: Staff | undefined;
+  if (client.responsibleStaff) {
+    // Check if it's a UUID (contains hyphen) or a name
+    if (client.responsibleStaff.includes('-')) {
+      clientManager = staffList.find(s => s.id === client.responsibleStaff);
+    } else {
+      clientManager = staffList.find(s => s.name === client.responsibleStaff);
+    }
+  }
   const defaultAreaCost = areaCosts[TaskArea.CONTABILIDADE] || 25;
   const managerHourlyRate = clientManager ? clientManager.hourlyCost : defaultAreaCost;
 
-  // 1. Calculate Cost per Task (Considering specific assignments)
-  client.tasks.forEach(ct => {
-    const taskDef = allTasks.find(t => t.id === ct.taskId);
-    if (taskDef) {
-      // Determines who does this task: Specific override -> Client Manager -> Area Default
-      let taskHourlyCost = managerHourlyRate;
+  // 1. Calculate Cost for all applicable tasks
+  allTasks.forEach(taskDef => {
+    const override = client.tasks.find(t => t.taskId === taskDef.id);
+    
+    let multiplier = 0;
+
+    // Priority: Manual override > Logic-based > Default (which is 0 if not applicable)
+    if (override?.multiplier) {
+      multiplier = override.multiplier;
+    } else if (taskDef.multiplierLogic && taskDef.multiplierLogic !== 'manual') {
+      multiplier = (client[taskDef.multiplierLogic as keyof Client] as number) || 0;
+    }
+
+    if (multiplier > 0) {
+      const frequency = override?.frequencyPerYear || taskDef.defaultFrequencyPerYear;
       
-      if (ct.assignedStaffId) {
-        const specificStaff = staffList.find(s => s.id === ct.assignedStaffId);
+      let taskHourlyCost = managerHourlyRate;
+      if (override?.assignedStaffId) {
+        const specificStaff = staffList.find(s => s.id === override.assignedStaffId);
         if (specificStaff) taskHourlyCost = specificStaff.hourlyCost;
-      } else if (!clientManager) {
-        // Fallback to area cost if no manager and no specific staff
+      } else if (!clientManager) { // Fallback to area cost if no manager and no specific staff
         taskHourlyCost = areaCosts[taskDef.area] || 25;
       }
 
-      const minutesPerOccurrence = taskDef.defaultTimeMinutes * ct.multiplier;
-      const annualMinutes = minutesPerOccurrence * ct.frequencyPerYear;
-      
+      const annualMinutes = taskDef.defaultTimeMinutes * multiplier * frequency;
       totalMinutes += annualMinutes;
       totalCost += (annualMinutes / 60) * taskHourlyCost;
     }
@@ -126,45 +141,51 @@ export function calculateStaffStats(
 
   clients.forEach(client => {
     let clientMinutesForThisStaff = 0;
+    const isResponsibleManager = client.responsibleStaff === staff.id || client.responsibleStaff === staff.name;
     
-    // Check assignments on tasks
-    client.tasks.forEach(ct => {
-      const taskDef = tasks.find(t => t.id === ct.taskId);
-      if (taskDef) {
-        let isAssigned = false;
+    // Iterate over all possible tasks to apply logic
+    tasks.forEach(taskDef => {
+        const override = client.tasks.find(t => t.taskId === taskDef.id);
         
-        // 1. Direct Assignment (Specific Task Override)
-        if (ct.assignedStaffId === staff.id) {
-            isAssigned = true;
-        } 
-        // 2. Client Manager Assignment (Fallback if no specific override exists)
-        else if (!ct.assignedStaffId && (client.responsibleStaff === staff.id || client.responsibleStaff === staff.name)) {
-            isAssigned = true;
+        let multiplier = 0;
+        // Priority: Manual override > Logic-based > Default (which is 0 if not applicable)
+        if (override?.multiplier) {
+            multiplier = override.multiplier;
+        } else if (taskDef.multiplierLogic && taskDef.multiplierLogic !== 'manual') {
+            multiplier = (client[taskDef.multiplierLogic as keyof Client] as number) || 0;
         }
 
-        if (isAssigned) {
-           const minutes = taskDef.defaultTimeMinutes * ct.multiplier * ct.frequencyPerYear;
-           clientMinutesForThisStaff += minutes;
+        if (multiplier > 0) {
+            const frequency = override?.frequencyPerYear || taskDef.defaultFrequencyPerYear;
+            
+            let isAssignedToThisStaff = false;
+            // 1. Direct assignment
+            if (override?.assignedStaffId === staff.id) {
+                isAssignedToThisStaff = true;
+            } 
+            // 2. No direct assignment, falls back to responsible manager
+            else if (!override?.assignedStaffId && isResponsibleManager) {
+                isAssignedToThisStaff = true;
+            }
+
+            if (isAssignedToThisStaff) {
+                const annualMinutes = taskDef.defaultTimeMinutes * multiplier * frequency;
+                clientMinutesForThisStaff += annualMinutes;
+            }
         }
-      }
     });
 
-    // Operational time attribution (Calls/Travel) - Assign to Client Manager Default
-    // Note: Future improvement could be assigning Calls/Travel to specific staff too
-    if (client.responsibleStaff === staff.id || client.responsibleStaff === staff.name) {
+    // Operational time attribution (Calls/Travel) - Assign to Client Manager
+    if (isResponsibleManager) {
        clientMinutesForThisStaff += (client.callTimeBalance * 12);
        clientMinutesForThisStaff += (client.travelCount * 60);
     }
 
     totalMinutesAnnually += clientMinutesForThisStaff;
     
-    // Revenue attribution is proportional to the workload carried by this staff member
-    if (clientMinutesForThisStaff > 0) {
-        // Simplified Logic: If they are the main manager, they get the full revenue credit for profitability view.
-        // A more complex model would split revenue by task hour % but that gets complex for simple views.
-        if (client.responsibleStaff === staff.id || client.responsibleStaff === staff.name) {
-            totalRevenueAttrib += (client.monthlyFee * 12);
-        }
+    // Revenue is attributed to the main responsible manager
+    if (isResponsibleManager) {
+        totalRevenueAttrib += (client.monthlyFee * 12);
     }
   });
 

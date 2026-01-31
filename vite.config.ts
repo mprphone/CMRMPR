@@ -11,8 +11,6 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_MODEL': JSON.stringify(env.GEMINI_MODEL || 'gemini-flash-latest'),
         // As variáveis com prefixo VITE_ são automaticamente expostas pelo Vite em `import.meta.env`.
         // As seguintes são para variáveis sem o prefixo que precisam de ser expostas no cliente.
         'process.env.SUPABASE_CLIENTS_SOURCE': JSON.stringify(env.SUPABASE_CLIENTS_SOURCE),

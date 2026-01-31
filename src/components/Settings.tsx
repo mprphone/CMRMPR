@@ -25,7 +25,10 @@ const Settings: React.FC<SettingsProps> = ({ globalSettings, setGlobalSettings, 
   };
 
   const handleBracketChange = (id: string, field: keyof TurnoverBracket, value: string) => {
-    const newValue = parseFloat(value) || 0;
+    let newValue = parseFloat(value);
+    if (isNaN(newValue) || !isFinite(newValue)) {
+      newValue = 0;
+    }
     setTurnoverBrackets(
       turnoverBrackets.map(b => b.id === id ? { ...b, [field]: newValue } : b)
     );

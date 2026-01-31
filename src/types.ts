@@ -8,6 +8,8 @@ export enum TaskArea {
   GESTAO = 'Gestão'
 }
 
+export type MultiplierLogic = 'manual' | 'employeeCount' | 'documentCount' | 'establishments' | 'banks';
+
 export enum TaskType {
   OBRIGACAO = 'Obrigação',
   NECESSIDADE = 'Necessidade',
@@ -21,6 +23,7 @@ export interface Task {
   type: TaskType;
   defaultTimeMinutes: number;
   defaultFrequencyPerYear: number;
+  multiplierLogic?: MultiplierLogic;
 }
 
 export interface QuoteItem {
@@ -56,6 +59,7 @@ export interface FeeGroup {
   name: string;
   description: string;
   clientIds: string[];
+  proposed_fees?: Record<string, number>;
 }
 
 export interface Client {
@@ -78,6 +82,19 @@ export interface Client {
   callTimeBalance: number;
   travelCount: number;
   
+  // Complexity Indicators
+  deliversOrganizedDocs?: boolean;
+  vatRefunds?: boolean;
+  hasIneReport?: boolean;
+  hasCostCenters?: boolean;
+  hasInternationalOps?: boolean;
+  hasManagementReports?: boolean;
+  supplierCount?: number;
+  customerCount?: number;
+  communicationCount?: number;
+  meetingCount?: number;
+  previousYearProfit?: number;
+
   tasks: ClientTaskOverride[];
   status: 'Ativo' | 'Em Análise' | 'Risco' | 'Cancelado';
   contractRenewalDate: string;
@@ -148,11 +165,32 @@ export interface QuoteHistory {
   client_name: string;
   client_nif: string;
   client_volume: number;
+  employee_count: number;
+  document_count: number;
+  establishments: number;
+  banks: number;
   items: QuoteItem[];
   target_margin: number;
   recommended_monthly_fee: number;
   total_annual_cost: number;
   total_annual_hours: number;
+}
+
+export interface InsurancePolicy {
+  id: string;
+  clientId?: string;
+  clientName?: string; // For display
+  policyDate: string;
+  policyNumber?: string;
+  insuranceProvider?: string;
+  paymentFrequency: 'Mensal' | 'Trimestral' | 'Semestral' | 'Anual';
+  policyType: string;
+  premiumValue: number;
+  commissionRate: number;
+  commissionPaid: boolean;
+  status: 'Proposta' | 'Aceite';
+  communicationType?: string;
+  attachment_url?: string;
 }
 
 export interface AppNotification {
@@ -163,6 +201,20 @@ export interface AppNotification {
   date: string;
   clientId?: string;
   actionLabel?: string;
+}
+
+export interface WorkSafetyService {
+  id: string;
+  clientId: string;
+  clientName?: string; // For display
+  serviceDate: string;
+  renewalTerm: 'Anual' | 'Bi-anual';
+  provider: string;
+  totalValue: number;
+  hasCommission: boolean;
+  isCommissionPaid: boolean;
+  proposalStatus: 'Não enviada' | 'Enviada' | 'Aceite' | 'Recusada';
+  attachment_url?: string;
 }
 
 export interface StaffStats {

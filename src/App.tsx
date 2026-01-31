@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Session } from '@supabase/supabase-js';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import ClientList from './components/ClientList';
@@ -9,20 +10,32 @@ import Tasks from './components/Tasks';
 import Calculator from './components/Calculator';
 import Settings from './components/Settings';
 import EmailCampaigns from './components/EmailCampaigns';
+import Login from './components/Login';
 import FeeGroups from './components/FeeGroups';
-import { DEFAULT_TASKS, DEFAULT_AREA_COSTS, DEFAULT_TURNOVER_BRACKETS } from './constants';
-import { Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory } from './types';
-import { clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, initSupabase } from './services/supabase';
+import { DEFAULT_TASKS, DEFAULT_AREA_COSTS, DEFAULT_TURNOVER_BRACKETS, DEFAULT_STAFF } from './constants';
+import { 
+  Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService 
+} from './types';
+import { 
+  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient 
+} from './services/supabase';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
+import Insurance from './components/Insurance';
+import WorkSafety from './components/WorkSafety';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
+  const [session, setSession] = useState<Session | null>(null);
+  const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [groups, setGroups] = useState<FeeGroup[]>([]);
-  const [tasks, setTasks] = useState<Task[]>(DEFAULT_TASKS);
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    const saved = localStorage.getItem('appTasks');
+    return saved ? JSON.parse(saved) : DEFAULT_TASKS;
+  });
   const [areaCosts, setAreaCosts] = useState<Record<string, number>>(DEFAULT_AREA_COSTS);
   const [turnoverBrackets, setTurnoverBrackets] = useState<TurnoverBracket[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -31,6 +44,8 @@ export default function App() {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [campaignHistory, setCampaignHistory] = useState<CampaignHistory[]>([]);
   const [quoteHistory, setQuoteHistory] = useState<QuoteHistory[]>([]);
+  const [insurancePolicies, setInsurancePolicies] = useState<InsurancePolicy[]>([]);
+  const [workSafetyServices, setWorkSafetyServices] = useState<WorkSafetyService[]>([]);
   const [logo, setLogo] = useState(() => localStorage.getItem('appLogo') || '');
 
   const handleLogoUpload = (newLogo: string) => {
@@ -63,35 +78,81 @@ export default function App() {
     localStorage.setItem('globalSettings', JSON.stringify(globalSettings));
   }, [globalSettings]);
 
+  // Auth listener
+  useEffect(() => {
+    if (!storeClient) return;
+
+    const { data: { subscription } } = storeClient.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user?.email === 'mpr@mpr.pt') {
+        setUserRole('admin');
+      } else if (session) {
+        setUserRole('user');
+      } else {
+        setUserRole(null);
+      }
+    });
+
+    // Check for initial session
+    storeClient.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [storeClient]);
+
+  useEffect(() => {
+    localStorage.setItem('appTasks', JSON.stringify(tasks));
+  }, [tasks]);
+
   const fetchData = async () => {
     setIsLoadingData(true);
-    try {
-      // Forçar leitura limpa do servidor de GESTÃO
-      const [c, s, g, t, h, b, qh] = await Promise.all([
-        clientService.getAll(),
-        staffService.getAll(),
-        groupService.getAll(),
-        templateService.getAll(),
-        campaignHistoryService.getAll(),
-        turnoverBracketService.getAll(),
-        quoteHistoryService.getAll()
-      ]);
-      setClients(c || []);
-      setStaff(s || []);
-      setGroups(g || []);
-      setTemplates(t || []);
-      setCampaignHistory(h || []);
-      setQuoteHistory(qh || []);
-      if (b && b.length > 0) {
-        setTurnoverBrackets(b);
-      } else {
-        setTurnoverBrackets(DEFAULT_TURNOVER_BRACKETS);
-      }
-    } catch (err) {
-      console.error("Erro ao carregar dados:", err);
-    } finally {
+
+    if (!storeClient) {
+      alert("Configuração do Servidor de Gestão em falta ou inválida. Verifique as configurações.");
       setIsLoadingData(false);
+      return;
     }
+
+    // Carregamos cada um individualmente para que se um falhar, os outros apareçam
+    const clientsPromise = clientService.getAll().catch(e => { console.error("Erro Clientes:", e); return []; });
+    const staffPromise = staffService.getAll().catch(e => { console.error("Erro Staff:", e); return []; });
+    const groupsPromise = groupService.getAll().catch(e => { console.error("Erro Grupos:", e); return []; });
+    const templatesPromise = templateService.getAll().catch(e => { console.error("Erro Templates:", e); return []; });
+    const campaignHistoryPromise = campaignHistoryService.getAll().catch(e => { console.error("Erro Histórico Campanhas:", e); return []; });
+    const quoteHistoryPromise = quoteHistoryService.getAll().catch(e => { console.error("Erro Histórico Propostas:", e); return []; });
+    const insurancePromise = insuranceService.getAll().catch(e => { console.error("Erro Seguros:", e); return []; });
+    const shtPromise = workSafetyService.getAll().catch(e => { console.error("Erro SHT:", e); return []; });
+    const bracketsPromise = turnoverBracketService.getAll().catch(e => { console.error("Erro Patamares:", e); return []; });
+
+    const [
+      clientsData,
+      staffData,
+      groupsData,
+      templatesData,
+      campaignHistoryData,
+      quoteHistoryData,
+      insuranceData,
+      shtData,
+      bracketsData
+    ] = await Promise.all([
+      clientsPromise, staffPromise, groupsPromise, templatesPromise, 
+      campaignHistoryPromise, quoteHistoryPromise, insurancePromise, shtPromise, bracketsPromise
+    ]);
+
+    setClients(clientsData);
+    setStaff(staffData.length > 0 ? staffData : DEFAULT_STAFF);
+    setGroups(groupsData);
+    setTemplates(templatesData);
+    setCampaignHistory(campaignHistoryData);
+    setQuoteHistory(quoteHistoryData);
+    setInsurancePolicies(insuranceData);
+    setWorkSafetyServices(shtData);
+    setTurnoverBrackets(
+      bracketsData.length > 0 ? bracketsData : DEFAULT_TURNOVER_BRACKETS.map(b => ({ ...b, id: crypto.randomUUID() }))
+    );
+
+    setIsLoadingData(false);
   };
 
   const handleUpdateClient = async (updatedClient: Client) => {
@@ -121,18 +182,33 @@ export default function App() {
   const handleFullSync = async () => {
     setIsSyncing(true);
     try {
+      console.log("--- INÍCIO DA SINCROZINAÇÃO ---");
       // 1. Staff
       const externalStaff = await staffService.importExternalStaff();
+      console.log("DEBUG: Staff importado (primeiros 3):", externalStaff.slice(0, 3));
       if (externalStaff.length > 0) await staffService.bulkUpsert(externalStaff);
 
       // 2. Clientes
       const externalClients = await clientService.importExternalClients();
+      console.log("DEBUG: Clientes importados (primeiros 3):", externalClients.slice(0, 3));
       if (externalClients.length > 0) {
-        await clientService.bulkUpsert(externalClients);
+        // Map responsible staff name (from import) to staff ID (for destination)
+        const clientsWithStaffId = externalClients.map(client => {
+          const responsible = externalStaff.find(s => 
+            s.name.trim().toLowerCase() === (client.responsibleStaff || '').trim().toLowerCase()
+          );
+          return {
+            ...client,
+            // Overwrite the name with the ID for the upsert operation
+            responsibleStaff: responsible ? responsible.id : '' 
+          };
+        });
+        await clientService.bulkUpsert(clientsWithStaffId);
       }
       
       // 3. AGUARDAR E RECARREGAR
       await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log("--- FIM DA SINCROZINAÇÃO, A RECARREGAR DADOS ---");
       await fetchData();
       
       setSyncSuccess(`Sucesso! ${externalClients.length} clientes processados.`);
@@ -144,12 +220,17 @@ export default function App() {
     }
   };
 
+  if (!session) {
+    return <Login />;
+  }
+
   return (
     <div className="flex min-h-screen bg-slate-50">
       <Sidebar 
         currentView={currentView} 
         onChangeView={(view) => { setCurrentView(view); setSelectedClient(null); setSelectedStaff(null); }}
         logo={logo} onLogoUpload={handleLogoUpload}
+        userRole={userRole}
       />
 
       <main className="flex-1 ml-64 p-8">
@@ -203,6 +284,8 @@ export default function App() {
               staff={staff} tasks={tasks} areaCosts={areaCosts}
               turnoverBrackets={turnoverBrackets}
               onUpdateClient={handleUpdateClient}
+              userRole={userRole}
+              insurancePolicies={insurancePolicies}
             />
           ) : selectedStaff ? (
             <StaffDetail
@@ -233,12 +316,25 @@ export default function App() {
                   history={campaignHistory} setHistory={setCampaignHistory}
                 />
               )}
+              {currentView === 'insurance' && (
+                <Insurance
+                  policies={insurancePolicies} setPolicies={setInsurancePolicies}
+                  clients={clients}
+                />
+              )}
+              {currentView === 'sht' && (
+                <WorkSafety
+                  services={workSafetyServices} setServices={setWorkSafetyServices}
+                  clients={clients}
+                />
+              )}
               {currentView === 'groups' && (
                 <FeeGroups 
                   groups={groups} setGroups={setGroups} 
                   clients={clients} setClients={setClients} 
                   onSelectClient={setSelectedClient}
                   tasks={tasks} staff={staff} areaCosts={areaCosts}
+                  turnoverBrackets={turnoverBrackets}
                 />
               )}
               {currentView === 'team' && (
@@ -253,8 +349,9 @@ export default function App() {
               {currentView === 'tasks' && <Tasks tasks={tasks} setTasks={setTasks} />}
               {currentView === 'calculator' && (
                 <Calculator 
-                  tasks={tasks} firmHourlyCost={40} logo={logo} 
+                  tasks={tasks} logo={logo} 
                   turnoverBrackets={turnoverBrackets} 
+                  areaCosts={areaCosts}
                   globalSettings={globalSettings}
                   quoteHistory={quoteHistory}
                   setQuoteHistory={setQuoteHistory}

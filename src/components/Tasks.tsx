@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Task, TaskArea, TaskType } from '../types';
-import { Clock, Tag, Plus, Edit2, X, Save } from 'lucide-react';
+import React from 'react';
+import { Task, TaskArea, TaskType, MultiplierLogic } from '../types';
+import { ListTodo, RotateCcw, Plus, Trash2 } from 'lucide-react';
+import { DEFAULT_TASKS } from '../constants';
 
 interface TasksProps {
   tasks: Task[];
@@ -8,207 +9,144 @@ interface TasksProps {
 }
 
 const Tasks: React.FC<TasksProps> = ({ tasks, setTasks }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-
-  // Form State
-  const [name, setName] = useState('');
-  const [area, setArea] = useState<TaskArea>(TaskArea.CONTABILIDADE);
-  const [type, setType] = useState<TaskType>(TaskType.OBRIGACAO);
-  const [time, setTime] = useState(0);
-  const [freq, setFreq] = useState(0);
-
-  const handleOpenModal = (task?: Task) => {
-    if (task) {
-      setEditingTask(task);
-      setName(task.name);
-      setArea(task.area);
-      setType(task.type);
-      setTime(task.defaultTimeMinutes);
-      setFreq(task.defaultFrequencyPerYear);
-    } else {
-      setEditingTask(null);
-      setName('');
-      setArea(TaskArea.CONTABILIDADE);
-      setType(TaskType.OBRIGACAO);
-      setTime(15);
-      setFreq(12);
+  const handleTaskChange = (id: string, field: keyof Task, value: any) => {
+    let processedValue = value;
+    if (field === 'defaultTimeMinutes' || field === 'defaultFrequencyPerYear') {
+      processedValue = parseInt(value, 10) || 0; // Garante que é sempre um número
     }
-    setIsModalOpen(true);
+    const updatedTasks = tasks.map(task =>
+      task.id === id ? { ...task, [field]: processedValue } : task
+    );
+    setTasks(updatedTasks);
   };
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingTask) {
-      // Update
-      const updatedTasks = tasks.map(t => t.id === editingTask.id ? {
-        ...t,
-        name, area, type, defaultTimeMinutes: time, defaultFrequencyPerYear: freq
-      } : t);
-      setTasks(updatedTasks);
-    } else {
-      // Create
-      const newTask: Task = {
-        id: Math.random().toString(36).substr(2, 9),
-        name,
-        area,
-        type,
-        defaultTimeMinutes: time,
-        defaultFrequencyPerYear: freq
-      };
-      setTasks([...tasks, newTask]);
+  const handleReset = () => {
+    if (confirm("Tem a certeza que deseja repor as tarefas para os valores padrão? Todas as suas alterações serão perdidas.")) {
+      setTasks(DEFAULT_TASKS);
     }
-    setIsModalOpen(false);
   };
 
-  // Group by Area
-  const tasksByArea = tasks.reduce((acc, task) => {
-    if (!acc[task.area]) acc[task.area] = [];
-    acc[task.area].push(task);
-    return acc;
-  }, {} as Record<string, Task[]>);
+  const handleAddTask = () => {
+    const newTask: Task = {
+      id: crypto.randomUUID(),
+      name: 'Nova Tarefa (editar)',
+      area: TaskArea.CONTABILIDADE,
+      type: TaskType.OBRIGACAO,
+      defaultTimeMinutes: 15,
+      defaultFrequencyPerYear: 1,
+      multiplierLogic: 'manual',
+    };
+    setTasks([...tasks, newTask]);
+  };
+
+  const handleDeleteTask = (id: string) => {
+    if (confirm("Tem a certeza que deseja apagar esta tarefa? Esta ação não pode ser desfeita.")) {
+      setTasks(tasks.filter(task => task.id !== id));
+    }
+  };
 
   return (
-    <div className="space-y-6 relative">
+    <div className="space-y-6 animate-fade-in">
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold text-slate-800">Catálogo de Tarefas Standard</h2>
-        <button 
-          onClick={() => handleOpenModal()}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
-        >
-          <Plus size={16}/> Nova Tarefa
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {Object.entries(tasksByArea).map(([area, areaTasks]: [string, Task[]]) => (
-          <div key={area} className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 font-semibold text-slate-700 flex justify-between">
-              <span>{area}</span>
-              <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full">{areaTasks.length}</span>
-            </div>
-            <div className="divide-y divide-slate-50">
-              {areaTasks.map(task => (
-                <div key={task.id} className="p-4 hover:bg-slate-50 transition-colors group">
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="font-medium text-slate-800 text-sm">{task.name}</h4>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded">
-                        {task.type}
-                      </span>
-                      <button 
-                        onClick={() => handleOpenModal(task)}
-                        className="text-slate-300 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex gap-4 text-xs text-slate-500">
-                    <div className="flex items-center gap-1">
-                      <Clock size={12} /> {task.defaultTimeMinutes} min
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Tag size={12} /> {task.defaultFrequencyPerYear}x / ano
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Edit/Add Modal Overlay */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 animate-fade-in">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold text-slate-800">
-                {editingTask ? 'Editar Tarefa' : 'Nova Tarefa'}
-              </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={20} />
-              </button>
-            </div>
-            
-            <form onSubmit={handleSave} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Nome da Tarefa</label>
-                <input 
-                  type="text" 
-                  value={name} 
-                  onChange={e => setName(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Área</label>
-                  <select 
-                    value={area} 
-                    onChange={e => setArea(e.target.value as TaskArea)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                  >
-                    {Object.values(TaskArea).map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Tipo</label>
-                  <select 
-                    value={type} 
-                    onChange={e => setType(e.target.value as TaskType)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                  >
-                    {Object.values(TaskType).map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Tempo Padrão (min)</label>
-                  <input 
-                    type="number" 
-                    value={time} 
-                    onChange={e => setTime(Number(e.target.value))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    min="1"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Freq. Anual</label>
-                  <input 
-                    type="number" 
-                    value={freq} 
-                    onChange={e => setFreq(Number(e.target.value))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    min="1"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-4 flex gap-3">
-                 <button 
-                  type="button" 
-                  onClick={() => setIsModalOpen(false)}
-                  className="flex-1 px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-50"
-                 >
-                   Cancelar
-                 </button>
-                 <button 
-                  type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center justify-center gap-2"
-                 >
-                   <Save size={16} /> Salvar
-                 </button>
-              </div>
-            </form>
-          </div>
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
+            <ListTodo size={24} /> Catálogo de Tarefas
+          </h2>
+          <p className="text-sm text-slate-500">Defina as tarefas padrão, os seus tempos e a lógica de cálculo. As alterações são guardadas automaticamente.</p>
         </div>
-      )}
+        <div className="flex items-center gap-2">
+          <button onClick={handleReset} className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-red-600 bg-white border border-slate-200 px-3 py-2 rounded-lg">
+            <RotateCcw size={14} /> Repor Padrões
+          </button>
+          <button onClick={handleAddTask} className="flex items-center gap-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg">
+            <Plus size={14} /> Nova Tarefa
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+              <tr>
+                <th className="px-4 py-3">Tarefa</th>
+                <th className="px-4 py-3">Área</th>
+                <th className="px-4 py-3">Tipo</th>
+                <th className="px-4 py-3 text-center">Tempo Padrão (min)</th>
+                <th className="px-4 py-3 text-center">Freq. Padrão (ano)</th>
+                <th className="px-4 py-3">Lógica do Multiplicador</th>
+                <th className="px-4 py-3 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {tasks.map(task => (
+                <tr key={task.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 font-medium text-slate-800">
+                    <input
+                      type="text"
+                      value={task.name}
+                      onChange={e => handleTaskChange(task.id, 'name', e.target.value)}
+                      className="w-full border rounded py-1 px-2 text-sm"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <select
+                      value={task.area}
+                      onChange={e => handleTaskChange(task.id, 'area', e.target.value as TaskArea)}
+                      className="w-full px-2 py-1 border rounded-lg text-xs bg-white"
+                    >
+                      {Object.values(TaskArea).map(area => <option key={area} value={area}>{area}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <select
+                      value={task.type}
+                      onChange={e => handleTaskChange(task.id, 'type', e.target.value as TaskType)}
+                      className="w-full px-2 py-1 border rounded-lg text-xs bg-white"
+                    >
+                      {Object.values(TaskType).map(type => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="number"
+                      value={task.defaultTimeMinutes}
+                      onChange={e => handleTaskChange(task.id, 'defaultTimeMinutes', e.target.value)}
+                      className="w-20 text-center border rounded py-1 text-sm"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="number"
+                      value={task.defaultFrequencyPerYear}
+                      onChange={e => handleTaskChange(task.id, 'defaultFrequencyPerYear', e.target.value)}
+                      className="w-20 text-center border rounded py-1 text-sm"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <select
+                      value={task.multiplierLogic || 'manual'}
+                      onChange={(e) => handleTaskChange(task.id, 'multiplierLogic', e.target.value as MultiplierLogic)}
+                      className="w-full px-2 py-1 border rounded-lg text-xs bg-white min-w-[150px]"
+                    >
+                      <option value="manual">Manual (Padrão)</option>
+                      <option value="employeeCount">Nº Funcionários</option>
+                      <option value="documentCount">Nº Documentos</option>
+                      <option value="establishments">Nº Estabelecimentos</option>
+                      <option value="banks">Nº Bancos</option>
+                    </select>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => handleDeleteTask(task.id)} className="p-2 text-slate-400 hover:text-red-600">
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };

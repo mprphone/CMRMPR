@@ -140,6 +140,8 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, tasks, are
                 <SortableHeader sortKey="name">Nome</SortableHeader>
                 <th className="px-4 py-3">Email / Telefone</th>
                 <SortableHeader sortKey="entityType">Tipo</SortableHeader>
+                <SortableHeader sortKey="employeeCount">Nº Func.</SortableHeader>
+                <SortableHeader sortKey="documentCount">Nº Docs</SortableHeader>
                 <SortableHeader sortKey="responsibleStaffName">Responsável</SortableHeader>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
@@ -154,6 +156,8 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, tasks, are
                     <div className="text-xs text-slate-400">{client.phone}</div>
                   </td>
                   <td className="px-4 py-4 text-xs uppercase">{client.entityType}</td>
+                  <td className="px-4 py-4 text-center font-medium">{client.employeeCount}</td>
+                  <td className="px-4 py-4 text-center font-medium">{client.documentCount}</td>
                   <td className="px-4 py-4 text-xs">{client.responsibleStaffName}</td>
                   <td className="px-4 py-4 text-right">
                     <button onClick={() => onSelectClient(client)} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold border border-blue-100 transition-colors">

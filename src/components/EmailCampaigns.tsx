@@ -72,9 +72,9 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     try {
       const result = await generateTemplateWithAI(aiTopic, aiTone);
       setEditingTemplate(prev => ({ ...prev, subject: result.subject, body: result.body }));
-    } catch (error) {
-      alert("Ocorreu um erro ao gerar o template com a IA.");
-      console.error(error);
+    } catch (err: any) {
+      alert("Falha na IA: " + err.message + "\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
+      console.error(err);
     } finally {
       setIsGenerating(false);
       setIsAiModalOpen(false);

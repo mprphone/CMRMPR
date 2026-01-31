@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Staff, Client, Task, TaskArea } from '../types';
 import { calculateStaffStats, calculateClientProfitability } from '../services/calculator';
 import { ArrowLeft, Save, RefreshCcw, User, Calculator, Layers, Briefcase, DollarSign, TrendingUp, Users } from 'lucide-react';
@@ -25,6 +25,14 @@ const StaffDetail: React.FC<StaffDetailProps> = ({ staffMember, clients, tasks, 
 
   const stats = calculateStaffStats(editedStaff, clients, tasks);
   const memberClients = clients.filter(c => c.responsibleStaff === editedStaff.id || c.responsibleStaff === editedStaff.name);
+
+  const portfolioTotals = useMemo(() => {
+    return memberClients.reduce((acc, client) => {
+      acc.totalEmployees += client.employeeCount || 0;
+      acc.totalDocuments += client.documentCount || 0;
+      return acc;
+    }, { totalEmployees: 0, totalDocuments: 0 });
+  }, [memberClients]);
 
   const handleFieldChange = (field: keyof Staff, value: any) => {
     setEditedStaff(prev => ({ ...prev, [field]: value }));
@@ -177,50 +185,104 @@ const StaffDetail: React.FC<StaffDetailProps> = ({ staffMember, clients, tasks, 
       <div className="mt-8 bg-white rounded-xl shadow-sm border border-slate-100">
         <div className="p-6 border-b border-slate-100">
             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Briefcase size={18} /> Resumo da Carteira de Clientes</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-center">
               <div className="p-4 bg-slate-50 rounded-lg">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">Nº de Empresas</p>
                 <p className="text-2xl font-black text-slate-700">{stats.clientCount}</p>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-lg">
+                <p className="text-[10px] font-bold text-slate-400 uppercase">Total Docs/Mês</p>
+                <p className="text-2xl font-black text-slate-700">{portfolioTotals.totalDocuments}</p>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-lg">
+                <p className="text-[10px] font-bold text-slate-400 uppercase">Total Funcionários</p>
+                <p className="text-2xl font-black text-slate-700">{portfolioTotals.totalEmployees}</p>
               </div>
               <div className="p-4 bg-blue-50 rounded-lg">
                 <p className="text-[10px] font-bold text-blue-500 uppercase">Total Avenças (Mensal)</p>
                 <p className="text-2xl font-black text-blue-700">{(stats.totalRevenue / 12).toFixed(0)}€</p>
               </div>
-              <div className="p-4 bg-red-50 rounded-lg">
-                <p className="text-[10px] font-bold text-red-500 uppercase">Custo Anual (Estimado)</p>
-                <p className="text-2xl font-black text-red-700">{(stats.totalCost / 1000).toFixed(1)}k €</p>
-              </div>
               <div className="p-4 bg-green-50 rounded-lg">
                 <p className="text-[10px] font-bold text-green-500 uppercase">Rentabilidade Carteira</p>
                 <p className="text-2xl font-black text-green-700">{stats.profitability.toFixed(0)}%</p>
+              </div>
+              <div className="p-4 bg-red-50 rounded-lg">
+                <p className="text-[10px] font-bold text-red-500 uppercase">Custo Anual</p>
+                <p className="text-2xl font-black text-red-700">{(stats.totalCost / 1000).toFixed(1)}k €</p>
               </div>
             </div>
         </div>
         
         <div className="overflow-y-auto">
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-slate-50"><tr className="text-left text-slate-400 font-medium"><th className="p-3">Cliente</th><th className="p-3 text-center">Avença (€)</th><th className="p-3 text-center">Horas/Ano</th><th className="p-3 text-right">Margem</th></tr></thead>
+            <thead className="sticky top-0 bg-slate-50">
+              <tr className="text-left text-slate-400 font-medium">
+                <th className="p-3">Cliente</th>
+                <th className="p-3 text-center">Nº Func.</th>
+                <th className="p-3 text-center">Nº Docs</th>
+                <th className="p-3 text-center">Avença (€)</th>
+                <th className="p-3 text-center">Horas/Ano</th>
+                <th className="p-3 text-right">Margem</th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-slate-100">
               {memberClients.length > 0 ? (
                 memberClients.map(client => {
                   const clientStats = calculateClientProfitability(client, tasks, areaCosts, staff);
+                  
                   let clientMinutesForThisStaff = 0;
-                  client.tasks.forEach(ct => {
-                    const taskDef = tasks.find(t => t.id === ct.taskId);
-                    if (taskDef && (!ct.assignedStaffId || ct.assignedStaffId === editedStaff.id)) {
-                      clientMinutesForThisStaff += taskDef.defaultTimeMinutes * ct.multiplier * ct.frequencyPerYear;
-                    }
+                  const isResponsibleManager = client.responsibleStaff === editedStaff.id || client.responsibleStaff === editedStaff.name;
+
+                  // Iterate over all possible tasks to apply logic
+                  tasks.forEach(taskDef => {
+                      const override = client.tasks.find(t => t.taskId === taskDef.id);
+                      
+                      let multiplier = 0;
+                      if (override?.multiplier) {
+                          multiplier = override.multiplier;
+                      } else if (taskDef.multiplierLogic && taskDef.multiplierLogic !== 'manual') {
+                          multiplier = (client[taskDef.multiplierLogic as keyof Client] as number) || 0;
+                      }
+
+                      if (multiplier > 0) {
+                          const frequency = override?.frequencyPerYear || taskDef.defaultFrequencyPerYear;
+                          
+                          let isAssignedToThisStaff = false;
+                          // 1. Direct assignment
+                          if (override?.assignedStaffId === editedStaff.id) {
+                              isAssignedToThisStaff = true;
+                          } 
+                          // 2. No direct assignment, falls back to responsible manager
+                          else if (!override?.assignedStaffId && isResponsibleManager) {
+                              isAssignedToThisStaff = true;
+                          }
+
+                          if (isAssignedToThisStaff) {
+                              const annualMinutes = taskDef.defaultTimeMinutes * multiplier * frequency;
+                              clientMinutesForThisStaff += annualMinutes;
+                          }
+                      }
                   });
-                  if (client.responsibleStaff === editedStaff.id || client.responsibleStaff === editedStaff.name) {
+
+                  // Operational time
+                  if (isResponsibleManager) {
                     clientMinutesForThisStaff += (client.callTimeBalance * 12) + (client.travelCount * 60);
                   }
+
                   const clientHoursForThisStaff = clientMinutesForThisStaff / 60;
                   return (
-                    <tr key={client.id} className="hover:bg-slate-50"><td className="p-3 font-medium text-slate-700 truncate">{client.name}</td><td className="p-3 text-center text-blue-600 font-bold">{client.monthlyFee.toFixed(0)}€</td><td className="p-3 text-center text-slate-600 font-medium">{clientHoursForThisStaff.toFixed(1)}h</td><td className={`p-3 text-right font-bold ${clientStats.profitability < 15 ? 'text-red-500' : 'text-green-600'}`}>{clientStats.profitability.toFixed(1)}%</td></tr>
+                    <tr key={client.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-medium text-slate-700 truncate">{client.name}</td>
+                      <td className="p-3 text-center font-medium">{client.employeeCount}</td>
+                      <td className="p-3 text-center font-medium">{client.documentCount}</td>
+                      <td className="p-3 text-center text-blue-600 font-bold">{client.monthlyFee.toFixed(0)}€</td>
+                      <td className="p-3 text-center text-slate-600 font-medium">{clientHoursForThisStaff.toFixed(1)}h</td>
+                      <td className={`p-3 text-right font-bold ${clientStats.profitability < 15 ? 'text-red-500' : 'text-green-600'}`}>{clientStats.profitability.toFixed(1)}%</td>
+                    </tr>
                   );
                 })
               ) : (
-                <tr><td colSpan={4} className="p-6 text-center text-slate-400 italic">Nenhum cliente atribuído.</td></tr>
+                <tr><td colSpan={6} className="p-6 text-center text-slate-400 italic">Nenhum cliente atribuído.</td></tr>
               )}
             </tbody>
           </table>

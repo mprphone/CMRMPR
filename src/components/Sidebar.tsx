@@ -1,24 +1,35 @@
 
 import React from 'react';
-import { LayoutDashboard, Users, Calculator, Settings, ListTodo, BrainCircuit, Briefcase, Upload, FolderTree, Mail } from 'lucide-react';
+import { LayoutDashboard, Users, Calculator, Settings, ListTodo, Briefcase, Upload, FolderTree, Mail, Shield, HeartPulse, LogOut } from 'lucide-react';
+import { ensureStoreClient } from '../services/supabase';
 
 interface SidebarProps {
   currentView: string;
   onChangeView: (view: string) => void;
   logo: string;
   onLogoUpload: (logo: string) => void;
+  userRole: 'admin' | 'user' | null;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLogoUpload }) => {
-  const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'clients', label: 'Clientes', icon: Users },
-    { id: 'groups', label: 'Grupos Avenças', icon: FolderTree },
-    { id: 'emails', label: 'Email Marketing', icon: Mail },
-    { id: 'team', label: 'Equipa', icon: Briefcase },
-    { id: 'tasks', label: 'Catálogo Tarefas', icon: ListTodo },
-    { id: 'calculator', label: 'Orçamentador', icon: Calculator },
+const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLogoUpload, userRole }) => {
+  const allMenuItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin'] },
+    { id: 'clients', label: 'Clientes', icon: Users, roles: ['admin', 'user'] },
+    { id: 'groups', label: 'Grupos Avenças', icon: FolderTree, roles: ['admin'] },
+    { id: 'insurance', label: 'Seguros', icon: Shield, roles: ['admin', 'user'] },
+    { id: 'sht', label: 'SHT', icon: HeartPulse, roles: ['admin', 'user'] },
+    { id: 'emails', label: 'Email Marketing', icon: Mail, roles: ['admin'] },
+    { id: 'team', label: 'Equipa', icon: Briefcase, roles: ['admin'] },
+    { id: 'tasks', label: 'Catálogo Tarefas', icon: ListTodo, roles: ['admin', 'user'] },
+    { id: 'calculator', label: 'Orçamentador', icon: Calculator, roles: ['admin'] },
   ];
+
+  const menuItems = allMenuItems.filter(item => userRole && item.roles.includes(userRole));
+
+  const handleLogout = async () => {
+    const supabase = ensureStoreClient();
+    await supabase.auth.signOut();
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -66,9 +77,15 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLo
       </nav>
 
       <div className="p-4 border-t border-slate-800">
-        <button onClick={() => onChangeView('settings')} className={`w-full flex items-center space-x-3 px-4 py-2 rounded ${currentView === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-          <Settings size={18} />
-          <span className="text-xs font-medium">Configurações</span>
+        {userRole === 'admin' && (
+          <button onClick={() => onChangeView('settings')} className={`w-full flex items-center space-x-3 px-4 py-2 rounded ${currentView === 'settings' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+            <Settings size={18} />
+            <span className="text-xs font-medium">Configurações</span>
+          </button>
+        )}
+        <button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-2 rounded text-slate-400 hover:text-white hover:bg-slate-800 mt-2">
+          <LogOut size={18} />
+          <span className="text-xs font-medium">Sair</span>
         </button>
       </div>
     </div>

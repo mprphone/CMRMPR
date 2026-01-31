@@ -32,6 +32,7 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
       else profitable++;
 
       return {
+        id: c.id, // Add ID for unique key
         name: c.name,
         revenue: analysis.totalAnnualRevenue,
         cost: analysis.totalAnnualCost,
@@ -166,7 +167,7 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
               </thead>
               <tbody>
                 {metrics.clientData.map((client) => (
-                  <tr key={client.name} className="border-b border-slate-50 hover:bg-slate-50">
+                  <tr key={client.id} className="border-b border-slate-50 hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium text-slate-900">{client.name}</td>
                     <td className={`px-4 py-3 text-right font-bold ${client.margin < 15 ? 'text-red-500' : 'text-green-600'}`}>
                       {client.margin.toFixed(1)}%

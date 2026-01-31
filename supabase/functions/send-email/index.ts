@@ -2,17 +2,19 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
 // This line imports the Resend library.
 // Deno (the Supabase functions environment) can import modules directly from URLs.
-import { Resend } from 'npm:resend';
+import { Resend } from 'npm:resend@3.4.0';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST',
+}
 
 // Main function that runs when the function is called
 serve(async (req) => {
   // Block to handle 'OPTIONS' requests (necessary for calls from the browser)
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: { 
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST',
-      'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    } })
+    return new Response('ok', { headers: corsHeaders })
   }
 
   try {
@@ -53,6 +55,7 @@ serve(async (req) => {
 
     // Returns a success response
     return new Response(JSON.stringify(data), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
@@ -60,7 +63,7 @@ serve(async (req) => {
     // Returns an error if something fails
     return new Response(String(err?.message ?? err), { 
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 })
