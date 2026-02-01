@@ -1,13 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { InsurancePolicy, Client } from '../types';
 import { insuranceService } from '../services/supabase';
-import { Shield, Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, Filter, CheckCircle, Circle, FileCheck, FileClock, Paperclip } from 'lucide-react';
+import { Shield, Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, Filter, CheckCircle, Circle, FileCheck, FileClock, Paperclip, ChevronUp, ChevronDown, PieChart } from 'lucide-react';
 
 interface InsuranceProps {
   policies: InsurancePolicy[];
   setPolicies: (policies: InsurancePolicy[]) => void;
   clients: Client[];
 }
+
+type SortableKeys = 'clientName' | 'policyDate' | 'premiumValue' | 'insuranceProvider';
 
 const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -20,6 +22,8 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
   const [providerFilter, setProviderFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [policyStatusFilter, setPolicyStatusFilter] = useState('all');
+  const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'policyDate', direction: 'descending' });
+  const [isQuarterlyModalOpen, setIsQuarterlyModalOpen] = useState(false);
 
   const uniqueProviders = useMemo(() => {
     const providers = new Set(policies.map(p => p.insuranceProvider).filter(Boolean));
@@ -30,8 +34,8 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
     return [...clients].sort((a, b) => a.name.localeCompare(b.name));
   }, [clients]);
 
-  const filteredPolicies = useMemo(() => {
-    return policies.filter(p => {
+  const sortedPolicies = useMemo(() => {
+    let filtered = policies.filter(p => {
       const searchMatch = searchTerm === '' ||
         p.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         p.policyNumber?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -46,11 +50,27 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
 
       return searchMatch && providerMatch && statusMatch && policyStatusMatch;
     });
-  }, [policies, searchTerm, providerFilter, statusFilter, policyStatusFilter]);
+
+    if (sortConfig !== null) {
+      filtered.sort((a, b) => {
+        const aValue = a[sortConfig.key as keyof InsurancePolicy] || '';
+        const bValue = b[sortConfig.key as keyof InsurancePolicy] || '';
+        if (aValue < bValue) {
+          return sortConfig.direction === 'ascending' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === 'ascending' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return filtered;
+  }, [policies, searchTerm, providerFilter, statusFilter, policyStatusFilter, sortConfig]);
 
   const totals = useMemo(() => {
     let pending = 0;
     let paid = 0;
+    let totalPremium = 0;
     // Only calculate totals for accepted policies
     const acceptedPolicies = policies.filter(p => p.status === 'Aceite');
     acceptedPolicies.forEach(p => {
@@ -60,8 +80,22 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       } else {
         pending += commissionValue;
       }
+      totalPremium += p.premiumValue;
     });
-    return { pending, paid };
+    return { pending, paid, totalPremium };
+  }, [policies]);
+
+  const quarterlyPremiums = useMemo(() => {
+    const quarters: Record<string, number> = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
+    const acceptedPolicies = policies.filter(p => p.status === 'Aceite');
+    acceptedPolicies.forEach(p => {
+      const month = new Date(p.policyDate).getMonth();
+      if (month < 3) quarters.Q1 += p.premiumValue;
+      else if (month < 6) quarters.Q2 += p.premiumValue;
+      else if (month < 9) quarters.Q3 += p.premiumValue;
+      else quarters.Q4 += p.premiumValue;
+    });
+    return quarters;
   }, [policies]);
 
   const handleOpenModal = (policy?: InsurancePolicy) => {
@@ -69,6 +103,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       policyDate: new Date().toISOString().split('T')[0],
       paymentFrequency: 'Anual',
       status: 'Proposta',
+      policyTier: 'Base',
       commissionPaid: false,
       commissionRate: 10,
       premiumValue: 0,
@@ -120,18 +155,22 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
     }
   };
 
-  const toggleCommissionStatus = async (policy: InsurancePolicy) => {
-    const updatedPolicy = { ...policy, commissionPaid: !policy.commissionPaid };
-    // Optimistic update
-    setPolicies(policies.map(p => p.id === policy.id ? updatedPolicy : p));
-    try {
-      await insuranceService.upsert(updatedPolicy);
-    } catch (err: any) {
-      alert("Erro ao atualizar o estado da comissão.");
-      // Revert on failure
-      setPolicies(policies.map(p => p.id === policy.id ? policy : p));
+  const requestSort = (key: SortableKeys) => {
+    let direction: 'ascending' | 'descending' = 'ascending';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
     }
+    setSortConfig({ key, direction });
   };
+
+  const SortableHeader = ({ children, sortKey }: { children: React.ReactNode, sortKey: SortableKeys }) => (
+    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100" onClick={() => requestSort(sortKey)}>
+      <div className="flex items-center gap-1">
+        {children}
+        {sortConfig?.key === sortKey ? (sortConfig.direction === 'ascending' ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ChevronUp size={14} className="text-slate-300" />}
+      </div>
+    </th>
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -145,7 +184,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <p className="text-sm font-medium text-amber-600">Comissões Pendentes</p>
           <h3 className="text-2xl font-bold text-slate-800 mt-1">{totals.pending.toFixed(2)}€</h3>
@@ -153,6 +192,10 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <p className="text-sm font-medium text-green-600">Comissões Recebidas (Total)</p>
           <h3 className="text-2xl font-bold text-slate-800 mt-1">{totals.paid.toFixed(2)}€</h3>
+        </div>
+        <div onClick={() => setIsQuarterlyModalOpen(true)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:bg-slate-50">
+          <p className="text-sm font-medium text-blue-600 flex items-center gap-1">Total Prémios (Aceites) <PieChart size={14}/></p>
+          <h3 className="text-2xl font-bold text-slate-800 mt-1">{totals.totalPremium.toFixed(2)}€</h3>
         </div>
       </div>
 
@@ -181,25 +224,25 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
           <table className="w-full text-sm text-left">
             <thead className="text-xs text-slate-500 uppercase bg-slate-50">
               <tr>
-                <th className="px-4 py-3">Cliente / Apólice</th>
+                <SortableHeader sortKey="clientName">Cliente / Apólice</SortableHeader>
+                <SortableHeader sortKey="policyDate">Data</SortableHeader>
                 <th className="px-4 py-3 text-center">Estado</th>
                 <th className="px-4 py-3">Tipo de Seguro</th>
-                <th className="px-4 py-3">Seguradora</th>
-                <th className="px-4 py-3 text-right">Prémio</th>
-                <th className="px-4 py-3 text-right">Comissão</th>
-                <th className="px-4 py-3 text-center">Estado Comissão</th>
+                <SortableHeader sortKey="insuranceProvider">Seguradora</SortableHeader>
+                <th className="px-4 py-3">Nível</th>
+                <SortableHeader sortKey="premiumValue">Prémio</SortableHeader>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {filteredPolicies.map(p => {
-                const commissionValue = (p.premiumValue * p.commissionRate) / 100;
+              {sortedPolicies.map(p => {
                 return (
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <div className="font-bold text-slate-800">{p.clientName}</div>
                       <div className="text-xs text-slate-400 font-mono">{p.policyNumber}</div>
                     </td>
+                    <td className="px-4 py-3 text-xs">{new Date(p.policyDate).toLocaleDateString('pt-PT')}</td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${p.status === 'Aceite' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                         {p.status === 'Aceite' ? <FileCheck size={14}/> : <FileClock size={14}/>}
@@ -208,14 +251,8 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                     </td>
                     <td className="px-4 py-3 font-medium">{p.policyType}</td>
                     <td className="px-4 py-3 text-xs">{p.insuranceProvider}</td>
+                    <td className="px-4 py-3 text-xs">{p.policyTier}</td>
                     <td className="px-4 py-3 text-right font-medium">{p.premiumValue.toFixed(2)}€</td>
-                    <td className="px-4 py-3 text-right font-bold text-blue-600">{commissionValue.toFixed(2)}€</td>
-                    <td className="px-4 py-3 text-center">
-                      <button onClick={() => toggleCommissionStatus(p)} className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${p.commissionPaid ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                        {p.commissionPaid ? <CheckCircle size={14}/> : <Circle size={14}/>}
-                        {p.commissionPaid ? 'Paga' : 'Pendente'}
-                      </button>
-                    </td>
                     <td className="px-4 py-3 text-right">
                       {p.attachment_url && (
                         <a href={p.attachment_url} target="_blank" rel="noopener noreferrer" title="Ver Anexo" className="p-2 text-slate-400 hover:text-blue-600 inline-block">
@@ -228,7 +265,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                   </tr>
                 );
               })}
-              {filteredPolicies.length === 0 && (<tr><td colSpan={8} className="text-center italic text-slate-400 py-10">Nenhuma apólice encontrada.</td></tr>)}
+              {sortedPolicies.length === 0 && (<tr><td colSpan={8} className="text-center italic text-slate-400 py-10">Nenhuma apólice encontrada.</td></tr>)}
             </tbody>
           </table>
         </div>
@@ -274,6 +311,13 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                 <select required value={editingPolicy.status || 'Proposta'} onChange={e => setEditingPolicy({...editingPolicy, status: e.target.value as any})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                   <option value="Proposta">Proposta</option>
                   <option value="Aceite">Aceite</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Nível do Seguro</label>
+                <select value={editingPolicy.policyTier || 'Base'} onChange={e => setEditingPolicy({...editingPolicy, policyTier: e.target.value as any})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                  <option value="Base">Base</option>
+                  <option value="Flexível">Flexível</option>
                 </select>
               </div>
               <div>
@@ -325,6 +369,26 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Quarterly Breakdown Modal */}
+      {isQuarterlyModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setIsQuarterlyModalOpen(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Prémios por Trimestre</h3>
+              <button type="button" onClick={() => setIsQuarterlyModalOpen(false)}><X size={20} /></button>
+            </div>
+            <div className="space-y-3">
+              {Object.entries(quarterlyPremiums).map(([quarter, value]) => (
+                <div key={quarter} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg">
+                  <span className="font-bold text-slate-600">{quarter}</span>
+                  <span className="font-bold text-blue-600 text-lg">{value.toFixed(2)}€</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

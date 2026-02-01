@@ -190,6 +190,7 @@ export interface InsurancePolicy {
   commissionPaid: boolean;
   status: 'Proposta' | 'Aceite';
   communicationType?: string;
+  policyTier?: 'Base' | 'Flexível';
   attachment_url?: string;
 }
 

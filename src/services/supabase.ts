@@ -464,6 +464,7 @@ const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
   status: p.status || 'Proposta',
   attachment_url: p.attachment_url,
   communicationType: p.communication_type,
+  policyTier: p.policy_tier,
 });
 
 const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
@@ -480,6 +481,7 @@ const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
   status: p.status,
   attachment_url: p.attachment_url,
   communication_type: p.communicationType,
+  policy_tier: p.policyTier,
 });
 
 export const insuranceService = {
