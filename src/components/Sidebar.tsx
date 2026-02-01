@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutDashboard, Users, Calculator, Settings, ListTodo, Briefcase, Upload, FolderTree, Mail, Shield, HeartPulse, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Calculator, Settings, ListTodo, Briefcase, Upload, FolderTree, Mail, Shield, HeartPulse, LogOut, Landmark } from 'lucide-react';
 import { ensureStoreClient } from '../services/supabase';
 
 interface SidebarProps {
@@ -18,6 +18,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLo
     { id: 'groups', label: 'Grupos Avenças', icon: FolderTree, roles: ['admin'] },
     { id: 'insurance', label: 'Seguros', icon: Shield, roles: ['admin', 'user'] },
     { id: 'sht', label: 'SHT', icon: HeartPulse, roles: ['admin', 'user'] },
+    { id: 'cashier', label: 'Caixa Numerário', icon: Landmark, roles: ['admin', 'user'] },
     { id: 'emails', label: 'Email Marketing', icon: Mail, roles: ['admin'] },
     { id: 'team', label: 'Equipa', icon: Briefcase, roles: ['admin'] },
     { id: 'tasks', label: 'Catálogo Tarefas', icon: ListTodo, roles: ['admin', 'user'] },

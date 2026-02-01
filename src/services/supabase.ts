@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashOperation } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -106,7 +106,7 @@ const mapClientToDb = (c: Client) => ({
   meeting_count: c.meetingCount,
   previous_year_profit: c.previousYearProfit,
   tasks: c.tasks,
-  contract_renewal_date: c.contractRenewalDate,
+  contract_renewal_date: c.contractRenewalDate || null,
   ai_analysis_cache: c.aiAnalysisCache
 });
 
@@ -323,6 +323,86 @@ export const workSafetyService = {
       .getPublicUrl(filePath);
 
     return data.publicUrl;
+  }
+};
+
+export const cashPaymentService = {
+  async getAll(): Promise<CashPayment[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient.from('cash_payments').select('*');
+    if (error) throw error;
+    return data.map(p => ({
+      id: p.id,
+      clientId: p.client_id,
+      paymentYear: p.payment_year,
+      paymentMonth: p.payment_month,
+      amountPaid: p.amount_paid,
+      paidAt: p.paid_at,
+      paymentMethod: p.payment_method || 'Numerário',
+      cashOperationId: p.cash_operation_id,
+    }));
+  },
+  async bulkUpsert(payments: Partial<CashPayment>[]): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const toSave = payments.map(p => ({
+      id: p.id,
+      client_id: p.clientId,
+      payment_year: p.paymentYear,
+      payment_month: p.paymentMonth,
+      amount_paid: p.amountPaid,
+      paid_at: p.paidAt,
+      payment_method: p.paymentMethod,
+    }));
+    const { error } = await storeClient.rpc('bulk_upsert_cash_payments', { payments_data: toSave });
+    if (error) throw error;
+  },
+  async deleteMany(ids: string[]): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient.from('cash_payments').delete().in('id', ids);
+    if (error) throw error;
+  }
+};
+
+export const cashOperationService = {
+  async getAll(): Promise<CashOperation[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient.from('cash_operations').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return data.map(op => ({
+      id: op.id,
+      createdAt: op.created_at,
+      depositedAmount: op.deposited_amount,
+      spentAmount: op.spent_amount,
+      mbWayDepositedAmount: op.mbway_deposited_amount,
+      adjustmentAmount: op.adjustment_amount,
+      spentDescription: op.spent_description,
+      reportDetails: op.report_details,
+    }));
+  },
+  async create(operation: Partial<CashOperation>, paymentIds: string[]): Promise<CashOperation> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient.rpc('create_cash_operation', {
+      p_deposited_amount: operation.depositedAmount,
+      p_spent_amount: operation.spentAmount,
+      p_spent_description: operation.spentDescription,
+      p_report_details: operation.reportDetails,
+      p_payment_ids: paymentIds,
+      p_mbway_deposited_amount: operation.mbWayDepositedAmount,
+      p_adjustment_amount: operation.adjustmentAmount,
+    }).single();
+
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      createdAt: data.created_at,
+      depositedAmount: data.deposited_amount,
+      spentAmount: data.spent_amount,
+      mbWayDepositedAmount: data.mbway_deposited_amount,
+      adjustmentAmount: data.adjustment_amount,
+      spentDescription: data.spent_description,
+      reportDetails: data.report_details,
+    };
   }
 };
 

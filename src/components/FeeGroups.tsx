@@ -5,8 +5,8 @@ import { calculateClientProfitability } from '../services/calculator';
 import { clientService, groupService, ensureStoreClient } from '../services/supabase';
 import { analyzeClientWithAI } from '../services/geminiService';
 import { 
-  Plus, Users, FolderOpen, Trash2, ChevronRight, Save, Printer, ChevronUp, ChevronDown, CheckCircle,
-  ArrowLeft, BrainCircuit, RefreshCcw, XCircle, Activity, UserPlus, Search, X, TrendingUp,
+  Plus, Users, FolderOpen, Trash2, ChevronRight, Save, Printer, ChevronUp, ChevronDown, CheckCircle, Filter,
+  ArrowLeft, BrainCircuit, RefreshCcw, XCircle, Activity, UserPlus, Search, X, TrendingUp
 } from 'lucide-react';
 
 interface FeeGroupsProps {

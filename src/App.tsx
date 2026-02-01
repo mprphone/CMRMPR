@@ -14,14 +14,15 @@ import Login from './components/Login';
 import FeeGroups from './components/FeeGroups';
 import { DEFAULT_TASKS, DEFAULT_AREA_COSTS, DEFAULT_TURNOVER_BRACKETS, DEFAULT_STAFF } from './constants';
 import { 
-  Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService 
+  Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashOperation
 } from './types';
 import { 
-  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient 
+  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashOperationService
 } from './services/supabase';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Insurance from './components/Insurance';
 import WorkSafety from './components/WorkSafety';
+import Cashier from './components/Cashier';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -46,6 +47,8 @@ export default function App() {
   const [quoteHistory, setQuoteHistory] = useState<QuoteHistory[]>([]);
   const [insurancePolicies, setInsurancePolicies] = useState<InsurancePolicy[]>([]);
   const [workSafetyServices, setWorkSafetyServices] = useState<WorkSafetyService[]>([]);
+  const [cashPayments, setCashPayments] = useState<CashPayment[]>([]);
+  const [cashOperations, setCashOperations] = useState<CashOperation[]>([]);
   const [logo, setLogo] = useState(() => localStorage.getItem('appLogo') || '');
 
   const handleLogoUpload = (newLogo: string) => {
@@ -124,6 +127,8 @@ export default function App() {
     const insurancePromise = insuranceService.getAll().catch(e => { console.error("Erro Seguros:", e); return []; });
     const shtPromise = workSafetyService.getAll().catch(e => { console.error("Erro SHT:", e); return []; });
     const bracketsPromise = turnoverBracketService.getAll().catch(e => { console.error("Erro Patamares:", e); return []; });
+    const cashPaymentsPromise = cashPaymentService.getAll().catch(e => { console.error("Erro Pagamentos Caixa:", e); return []; });
+    const cashOperationsPromise = cashOperationService.getAll().catch(e => { console.error("Erro Operações Caixa:", e); return []; });
 
     const [
       clientsData,
@@ -134,10 +139,13 @@ export default function App() {
       quoteHistoryData,
       insuranceData,
       shtData,
-      bracketsData
+      bracketsData,
+      cashPaymentsData,
+      cashOperationsData
     ] = await Promise.all([
       clientsPromise, staffPromise, groupsPromise, templatesPromise, 
-      campaignHistoryPromise, quoteHistoryPromise, insurancePromise, shtPromise, bracketsPromise
+      campaignHistoryPromise, quoteHistoryPromise, insurancePromise, shtPromise, bracketsPromise,
+      cashPaymentsPromise, cashOperationsPromise
     ]);
 
     setClients(clientsData);
@@ -148,6 +156,8 @@ export default function App() {
     setQuoteHistory(quoteHistoryData);
     setInsurancePolicies(insuranceData);
     setWorkSafetyServices(shtData);
+    setCashPayments(cashPaymentsData);
+    setCashOperations(cashOperationsData);
     setTurnoverBrackets(
       bracketsData.length > 0 ? bracketsData : DEFAULT_TURNOVER_BRACKETS.map(b => ({ ...b, id: crypto.randomUUID() }))
     );
@@ -342,6 +352,16 @@ export default function App() {
                 <WorkSafety
                   services={workSafetyServices} setServices={setWorkSafetyServices}
                   clients={clients}
+                />
+              )}
+              {currentView === 'cashier' && (
+                <Cashier
+                  clients={clients}
+                  groups={groups}
+                  cashPayments={cashPayments}
+                  setCashPayments={setCashPayments}
+                  cashOperations={cashOperations}
+                  setCashOperations={setCashOperations}
                 />
               )}
               {currentView === 'groups' && (

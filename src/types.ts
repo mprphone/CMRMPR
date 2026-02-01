@@ -218,6 +218,33 @@ export interface WorkSafetyService {
   attachment_url?: string;
 }
 
+export interface CashPayment {
+  id: string;
+  clientId: string;
+  paymentYear: number;
+  paymentMonth: number;
+  amountPaid: number;
+  paidAt: string;
+  paymentMethod: 'Numerário' | 'MB Way';
+  cashOperationId: string | null;
+}
+
+export interface CashOperation {
+  id: string;
+  createdAt: string;
+  depositedAmount: number;
+  spentAmount: number;
+  mbWayDepositedAmount?: number;
+  adjustmentAmount?: number;
+  spentDescription: string;
+  reportDetails: {
+    clientName: string;
+    months: string[];
+    total: number;
+    method: 'Numerário' | 'MB Way';
+  }[];
+}
+
 export interface StaffStats {
   staffName: string;
   clientCount: number;
