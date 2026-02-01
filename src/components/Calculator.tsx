@@ -221,11 +221,22 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
         </div>
 
         <div className="max-w-4xl mx-auto bg-white p-10 border border-slate-100 rounded-2xl print-reset print:rounded-none print:p-0">
-          {/* Espaço para folha timbrada */}
-          <div className="h-20 print:h-24">
-            <div className="no-print h-full rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-400 text-xs">
-              Espaço reservado para a sua folha timbrada (cabeçalho / logo)
-            </div>
+          {/* Cabeçalho: logo (imprime) + espaço para folha timbrada */}
+          <div className="h-20 print:h-24 flex items-center justify-between">
+            {logo ? (
+              <img
+                src={logo}
+                alt="Logo"
+                className="h-12 print:h-14 w-auto object-contain"
+              />
+            ) : (
+              <div className="no-print w-full h-full rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-400 text-xs">
+                Faça upload do logotipo (na barra lateral) ou use a sua folha timbrada
+              </div>
+            )}
+
+            {/* Se usares folha timbrada completa (cabeçalho já impresso), podes esconder o logo e manter este espaço vazio */}
+            <div className="hidden print:block flex-1" />
           </div>
 
           <div className="flex justify-between items-end mt-4 pb-4 border-b border-slate-200">

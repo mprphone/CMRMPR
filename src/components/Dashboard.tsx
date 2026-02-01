@@ -4,7 +4,7 @@ import { calculateClientProfitability, calculateStaffStats } from '../services/c
 import { generateNotifications } from '../services/notificationService';
 import AlertsPanel from './AlertsPanel';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { TrendingUp, Users, AlertTriangle, DollarSign, UserCheck } from 'lucide-react';
+import { TrendingUp, AlertTriangle, DollarSign, UserCheck, Award, ThumbsDown } from 'lucide-react';
 
 interface DashboardProps {
   clients: Client[];
@@ -16,7 +16,7 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff }) => {
   const notifications = useMemo(() => generateNotifications(clients, tasks, areaCosts, staff), [clients, tasks, areaCosts, staff]);
 
-  const { metrics, staffMetrics } = useMemo(() => {
+  const { metrics, staffMetrics, topClients, bottomClients } = useMemo(() => {
     let totalRev = 0;
     let totalCost = 0;
     let profitable = 0;
@@ -32,21 +32,23 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
       else profitable++;
 
       return {
-        id: c.id, // Add ID for unique key
         name: c.name,
-        revenue: analysis.totalAnnualRevenue,
-        cost: analysis.totalAnnualCost,
         margin: analysis.profitability
       };
-    }).sort((a, b) => a.margin - b.margin); // Sort by lowest margin first
+    }).sort((a, b) => a.margin - b.margin);
+
+    const topClients = [...clientData].sort((a, b) => b.margin - a.margin).slice(0, 5).reverse();
+    const bottomClients = clientData.slice(0, 5).reverse();
 
     const staffPerformance = staff
       .map(s => calculateStaffStats(s, clients, tasks))
-      .sort((a, b) => a.profitability - b.profitability);
+      .sort((a, b) => b.profitability - a.profitability);
 
     return { 
-      metrics: { totalRev, totalCost, profitable, risk, clientData },
-      staffMetrics: staffPerformance
+      metrics: { totalRev, totalCost, profitable, risk },
+      staffMetrics: staffPerformance,
+      topClients,
+      bottomClients
     };
   }, [clients, tasks, areaCosts, staff]);
 
@@ -117,16 +119,17 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Charts */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">Top Clientes: Receita vs Custo</h3>
-          <div className="h-80">
+          <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+            <Award size={20} className="text-green-500" /> Top 5 Clientes Mais Rentáveis
+          </h3>
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={metrics.clientData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <BarChart data={topClients} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" />
-                <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}} />
-                <Tooltip formatter={(value) => `${Number(value).toFixed(0)}€`} />
-                <Bar dataKey="revenue" name="Receita" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-                <Bar dataKey="cost" name="Custo" fill="#ef4444" radius={[0, 4, 4, 0]} />
+                <XAxis type="number" domain={[0, 'dataMax + 10']} tickFormatter={(value) => `${value}%`} />
+                <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 12}} />
+                <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} cursor={{ fill: '#f1f5f9' }} />
+                <Bar dataKey="margin" name="Margem" fill="#22c55e" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -134,50 +137,45 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
 
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <UserCheck size={20} className="text-blue-600" />
-            Rentabilidade por Funcionário
+            <ThumbsDown size={20} className="text-red-500" /> Top 5 Clientes Menos Rentáveis
           </h3>
-          <div className="h-80">
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={staffMetrics} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <BarChart data={bottomClients} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" domain={[-50, 100]} tickFormatter={(value) => `${value}%`} />
-                <YAxis dataKey="staffName" type="category" width={100} tick={{fontSize: 12}} />
-                <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
-                <Bar dataKey="profitability" name="Rentabilidade">
-                  {staffMetrics.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.profitability < 20 ? '#ef4444' : '#22c55e'} />
+                <XAxis type="number" domain={['dataMin - 10', 40]} tickFormatter={(value) => `${value}%`} />
+                <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 12}} />
+                <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} cursor={{ fill: '#f1f5f9' }} />
+                <Bar dataKey="margin" name="Margem" radius={[0, 4, 4, 0]}>
+                  {bottomClients.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.margin < 0 ? '#ef4444' : '#f97316'} />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
 
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">Análise de Margem por Cliente</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-slate-500 uppercase bg-slate-50">
-                <tr>
-                  <th className="px-4 py-3">Cliente</th>
-                  <th className="px-4 py-3 text-right">Margem %</th>
-                  <th className="px-4 py-3 text-right">Lucro Anual</th>
-                </tr>
-              </thead>
-              <tbody>
-                {metrics.clientData.map((client) => (
-                  <tr key={client.id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{client.name}</td>
-                    <td className={`px-4 py-3 text-right font-bold ${client.margin < 15 ? 'text-red-500' : 'text-green-600'}`}>
-                      {client.margin.toFixed(1)}%
-                    </td>
-                    <td className="px-4 py-3 text-right">{(client.revenue - client.cost).toFixed(0)}€</td>
-                  </tr>
+      {/* Staff Performance Chart */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+          <UserCheck size={20} className="text-blue-600" /> Rentabilidade por Funcionário
+        </h3>
+        <div className="h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={staffMetrics} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+              <XAxis type="number" domain={['dataMin - 10', 'dataMax + 10']} tickFormatter={(value) => `${value}%`} />
+              <YAxis dataKey="staffName" type="category" width={100} tick={{fontSize: 12}} />
+              <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} cursor={{ fill: '#f1f5f9' }} />
+              <Bar dataKey="profitability" name="Rentabilidade" radius={[0, 4, 4, 0]}>
+                {staffMetrics.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.profitability < 20 ? '#ef4444' : '#22c55e'} />
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
     </div>

@@ -193,10 +193,19 @@ export default function App() {
       console.log("DEBUG: Clientes importados (primeiros 3):", externalClients.slice(0, 3));
       if (externalClients.length > 0) {
         // Map responsible staff name (from import) to staff ID (for destination)
+        const unmatchedNames = new Set<string>();
         const clientsWithStaffId = externalClients.map(client => {
+          const responsibleIdFromClient = client.responsibleStaff || '';
+          
+          // The responsibleStaff field from the import is an ID. We match it against the imported staff's ID.
           const responsible = externalStaff.find(s => 
-            s.name.trim().toLowerCase() === (client.responsibleStaff || '').trim().toLowerCase()
+            s.id === responsibleIdFromClient
           );
+
+          if (!responsible && responsibleIdFromClient) {
+            unmatchedNames.add(responsibleIdFromClient); // This will now log unmatched IDs
+          }
+
           return {
             ...client,
             // Overwrite the name with the ID for the upsert operation
@@ -204,15 +213,22 @@ export default function App() {
           };
         });
         await clientService.bulkUpsert(clientsWithStaffId);
+
+        let successMessage = `Sucesso! ${externalClients.length} clientes processados.`;
+        if (unmatchedNames.size > 0) {
+          successMessage += ` Atenção: os seguintes responsáveis não foram encontrados e não foram atualizados: ${Array.from(unmatchedNames).join(', ')}`;
+        }
+        setSyncSuccess(successMessage);
+        setTimeout(() => setSyncSuccess(null), 15000); // Longer timeout to read the message
+      } else {
+        setSyncSuccess(`Sucesso! Nenhum cliente novo para sincronizar.`);
+        setTimeout(() => setSyncSuccess(null), 5000);
       }
       
       // 3. AGUARDAR E RECARREGAR
       await new Promise(resolve => setTimeout(resolve, 1000));
       console.log("--- FIM DA SINCROZINAÇÃO, A RECARREGAR DADOS ---");
       await fetchData();
-      
-      setSyncSuccess(`Sucesso! ${externalClients.length} clientes processados.`);
-      setTimeout(() => setSyncSuccess(null), 5000);
     } catch (err: any) {
       alert("Falha na sincronização: " + err.message);
     } finally {

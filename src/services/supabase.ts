@@ -49,7 +49,7 @@ const mapDbToClient = (db: any): Client => ({
   nif: db.nif || '',
   sector: db.sector || 'Geral',
   entityType: db.entity_type || db.tipo_entidade || 'SOCIEDADE',
-  responsibleStaff: db.responsavel_interno_id || db.responsible_staff || '',
+  responsibleStaff: db.responsavel_interno_id || db.responsible_staff || db.responsavel || db.Responsavel || db.gestor || db.Gestor || '',
   status: db.status || db.estado || 'Ativo',
   monthlyFee: Number(db.monthly_fee || 0),
   employeeCount: Number(db.employee_count || 0),
@@ -155,19 +155,19 @@ export const clientService = {
   },
   async bulkUpsert(clients: Client[]): Promise<void> {
     const storeClient = ensureStoreClient();
-    // During sync, we only want to update core identification fields, not financial/operational data.
     const clientsToUpsert = clients.map(c => ({
-      nif: c.nif,          // Chave de conflito
-      name: c.name,        // OBRIGATÓRIO (para bater com a restrição NOT NULL)
+      nif: c.nif,
+      name: c.name,
       email: c.email || '',
       phone: c.phone || '',
       address: c.address || '',
       entity_type: c.entityType || 'SOCIEDADE',
       sector: c.sector || 'Geral',
       status: c.status || 'Ativo',
-      responsavel_interno_id: c.responsibleStaff || null
+      responsavel_interno_id: (c.responsibleStaff && c.responsibleStaff.includes('-')) ? c.responsibleStaff : null
     }));
-    const { error } = await storeClient.from('clients').upsert(clientsToUpsert, { onConflict: 'nif' });
+
+    const { error } = await storeClient.rpc('bulk_upsert_clients', { clients_data: clientsToUpsert });
     if (error) throw error;
   },
   async upsert(client: Client): Promise<Client> {
