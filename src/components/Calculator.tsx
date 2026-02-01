@@ -221,8 +221,8 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
         </div>
 
         <div className="max-w-4xl mx-auto bg-white p-10 border border-slate-100 rounded-2xl print-reset print:rounded-none print:p-0">
-          {/* Cabeçalho: logo (imprime) + espaço para folha timbrada */}
-          <div className="h-20 print:h-24 flex items-center justify-between">
+          {/* Cabeçalho: logo (imprime) no topo esquerdo + espaço para folha timbrada */}
+          <div className="h-20 print:h-24 flex items-center gap-6">
             {logo ? (
               <img
                 src={logo}
@@ -230,28 +230,26 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 className="h-12 print:h-14 w-auto object-contain"
               />
             ) : (
-              <div className="no-print w-full h-full rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-400 text-xs">
+              <div className="no-print flex-1 h-full rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-400 text-xs">
                 Faça upload do logotipo (na barra lateral) ou use a sua folha timbrada
               </div>
             )}
 
-            {/* Se usares folha timbrada completa (cabeçalho já impresso), podes esconder o logo e manter este espaço vazio */}
-            <div className="hidden print:block flex-1" />
+            {/* Espaço à direita reservado para folha timbrada (caso exista cabeçalho completo). */}
+            <div className="flex-1" />
           </div>
 
-          <div className="flex justify-between items-end mt-4 pb-4 border-b border-slate-200">
-            <div>
+          <div className="mt-4 pb-4 border-b border-slate-200">
+            <div className="flex items-end justify-between gap-4">
+              <div>
               <h2 className="text-lg font-extrabold text-slate-800 uppercase tracking-tight">Proposta de Serviços de Contabilidade</h2>
               <p className="text-[11px] text-slate-500 mt-1">Data: {new Date().toLocaleDateString('pt-PT')}</p>
+              </div>
+              <div className="text-[11px] text-slate-500 text-right leading-tight">
+                <div className="font-semibold text-slate-600">Ref.: {`MPR-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`}</div>
+                <div>Validade: 30 dias</div>
+              </div>
             </div>
-            {/* Opcional: mostrar logo no ecrã (não obrigatório para folha timbrada) */}
-            {logo && (
-              <img
-                src={logo}
-                alt="Logo"
-                className="h-10 w-auto object-contain no-print opacity-90"
-              />
-            )}
           </div>
 
                     {/* Layout principal */}
