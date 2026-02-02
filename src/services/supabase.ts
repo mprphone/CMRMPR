@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, SupabaseClientOptions } from '@supabase/supabase-js';
 import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashOperation } from '../types';
 
 export let importClient: SupabaseClient | null = null;
@@ -10,13 +10,21 @@ export const initSupabase = (settings: GlobalSettings) => {
   const sUrl = import.meta.env.VITE_SUPABASE_URL_CMR || settings.supabaseStoreUrl;
   const sKey = import.meta.env.VITE_SUPABASE_KEY_CMR || settings.supabaseStoreKey;
 
+  const supabaseOptions: SupabaseClientOptions<"public"> = {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true, // Important for OAuth callbacks
+    },
+  };
+
   if (iUrl && iKey && iUrl.startsWith('http')) {
     importClient = createClient(iUrl, iKey);
   } else {
     importClient = null;
   }
   if (sUrl && sKey && sUrl.startsWith('http')) {
-    storeClient = createClient(sUrl, sKey);
+    storeClient = createClient(sUrl, sKey, supabaseOptions);
   } else {
     storeClient = null;
   }

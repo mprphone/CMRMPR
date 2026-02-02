@@ -7,7 +7,7 @@ export const analyzeClientWithAI = async (client: Client, analysis: AnalysisResu
 
   try {
     const { data, error } = await storeClient.functions.invoke('analyze-client', {
-      body: { client, analysis }
+      body: { client, analysis },
     });
 
     if (error) {
@@ -25,9 +25,9 @@ export const analyzeClientWithAI = async (client: Client, analysis: AnalysisResu
     }
 
     return data as AiAnalysis;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
-    return { parecer: "Erro ao contactar a IA. Verifique a consola para mais detalhes.", avenca_sugerida: 0 };
+    throw error; // Re-throw to be handled by the UI layer
   }
 };
 
@@ -36,7 +36,7 @@ export const generateTemplateWithAI = async (topic: string, tone: string): Promi
 
   try {
     const { data, error } = await storeClient.functions.invoke('generate-email', {
-      body: { topic, tone }
+      body: { topic, tone },
     });
 
     if (error) {
@@ -53,8 +53,8 @@ export const generateTemplateWithAI = async (topic: string, tone: string): Promi
     }
 
     return data as AiTemplateAnalysis;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini Template Generation Error:", error);
-    return { subject: "Erro", body: "Ocorreu um erro ao tentar gerar o template. Por favor, tente novamente." };
+    throw error; // Re-throw to be handled by the UI layer
   }
 };

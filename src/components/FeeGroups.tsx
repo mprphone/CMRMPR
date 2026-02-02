@@ -205,21 +205,25 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
 
   const runAiAnalysis = async (client: Client) => {
     setAnalyzingClientId(client.id);
-    const stats = calculateClientProfitability(client, tasks, areaCosts as Record<TaskArea, number>, staff, turnoverBrackets);
-    const analysisResult = await analyzeClientWithAI(client, stats);    
-    const updatedClientWithAI = { ...client, aiAnalysisCache: analysisResult };
-    
     try {
+      const stats = calculateClientProfitability(client, tasks, areaCosts as Record<TaskArea, number>, staff, turnoverBrackets);
+      const analysisResult = await analyzeClientWithAI(client, stats);    
+      const updatedClientWithAI = { ...client, aiAnalysisCache: analysisResult };
+      
       // Persist the AI analysis to the client record
       await clientService.upsert(updatedClientWithAI);
       
       // Update local state
-      const updatedClients = clients.map(c => 
-        c.id === client.id ? updatedClientWithAI : c
-      );
+      const updatedClients = clients.map(c => c.id === client.id ? updatedClientWithAI : c);
       setClients(updatedClients);
     } catch (err: any) {
-      alert("Erro ao gravar a análise da IA: " + err.message);
+      const errorMessage = err.message || "Ocorreu um erro desconhecido.";
+      if (errorMessage.includes('Invalid JWT')) {
+          alert("A sua sessão expirou. Por favor, recarregue a página e tente novamente.");
+      } else {
+          alert("Erro ao contactar a IA: " + errorMessage);
+      }
+      console.error(err);
     } finally {
       setAnalyzingClientId(null);
     }

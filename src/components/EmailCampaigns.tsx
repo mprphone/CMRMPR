@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Client, FeeGroup, Staff, EmailTemplate, CampaignHistory, AiTemplateAnalysis, GlobalSettings } from '../types';
-import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2 } from 'lucide-react';
+import { Client, FeeGroup, Staff, EmailTemplate, CampaignHistory, GlobalSettings } from '../types';
+import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2, Search, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { generateTemplateWithAI } from '../services/geminiService';
 import { templateService, campaignHistoryService, storeClient } from '../services/supabase';
 
@@ -38,6 +38,15 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
   const [aiTopic, setAiTopic] = useState('');
   const [aiTone, setAiTone] = useState('Profissional');
 
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduleDateTime, setScheduleDateTime] = useState('');
+  const [isRecipientModalOpen, setIsRecipientModalOpen] = useState(false);
+  // New states for guardrails
+  const [sendDelay, setSendDelay] = useState(500); // Default 0.5s
+  const [recipientSearch, setRecipientSearch] = useState('');
+  const [campaignResult, setCampaignResult] = useState<{ successCount: number; errorCount: number; details: { name: string; email: string; status: 'success' | 'error'; error?: string }[] } | null>(null);
+  const [validationIssues, setValidationIssues] = useState<string[]>([]);
+
   useEffect(() => {
     // Set initial state from first template if available
     if (templates.length > 0 && !selectedTemplateId) {
@@ -52,6 +61,14 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     const group = groups.find(g => g.id === selectedGroupId);
     return group ? clients.filter(c => group.clientIds.includes(c.id)) : [];
   }, [selectedGroupId, clients, groups]);
+
+  const filteredRecipients = useMemo(() => {
+    if (!recipientSearch) return availableRecipients;
+    return availableRecipients.filter(c => 
+        c.name.toLowerCase().includes(recipientSearch.toLowerCase()) || 
+        (c.email && c.email.toLowerCase().includes(recipientSearch.toLowerCase()))
+    );
+  }, [availableRecipients, recipientSearch]);
 
   const handleTemplateChange = (templateId: string) => {
     const template = templates.find(t => t.id === templateId);
@@ -73,7 +90,12 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
       const result = await generateTemplateWithAI(aiTopic, aiTone);
       setEditingTemplate(prev => ({ ...prev, subject: result.subject, body: result.body }));
     } catch (err: any) {
-      alert("Falha na IA: " + err.message + "\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
+      const errorMessage = err.message || "Ocorreu um erro desconhecido.";
+      if (errorMessage.includes('Invalid JWT')) {
+          alert("A sua sessão expirou. Por favor, recarregue a página e tente novamente.");
+      } else {
+        alert("Falha na IA: " + errorMessage + "\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
+      }
       console.error(err);
     } finally {
       setIsGenerating(false);
@@ -90,16 +112,71 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
       alert("Por favor, configure o seu Nome e Email de Remetente nas Configurações.");
       return;
     }
+
+    // --- New Scheduling Logic ---
+    if (isScheduled) {
+      if (!scheduleDateTime) {
+        alert("Por favor, selecione uma data e hora para o agendamento.");
+        return;
+      }
+      const scheduleDate = new Date(scheduleDateTime);
+      if (scheduleDate < new Date()) {
+        alert("A data de agendamento não pode ser no passado.");
+        return;
+      }
+      if (!confirm(`Tem a certeza que deseja agendar esta campanha para ${scheduleDate.toLocaleString('pt-PT')} para ${selectedRecipients.length} cliente(s)?`)) {
+        return;
+      }
+
+      setIsSending(true); // Use isSending for loading state
+
+      const group = groups.find(g => g.id === selectedGroupId);
+      const groupName = selectedGroupId === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
+
+      // NOTE: The CampaignHistory type and 'campaign_history' table in Supabase
+      // must be updated to include: recipient_ids (text[]), scheduled_at (timestamptz), send_delay (int4), template_id (uuid)
+      const scheduledCampaign: Partial<CampaignHistory> = {
+        subject,
+        body,
+        recipient_ids: selectedRecipients,
+        group_name: groupName,
+        status: 'Agendada',
+        scheduled_at: scheduleDate.toISOString(),
+        send_delay: sendDelay,
+        template_id: selectedTemplateId || null,
+        recipient_count: selectedRecipients.length,
+      };
+
+      try {
+        const savedRecord = await campaignHistoryService.create(scheduledCampaign);
+        setHistory([savedRecord, ...history]);
+        alert(`Campanha agendada com sucesso para ${scheduleDate.toLocaleString('pt-PT')}.\n\nNOTA: É necessário um processo no servidor (cron job) para processar e enviar campanhas agendadas.`);
+        setSelectedRecipients([]);
+        setIsScheduled(false);
+        setScheduleDateTime('');
+      } catch (err: any) {
+        alert("Falha ao agendar a campanha: " + err.message);
+      } finally {
+        setIsSending(false);
+      }
+      return; // End execution here for scheduled campaigns
+    }
+    
+    // --- Existing Immediate Send Logic ---
     if (!confirm(`Tem a certeza que deseja enviar esta campanha para ${selectedRecipients.length} cliente(s)?`)) {
       return;
     }
 
     setIsSending(true);
+    setValidationIssues([]); // Clear issues on send
     
     const recipients = clients.filter(c => selectedRecipients.includes(c.id));
     let successCount = 0;
     let errorCount = 0;
+    const campaignLogs: { name: string; email: string; status: 'success' | 'error'; error?: string }[] = [];
+    let jwtError = false;
 
+    const optOutFooter = `<br><br><p style="font-size:10px; color:#999;">Para deixar de receber comunicações de marketing, por favor responda a este email com o assunto "Remover".</p>`;
     for (const client of recipients) {
       // Personalize email for each client
       let responsibleName = 'N/A';
@@ -114,33 +191,63 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
       try {
         if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
         
+        const finalHtml = finalBody.replace(/\n/g, '<br>') + `<br><br>${globalSettings.emailSignature || ''}` + optOutFooter;
+
         const { error } = await storeClient.functions.invoke('send-email', {
-          body: { to: client.email, from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: finalSubject, html: finalBody.replace(/\n/g, '<br>') + `<br><br>${globalSettings.emailSignature || ''}` },
+          body: { to: client.email, from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: finalSubject, html: finalHtml },
         });
 
-        if (error) { errorCount++; console.error(`Falha ao enviar para ${client.email}:`, error); } 
-        else { successCount++; }
-      } catch (err) {
+        if (error) throw error;
+
+        successCount++;
+        campaignLogs.push({ name: client.name, email: client.email, status: 'success' });
+      } catch (err: any) {
+        let detailedError = err.message;
+        if (err.context && typeof err.context.json === 'function') {
+          const funcError = await err.context.json().catch(() => null);
+          if (funcError && funcError.error) detailedError = funcError.error;
+        }
+
+        if (detailedError.includes('Invalid JWT')) {
+          alert("A sua sessão expirou ou é inválida. A campanha foi interrompida. Por favor, recarregue a página e tente novamente.");
+          jwtError = true;
+          break; // Stop campaign on auth error
+        }
+
         errorCount++;
-        console.error(`Falha ao enviar para ${client.email}:`, err);
+        console.error(`Falha ao enviar para ${client.email}:`, detailedError, err);
+        campaignLogs.push({ name: client.name, email: client.email, status: 'error', error: detailedError });
       }
-      await new Promise(resolve => setTimeout(resolve, 500)); // 0.5s delay between emails
+      await new Promise(resolve => setTimeout(resolve, sendDelay)); // Use configurable delay
+    }
+    
+    if (jwtError) {
+      // Alert was shown in the loop. Just stop the loading state.
+      setIsSending(false);
+      return;
     }
 
     const group = groups.find(g => g.id === selectedGroupId);
     const groupName = selectedGroupId === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
-    const newHistoryRecord: Partial<CampaignHistory> = { subject, body, recipient_count: successCount, group_name: groupName, status: `Enviada (${successCount} sucesso, ${errorCount} falhas)` };
+    const newHistoryRecord: Partial<CampaignHistory> = {
+      subject,
+      body,
+      recipient_count: successCount,
+      group_name: groupName,
+      status: `Enviada (${successCount} sucesso, ${errorCount} falhas)`
+    };
 
     try {
       const savedRecord = await campaignHistoryService.create(newHistoryRecord);
+      // TODO: For more detailed logging, create a `campaign_recipient_logs` table
+      // and save each entry from `campaignLogs` here, linked to `savedRecord.id`.
       setHistory([savedRecord, ...history]);
     } catch (err: any) {
       alert("Falha ao gravar o histórico da campanha: " + err.message);
     }
 
-    alert(`Campanha concluída. ${successCount} emails enviados com sucesso. ${errorCount} falhas.`);
+    setCampaignResult({ successCount, errorCount, details: campaignLogs });
     setIsSending(false);
-    setSelectedRecipients([]);
   };
 
   const handleSendTestEmail = async () => {
@@ -188,6 +295,9 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     testSubject = testSubject.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENÇA]');
     testBody = testBody.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENÇA]');
 
+    const optOutFooter = `<br><br><p style="font-size:10px; color:#999;">Para deixar de receber comunicações de marketing, por favor responda a este email com o assunto "Remover".</p>`;
+    const finalHtml = testBody.replace(/\n/g, '<br>') + `<br><br>${globalSettings.emailSignature || ''}` + optOutFooter;
+
     const confirmationMessage = `Isto irá enviar um email de teste REAL para 'mpr@mpr.pt' a partir de '${globalSettings.fromEmail}'.\n\nAssunto: ${testSubject}\n\nDeseja continuar?`;
 
     if (!confirm(confirmationMessage)) return;
@@ -195,13 +305,24 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     setIsSending(true);
     try {
       if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
+
       const { error } = await storeClient.functions.invoke('send-email', {
-        body: { to: 'mpr@mpr.pt', from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: testSubject, html: testBody.replace(/\n/g, '<br>') + `<br><br>${globalSettings.emailSignature || ''}` },
+        body: { to: 'mpr@mpr.pt', from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: testSubject, html: finalHtml },
       });
       if (error) throw error;
       alert("Email de teste enviado com sucesso!");
     } catch (err: any) {
-      alert(`Erro ao enviar email de teste: ${err.message}`);
+      let detailedError = err.message;
+      if (err.context && typeof err.context.json === 'function') {
+        const functionError = await err.context.json().catch(() => null);
+        if (functionError && functionError.error) detailedError = functionError.error;
+        else if (functionError && functionError.message) detailedError = functionError.message;
+      }
+      if (detailedError.includes('Invalid JWT')) {
+        alert("A sua sessão expirou ou é inválida. Por favor, recarregue a página e tente novamente.");
+      } else {
+        alert(`Erro ao enviar email de teste: ${detailedError}`);
+      }
       console.error(err);
     } finally {
       setIsSending(false);
@@ -224,6 +345,9 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
         // Add new
         setTemplates([...templates, savedTemplate]);
       }
+      // TODO: Implement template versioning and approval flow.
+      // A template should have a status (e.g., 'draft', 'approved').
+      // Only 'approved' templates can be sent. An 'admin' role would be needed to change the status.
       setIsTemplateModalOpen(false);
       setEditingTemplate(null);
       handleTemplateChange(savedTemplate.id); // Select the new/edited template
@@ -265,6 +389,25 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     // This is a simplification. A real implementation would insert at the cursor position.
     // For now, we append to the body.
     setEditingTemplate(prev => ({ ...prev, body: (prev?.body || '') + `{{${variable}}}` }));
+  };
+
+  const validateCurrentTemplate = () => {
+    setValidationIssues([]);
+    const issues: string[] = [];
+    const allContent = subject + ' ' + body;
+    const variablesFound = allContent.match(/{{(.*?)}}/g) || [];
+    
+    variablesFound.forEach(variable => {
+        const varName = variable.replace(/{{|}}/g, '');
+        if (!allVariables.includes(varName as any)) {
+            issues.push(`A variável ${variable} não é reconhecida.`);
+        }
+    });
+
+    if (issues.length === 0) {
+        alert("Nenhum problema encontrado. As variáveis parecem estar corretas.");
+    }
+    setValidationIssues(issues);
   };
 
   return (
@@ -316,14 +459,27 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
               className="w-full px-3 py-2 border rounded-lg text-sm h-80 font-mono"
               placeholder="Escreva o seu email aqui... Use {{client_name}} para personalizar."
             />
-            <div className="mt-2 text-xs text-slate-500">
-              <span className="font-bold">Variáveis disponíveis:</span>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {allVariables.map(variable => (
-                  <code key={variable} className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-md font-mono">{`{{${variable}}}`}</code>
-                ))}
+            <div className="flex justify-between items-start mt-2">
+              <div className="text-xs text-slate-500">
+                <span className="font-bold">Variáveis disponíveis:</span>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {allVariables.map(variable => (
+                    <code key={variable} className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-md font-mono">{`{{${variable}}}`}</code>
+                  ))}
+                </div>
               </div>
+              <button onClick={validateCurrentTemplate} className="text-xs font-bold bg-slate-100 text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-2">
+                <CheckCircle size={14}/> Verificar Variáveis
+              </button>
             </div>
+            {validationIssues.length > 0 && (
+                <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                    <p className="font-bold mb-1 flex items-center gap-1"><AlertCircle size={14}/> Problemas Encontrados:</p>
+                    <ul className="list-disc list-inside pl-2">
+                    {validationIssues.map((issue, i) => <li key={i}>{issue}</li>)}
+                    </ul>
+                </div>
+            )}
           </div>
         </div>
 
@@ -346,49 +502,46 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
               </select>
             </div>
             <div className="mt-4 border-t pt-4">
-              <div className="flex justify-between items-center mb-2">
-                <p className="text-xs font-bold text-slate-500">{selectedRecipients.length} de {availableRecipients.length} selecionados</p>
-                <button
-                  onClick={() => {
-                    if (selectedRecipients.length === availableRecipients.length) {
-                      setSelectedRecipients([]);
-                    } else {
-                      setSelectedRecipients(availableRecipients.map(c => c.id));
-                    }
-                  }}
-                  className="text-xs font-medium text-blue-600 hover:underline"
-                >
-                  {selectedRecipients.length === availableRecipients.length ? 'Desselecionar Todos' : 'Selecionar Todos'}
-                </button>
-              </div>
-              <div className="max-h-60 overflow-y-auto border rounded-lg bg-slate-50/50 p-2 space-y-1">
-                {availableRecipients.map(client => (
-                  <label key={client.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-100 cursor-pointer text-xs">
-                    <input 
-                      type="checkbox" 
-                      className="rounded"
-                      checked={selectedRecipients.includes(client.id)}
-                      onChange={() => {
-                        setSelectedRecipients(prev => 
-                          prev.includes(client.id) ? prev.filter(id => id !== client.id) : [...prev, client.id]
-                        );
-                      }}
-                    />
-                    <span className="font-medium text-slate-700">{client.name}</span>
-                  </label>
-                ))}
-              </div>
+                <div className="flex justify-between items-center">
+                    <p className="text-sm">
+                        <span className="font-bold text-blue-600">{selectedRecipients.length}</span> destinatário(s) selecionado(s) de <span className="font-bold">{availableRecipients.length}</span>
+                    </p>
+                    <button onClick={() => setIsRecipientModalOpen(true)} className="bg-blue-50 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-100">
+                        Selecionar
+                    </button>
+                </div>
             </div>
           </div>
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Send size={18} /> Envio</h3>
             <div className="space-y-4">
               <div>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input 
+                        type="checkbox" 
+                        checked={isScheduled} 
+                        onChange={e => setIsScheduled(e.target.checked)} 
+                        className="rounded h-4 w-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    Agendar envio
+                </label>
+                {isScheduled && (
+                    <div className="mt-2 pl-6">
+                        <label className="block text-xs font-bold text-slate-500 mb-1">Data e Hora do Envio</label>
+                        <input 
+                            type="datetime-local" value={scheduleDateTime} onChange={e => setScheduleDateTime(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg text-sm bg-white" min={new Date().toISOString().slice(0, 16)}
+                        />
+                    </div>
+                )}
+              </div>
+              <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Velocidade de Envio</label>
-                <select className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option>Imediato</option>
-                  <option>Lento (1 email / 5 seg)</option>
-                  <option>Muito Lento (1 email / 15 seg)</option>
+                <select value={sendDelay} onChange={e => setSendDelay(Number(e.target.value))} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                  <option value={200}>Muito Rápido (5/seg)</option>
+                  <option value={500}>Rápido (2/seg)</option>
+                  <option value={2000}>Lento (1/2 seg)</option>
+                  <option value={5000}>Muito Lento (1/5 seg)</option>
                 </select>
               </div>
               <button 
@@ -424,18 +577,34 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
                 <th className="px-4 py-3">Assunto</th>
                 <th className="px-4 py-3">Grupo</th>
                 <th className="px-4 py-3 text-center">Destinatários</th>
+                <th className="px-4 py-3 text-center">Estado</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {history.map(item => (
-                <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{new Date(item.sent_at).toLocaleString('pt-PT')}</td>
-                  <td className="px-4 py-3 font-medium text-slate-700">{item.subject}</td>
-                  <td className="px-4 py-3 text-xs">{item.group_name}</td>
-                  <td className="px-4 py-3 text-center font-bold">{item.recipient_count}</td>
-                </tr>
-              ))}
-              {history.length === 0 && ( <tr><td colSpan={4} className="text-center italic text-slate-400 py-10">Nenhuma campanha enviada ainda.</td></tr> )}
+              {history.map(item => {
+                const isScheduled = item.status === 'Agendada' && item.scheduled_at;
+                const displayDate = isScheduled ? new Date(item.scheduled_at) : new Date(item.sent_at);
+
+                return (
+                  <tr key={item.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{displayDate.toLocaleString('pt-PT')}</td>
+                    <td className="px-4 py-3 font-medium text-slate-700">{item.subject}</td>
+                    <td className="px-4 py-3 text-xs">{item.group_name}</td>
+                    <td className="px-4 py-3 text-center font-bold">{item.recipient_count}</td>
+                    <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full ${
+                            isScheduled ? 'bg-yellow-100 text-yellow-700' 
+                            : item.status.includes('falhas') ? 'bg-red-100 text-red-700' 
+                            : 'bg-green-100 text-green-700'
+                        }`}>
+                            {isScheduled ? <Clock size={12} /> : <CheckCircle size={12} />}
+                            {item.status}
+                        </span>
+                    </td>
+                  </tr>
+                )
+              })}
+              {history.length === 0 && ( <tr><td colSpan={5} className="text-center italic text-slate-400 py-10">Nenhuma campanha enviada ainda.</td></tr> )}
             </tbody>
           </table>
         </div>
@@ -450,12 +619,17 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
               <button onClick={() => setIsTemplateModalOpen(false)}><X size={20} /></button>
             </div>
             <form onSubmit={handleSaveTemplate} className="space-y-4">
-              <div className="flex gap-4 items-end">
+              <div className="flex gap-4 items-center">
                 <div className="flex-1">
                   <label className="block text-xs font-bold text-slate-500 mb-1">Nome do Template</label>
                   <input type="text" required value={editingTemplate.name || ''} onChange={e => setEditingTemplate({...editingTemplate, name: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
                 </div>
-                <button type="button" onClick={() => setIsAiModalOpen(true)} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700">
+                {/* Placeholder for approval workflow */}
+                <div className="text-xs mt-5">
+                    <span className="font-bold text-slate-400">Estado:</span>
+                    <span className="ml-1 bg-yellow-100 text-yellow-700 font-bold px-2 py-1 rounded-full">Rascunho</span>
+                </div>
+                <button type="button" onClick={() => setIsAiModalOpen(true)} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 mt-5">
                   <BrainCircuit size={16} /> Assistente IA
                 </button>
               </div>
@@ -484,6 +658,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
               </div>
               <div className="flex justify-end gap-3 pt-4">
                 <button type="button" onClick={() => setIsTemplateModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">Cancelar</button>
+                <button type="button" disabled title="Funcionalidade de aprovação futura" className="bg-gray-300 text-white px-4 py-2 rounded-lg text-sm font-bold cursor-not-allowed">Aprovar</button>
                 <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
                   <Save size={16} /> Salvar Template
                 </button>
@@ -520,6 +695,120 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Campaign Result Modal */}
+      {campaignResult && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold">Resultado da Campanha</h3>
+                <button onClick={() => setCampaignResult(null)}><X size={20} /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-center mb-4">
+                <div className="bg-green-50 p-4 rounded-lg">
+                <p className="text-xs font-bold uppercase text-green-700">Sucessos</p>
+                <p className="text-2xl font-bold">{campaignResult.successCount}</p>
+                </div>
+                <div className="bg-red-50 p-4 rounded-lg">
+                <p className="text-xs font-bold uppercase text-red-700">Falhas</p>
+                <p className="text-2xl font-bold">{campaignResult.errorCount}</p>
+                </div>
+            </div>
+            <div className="max-h-80 overflow-y-auto border rounded-lg custom-scrollbar">
+                <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50">
+                    <tr>
+                    <th className="p-2 text-left">Destinatário</th>
+                    <th className="p-2 text-left">Email</th>
+                    <th className="p-2 text-center">Estado</th>
+                    <th className="p-2 text-left">Detalhe</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {campaignResult.details.map((detail, i) => (
+                    <tr key={i} className={detail.status === 'error' ? 'bg-red-50/50' : ''}>
+                        <td className="p-2 font-medium">{detail.name}</td>
+                        <td className="p-2 text-slate-500">{detail.email}</td>
+                        <td className={`p-2 text-center font-bold ${detail.status === 'success' ? 'text-green-600' : 'text-red-600'}`}>{detail.status === 'success' ? 'Enviado' : 'Falhou'}</td>
+                        <td className="p-2 text-red-500 italic">{detail.error}</td>
+                    </tr>
+                    ))}
+                </tbody>
+                </table>
+            </div>
+            <div className="text-right mt-4"><button onClick={() => setCampaignResult(null)} className="bg-slate-700 text-white px-6 py-2 rounded-lg font-bold">Fechar</button></div>
+            </div>
+        </div>
+      )}
+
+      {/* Recipient Selection Modal */}
+      {isRecipientModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl flex flex-col max-h-[80vh]">
+                <div className="p-6 border-b flex justify-between items-center">
+                    <h3 className="text-xl font-bold">Selecionar Destinatários</h3>
+                    <button onClick={() => setIsRecipientModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                </div>
+                
+                <div className="p-4 border-b">
+                    <div className="relative">
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input 
+                            type="text"
+                            placeholder="Pesquisar por nome ou email..."
+                            value={recipientSearch}
+                            onChange={e => setRecipientSearch(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                    <div className="flex justify-between items-center mb-2 px-2">
+                        <p className="text-xs font-bold text-slate-500">{selectedRecipients.length} de {filteredRecipients.length} selecionados</p>
+                        <button
+                            onClick={() => {
+                                const allVisibleIds = filteredRecipients.map(c => c.id);
+                                const allVisibleSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => selectedRecipients.includes(id));
+
+                                if (allVisibleSelected) {
+                                    setSelectedRecipients(prev => prev.filter(id => !allVisibleIds.includes(id)));
+                                } else {
+                                    setSelectedRecipients(prev => Array.from(new Set([...prev, ...allVisibleIds])));
+                                }
+                            }}
+                            className="text-xs font-medium text-blue-600 hover:underline"
+                        >
+                            {filteredRecipients.length > 0 && filteredRecipients.every(c => selectedRecipients.includes(c.id)) ? 'Desselecionar Visíveis' : 'Selecionar Visíveis'}
+                        </button>
+                    </div>
+                    <div className="border rounded-lg bg-slate-50/50 p-2 space-y-1">
+                        {filteredRecipients.map(client => (
+                            <label key={client.id} className="flex items-center gap-3 p-2 rounded hover:bg-slate-100 cursor-pointer text-sm">
+                                <input 
+                                    type="checkbox" 
+                                    className="rounded h-4 w-4 text-blue-600 focus:ring-blue-500"
+                                    checked={selectedRecipients.includes(client.id)}
+                                    onChange={() => {
+                                        setSelectedRecipients(prev => 
+                                            prev.includes(client.id) ? prev.filter(id => id !== client.id) : [...prev, client.id]
+                                        );
+                                    }}
+                                />
+                                <div>
+                                    <span className="font-medium text-slate-800">{client.name}</span>
+                                    <span className="text-xs text-slate-400 ml-2">{client.email}</span>
+                                </div>
+                            </label>
+                        ))}
+                        {filteredRecipients.length === 0 && <p className="text-center text-slate-400 italic py-4">Nenhum cliente encontrado.</p>}
+                    </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={() => setIsRecipientModalOpen(false)} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">Confirmar Seleção</button></div>
+            </div>
         </div>
       )}
     </div>
