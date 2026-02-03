@@ -217,7 +217,23 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
           )}
           <div className="text-right">
              <p className="text-xs text-slate-400">Responsável Principal</p>
-             <p className="font-bold text-slate-700">{responsibleStaffName}</p>
+             <div className="flex items-center justify-end gap-2">
+             <select
+               value={(editedClient.responsibleStaff && editedClient.responsibleStaff.includes('-')) ? editedClient.responsibleStaff : ''}
+               onChange={(e) => {
+                 const v = e.target.value;
+                 setEditedClient({ ...editedClient, responsibleStaff: v ? v : '' });
+                 setIsDirty(true);
+               }}
+               className="border border-slate-200 rounded px-2 py-1 text-sm font-semibold text-slate-700 bg-white"
+             >
+               <option value="">Não atribuído</option>
+               {staff.map((s) => (
+                 <option key={s.id} value={s.id}>{s.name}</option>
+               ))}
+             </select>
+             {isDirty && <span className="text-xs text-amber-600 font-medium">por gravar</span>}
+           </div>
           </div>
         </div>
       </div>
