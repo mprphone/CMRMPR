@@ -1,83 +1,83 @@
 import { Client, AnalysisResult, AiAnalysis, AiTemplateAnalysis } from "../types";
-import { ensureStoreClient } from './supabase';
+import { ensureStoreClient } from "./supabase";
 
 /**
- * IMPORTANT:
- * Many Supabase Edge Functions run with JWT verification ON by default.
- * If you invoke them from the browser without setting the Authorization token,
- * you will get 401 / "Invalid JWT" and the function won't even execute.
+ * Sets the Authorization token for Supabase Edge Functions IF a session exists.
  *
- * This helper mirrors what you already do in "send test email":
- * - getSession()
- * - functions.setAuth(access_token)
+ * Why optional?
+ * - If your Edge Functions are configured with verify_jwt = true, you need a valid session/JWT.
+ * - If verify_jwt = false, you can call them without a session, so we shouldn't block the user.
  */
-async function ensureFunctionAuth(storeClient: any) {
-  // Se existir sessão autenticada, envia o JWT; se não existir, continua.
-  // Para funcionar sem sessão, configure a Edge Function com verify_jwt = false.
+async function setFunctionsAuthIfSessionExists(storeClient: any) {
   try {
     const { data: { session } } = await storeClient.auth.getSession();
     if (session?.access_token) {
       storeClient.functions.setAuth(session.access_token);
     }
-  } catch (_) { /* ignore */ }
-}
-  storeClient.functions.setAuth(session.access_token);
+  } catch {
+    // ignore: we'll attempt the call without JWT
+  }
 }
 
-export const analyzeClientWithAI = async (client: Client, analysis: AnalysisResult): Promise<AiAnalysis> => {
+export const analyzeClientWithAI = async (
+  client: Client,
+  analysis: AnalysisResult
+): Promise<AiAnalysis> => {
   const storeClient = ensureStoreClient();
 
-  try {
-    await ensureFunctionAuth(storeClient);
+  await setFunctionsAuthIfSessionExists(storeClient);
 
-    const { data, error } = await storeClient.functions.invoke('analyze-client', {
-      body: { client, analysis },
-    });
+  const { data, error } = await storeClient.functions.invoke("analyze-client", {
+    body: { client, analysis },
+  });
 
-    if (error) {
-      console.error("Erro na Edge Function 'analyze-client':", error);
-      if (error.context && typeof (error.context as any).json === 'function') {
-        const functionError = await (error.context as any).json().catch(() => null);
-        if (functionError?.error) throw new Error(functionError.error);
-        if (functionError?.message) throw new Error(functionError.message);
-      }
-      throw new Error("A função de análise de cliente falhou no servidor. Verifique os logs da Edge Function.");
+  if (error) {
+    console.error("Erro na Edge Function 'analyze-client':", error);
+
+    // Try to surface function error body when available
+    if (error.context && typeof (error.context as any).json === "function") {
+      const functionError = await (error.context as any).json().catch(() => null);
+      if (functionError?.error) throw new Error(functionError.error);
+      if (functionError?.message) throw new Error(functionError.message);
     }
 
-    if (!data) throw new Error("A função de análise de cliente retornou uma resposta vazia.");
-
-    return data as AiAnalysis;
-  } catch (err: any) {
-    console.error("AI analyze error:", err);
-    throw err;
+    throw new Error(
+      "A função de análise de cliente falhou no servidor. Verifique os logs da Edge Function."
+    );
   }
+
+  if (!data) throw new Error("A função de análise de cliente retornou uma resposta vazia.");
+
+  return data as AiAnalysis;
 };
 
-export const generateTemplateWithAI = async (topic: string, tone: string): Promise<AiTemplateAnalysis> => {
+export const generateTemplateWithAI = async (
+  topic: string,
+  tone: string
+): Promise<AiTemplateAnalysis> => {
   const storeClient = ensureStoreClient();
 
-  try {
-    await ensureFunctionAuth(storeClient);
+  await setFunctionsAuthIfSessionExists(storeClient);
 
-    const { data, error } = await storeClient.functions.invoke('generate-email', {
-      body: { topic, tone },
-    });
+  const { data, error } = await storeClient.functions.invoke("generate-email", {
+    body: { topic, tone },
+  });
 
-    if (error) {
-      console.error("Erro na Edge Function 'generate-email':", error);
-      if (error.context && typeof (error.context as any).json === 'function') {
-        const functionError = await (error.context as any).json().catch(() => null);
-        if (functionError?.error) throw new Error(functionError.error);
-        if (functionError?.message) throw new Error(functionError.message);
-      }
-      throw new Error("A função de geração de email falhou no servidor. Verifique os logs da Edge Function.");
+  if (error) {
+    console.error("Erro na Edge Function 'generate-email':", error);
+
+    if (error.context && typeof (error.context as any).json === "function") {
+      const functionError = await (error.context as any).json().catch(() => null);
+      if (functionError?.error) throw new Error(functionError.error);
+      if (functionError?.message) throw new Error(functionError.message);
     }
 
-    if (!data) throw new Error("A função de geração de email retornou uma resposta vazia.");
-
-    return data as AiTemplateAnalysis;
-  } catch (err: any) {
-    console.error("AI template generation error:", err);
-    throw err;
+    throw new Error(
+      "A função de geração de email falhou no servidor. Verifique os logs da Edge Function."
+    );
   }
+
+  if (!data) throw new Error("A função de geração de email retornou uma resposta vazia.");
+
+  return data as AiTemplateAnalysis;
 };
