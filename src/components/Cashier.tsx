@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Client, FeeGroup, CashPayment, CashOperation } from '../types';
 import { cashPaymentService, cashOperationService } from '../services/supabase';
-import { Landmark, Check, X, Save, RefreshCcw, Printer, ArrowLeft, DollarSign, Banknote, Download, History, CreditCard } from 'lucide-react';
+import { Landmark, Check, X, Save, RefreshCcw, Printer, ArrowLeft, DollarSign, Banknote, Download, History, CreditCard, Plus } from 'lucide-react';
 
 interface CashierProps {
   clients: Client[];
@@ -22,10 +22,13 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const [paymentMode, setPaymentMode] = useState<'Numerário' | 'MB Way'>('Numerário');
   const [activeReport, setActiveReport] = useState<CashOperation | null>(null);
 
+  // New state for session expenses
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [newExpense, setNewExpense] = useState<{ amount: string; description: string }>({ amount: '', description: '' });
+  const [sessionExpenses, setSessionExpenses] = useState<{ id: string; amount: number; description: string }[]>([]);
+
   // Form state for closing the register
   const [depositAmount, setDepositAmount] = useState('');
-  const [spentAmount, setSpentAmount] = useState('');
-  const [spentDescription, setSpentDescription] = useState('');
   const [mbWayDepositAmount, setMbWayDepositAmount] = useState('');
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
 
@@ -81,9 +84,9 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     return { cashInHand: cashTotal, mbWayInHand: mbWayTotal };
   }, [cashPayments, pendingChanges]);
 
-  const totalPendingPayments = useMemo(() => {
-    return cashInHand + mbWayInHand;
-  }, [cashPayments, pendingChanges]);
+  const totalSessionExpenses = useMemo(() => {
+    return sessionExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+  }, [sessionExpenses]);
 
   const handlePaymentToggle = (client: Client, month: number) => {
     const changeKey = `${client.id}-${currentYear}-${month + 1}`;
@@ -143,6 +146,21 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     };
   }, [pendingChanges, handleSaveChanges]);
 
+  const handleAddExpense = () => {
+    const amount = parseFloat(newExpense.amount);
+    if (!amount || amount <= 0 || !newExpense.description) {
+      alert("Por favor, preencha um valor e uma descrição válidos para a saída de caixa.");
+      return;
+    }
+    setSessionExpenses(prev => [...prev, { id: crypto.randomUUID(), amount, description: newExpense.description }]);
+    setIsExpenseModalOpen(false);
+    setNewExpense({ amount: '', description: '' });
+  };
+
+  const handleRemoveExpense = (id: string) => {
+    setSessionExpenses(prev => prev.filter(exp => exp.id !== id));
+  };
+
   const handleCloseRegister = async () => {
     let paymentsForProcessing = cashPayments;
     if (pendingChanges.size > 0) {
@@ -156,8 +174,8 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     }
     // Collect ALL payments that are not yet processed, regardless of method
     const allPaymentsToProcess = paymentsForProcessing.filter(p => !p.cashOperationId);
-    if (allPaymentsToProcess.length === 0) {
-      alert('Não há pagamentos pendentes para processar.');
+    if (allPaymentsToProcess.length === 0 && sessionExpenses.length === 0) {
+      alert('Não há pagamentos ou saídas de caixa pendentes para processar.');
       return;
     }
 
@@ -165,7 +183,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     const totalNumerarioToProcess = numerarioPaymentsToProcess.reduce((sum, p) => sum + p.amountPaid, 0);
 
     const deposit = parseFloat(depositAmount) || 0;
-    const spent = parseFloat(spentAmount) || 0;
+    const spent = totalSessionExpenses;
     const adjustment = parseFloat(adjustmentAmount) || 0;
     const mbWayDeposit = parseFloat(mbWayDepositAmount) || 0;
 
@@ -194,8 +212,8 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
     const newOperation: Partial<CashOperation> = {
       depositedAmount: deposit,
-      spentAmount: spent,
-      spentDescription: spentDescription,
+      spentAmount: spent, // Use calculated total
+      spentDescription: sessionExpenses.map(e => `${e.description}: ${e.amount.toFixed(2)}€`).join('; '), // Generate description
       mbWayDepositedAmount: mbWayDeposit,
       adjustmentAmount: adjustment,
       reportDetails: Array.from(reportDetailsMap.values()),
@@ -213,10 +231,9 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setView('report');
       // Reset form
       setDepositAmount('');
-      setSpentAmount('');
-      setSpentDescription('');
       setMbWayDepositAmount('');
       setAdjustmentAmount('');
+      setSessionExpenses([]); // Clear session expenses
     } catch (err: any) {
       alert('Erro ao fechar a caixa: ' + err.message);
     } finally {
@@ -393,6 +410,41 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         </div>
       </div>
 
+      {/* Session Expenses Section */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2"><DollarSign size={18} /> Saídas de Caixa (Sessão Atual)</h3>
+          <button onClick={() => setIsExpenseModalOpen(true)} className="bg-orange-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-orange-600 font-bold text-sm">
+            <Plus size={16} /> Adicionar Saída
+          </button>
+        </div>
+        <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+          {sessionExpenses.length === 0 ? (
+            <p className="text-sm text-slate-400 italic text-center py-4">Nenhuma saída de caixa nesta sessão.</p>
+          ) : (
+            sessionExpenses.map(exp => (
+              <div key={exp.id} className="flex justify-between items-center bg-slate-50 p-2 rounded-lg">
+                <div className="text-sm">
+                  <span className="font-medium text-slate-700">{exp.description}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-bold text-orange-600">{exp.amount.toFixed(2)}€</span>
+                  <button onClick={() => handleRemoveExpense(exp.id)} className="text-slate-400 hover:text-red-500">
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        {sessionExpenses.length > 0 && (
+          <div className="mt-4 border-t pt-3 flex justify-end font-bold">
+            <span className="text-sm text-slate-500 mr-2">Total de Saídas:</span>
+            <span className="text-slate-800">{totalSessionExpenses.toFixed(2)}€</span>
+          </div>
+        )}
+      </div>
+
       {/* Close Register Section */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Download size={18} /> Fechar Caixa e Gerar Relatório</h3>
@@ -406,24 +458,61 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
             <input type="number" value={mbWayDepositAmount} onChange={e => setMbWayDepositAmount(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><DollarSign size={14}/> Gastos de Caixa (€)</label>
-            <input type="number" value={spentAmount} onChange={e => setSpentAmount(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
+            <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><DollarSign size={14} /> Gastos de Caixa (€)</label>
+            <input type="number" value={totalSessionExpenses.toFixed(2)} readOnly className="w-full px-3 py-2 border rounded-lg text-sm bg-slate-100 text-slate-500" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">Acertos (+/- €)</label>
             <input type="number" value={adjustmentAmount} onChange={e => setAdjustmentAmount(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
           </div>
-          <div className="md:col-span-4">
-            <label className="block text-xs font-bold text-slate-500 mb-1">Descrição dos Gastos/Acertos</label>
-            <input type="text" value={spentDescription} onChange={e => setSpentDescription(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Ex: Pagamento de despesas diversas" />
-          </div>
           <div className="md:col-span-4 text-right">
-            <button onClick={handleCloseRegister} disabled={isSaving || totalPendingPayments === 0} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50 ml-auto">
+            <button onClick={handleCloseRegister} disabled={isSaving || (cashInHand + mbWayInHand === 0 && sessionExpenses.length === 0)} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50 ml-auto">
               {isSaving ? <RefreshCcw size={18} className="animate-spin" /> : <Check size={18} />} Finalizar e Gerar Relatório
             </button>
           </div>
         </div>
       </div>
+
+      {/* Expense Modal */}
+      {isExpenseModalOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Nova Saída de Caixa</h3>
+              <button type="button" onClick={() => setIsExpenseModalOpen(false)}><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Valor (€)</label>
+                <input 
+                  type="number" 
+                  value={newExpense.amount} 
+                  onChange={e => setNewExpense(prev => ({ ...prev, amount: e.target.value }))} 
+                  className="w-full px-3 py-2 border rounded-lg text-sm" 
+                  placeholder="0.00" 
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Descrição</label>
+                <input 
+                  type="text" 
+                  value={newExpense.description} 
+                  onChange={e => setNewExpense(prev => ({ ...prev, description: e.target.value }))} 
+                  className="w-full px-3 py-2 border rounded-lg text-sm" 
+                  placeholder="Ex: Material de escritório" 
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-6">
+              <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">Cancelar</button>
+              <button onClick={handleAddExpense} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
+                <Save size={16} /> Adicionar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
