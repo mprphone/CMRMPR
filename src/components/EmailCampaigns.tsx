@@ -174,8 +174,27 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
 
     setIsSending(true);
     setValidationIssues([]); // Clear issues on send
-    
+
+    // Ensure Supabase session/auth is set for Edge Functions (prevents Invalid JWT / 401)
+    try {
+      if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
+      const { data: { session }, error: sessionErr } = await storeClient.auth.getSession();
+      if (sessionErr) throw sessionErr;
+      if (!session) throw new Error("Sessão inválida ou expirada. Faça login novamente.");
+      storeClient.functions.setAuth(session.access_token);
+    } catch (authErr: any) {
+      alert(authErr?.message || "Sessão inválida ou expirada. Faça login novamente.");
+      setIsSending(false);
+      return;
+    }
+
     const recipients = clients.filter(c => selectedRecipients.includes(c.id));
+    const invalidEmails = recipients.filter(c => !c.email || !c.email.includes('@'));
+    if (invalidEmails.length) {
+      alert(`Existem ${invalidEmails.length} destinatário(s) sem email válido. Corrija antes de enviar.`);
+      setIsSending(false);
+      return;
+    }
     let successCount = 0;
     let errorCount = 0;
     const campaignLogs: { name: string; email: string; status: 'success' | 'error'; error?: string }[] = [];
@@ -213,7 +232,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
           if (funcError && funcError.error) detailedError = funcError.error;
         }
 
-        if (detailedError.includes('Invalid JWT')) {
+        if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
           alert("A sua sessão expirou ou é inválida. A campanha foi interrompida. Por favor, recarregue a página e tente novamente.");
           jwtError = true;
           break; // Stop campaign on auth error
@@ -311,6 +330,11 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     try {
       if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
 
+      // Garante que o token de autenticação está atualizado
+      const { data: { session } } = await storeClient.auth.getSession();
+      if (!session) throw new Error("Sessão inválida ou expirada. Faça login novamente.");
+      storeClient.functions.setAuth(session.access_token);
+
       const { error } = await storeClient.functions.invoke('send-email', {
         body: { to: 'mpr@mpr.pt', from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: testSubject, html: finalHtml },
       });
@@ -323,7 +347,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
         if (functionError && functionError.error) detailedError = functionError.error;
         else if (functionError && functionError.message) detailedError = functionError.message;
       }
-      if (detailedError.includes('Invalid JWT')) {
+      if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
         alert("A sua sessão expirou ou é inválida. Por favor, recarregue a página e tente novamente.");
       } else {
         alert(`Erro ao enviar email de teste: ${detailedError}`);

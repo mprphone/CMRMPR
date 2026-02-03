@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Client, Staff, Task, TurnoverBracket, ClientTaskOverride, TaskArea, AiAnalysis, InsurancePolicy } from '../types';
 import { calculateClientProfitability } from '../services/calculator';
 import { analyzeClientWithAI } from '../services/geminiService';
+import { ensureStoreClient } from '../services/supabase';
 import { 
   ArrowLeft, BrainCircuit, Activity, Building, University, Wallet, AlertCircle, CheckCircle, Phone, MapPin, FileText, Plus, Trash2, Save, User, Clock, Users, RefreshCcw, BadgeEuro, Shield,
   FileCheck, Receipt, BarChart3, Building2, Target, Globe, MessageSquare, PieChart, Presentation, TrendingUp
@@ -116,6 +117,11 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
       responsibleStaff: responsibleStaffName
     };
     try {
+        const storeClient = ensureStoreClient();
+        const { data: { session } } = await storeClient.auth.getSession();
+        if (!session) throw new Error("Sessão inválida ou expirada. Faça login novamente.");
+        storeClient.functions.setAuth(session.access_token);
+
         const advice = await analyzeClientWithAI(clientForAI, stats);
         setAiAnalysis(advice);
         setEditedClient(prev => ({ ...prev, aiAnalysisCache: advice }));
@@ -127,7 +133,11 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
             if (functionError && functionError.error) detailedError = functionError.error;
             else if (functionError && functionError.message) detailedError = functionError.message;
         }
-        alert("Falha na IA: " + detailedError + "\n\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
+        if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
+            alert("A sua sessão expirou. Por favor, recarregue a página e tente novamente.");
+        } else {
+            alert("Falha na IA: " + detailedError + "\n\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
+        }
         console.error(err);
     } finally {
         setIsLoadingAi(false);
