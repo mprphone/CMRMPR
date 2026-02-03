@@ -94,6 +94,7 @@ const mapClientToDb = (c: Client) => ({
   status: c.status,
   sector: c.sector,
   responsavel_interno_id: (c.responsibleStaff && c.responsibleStaff.includes('-')) ? c.responsibleStaff : null,
+      responsavel_action: ((c as any).responsibleStaffAction as string) || (c.responsibleStaff ? 'set' : 'clear'),
   monthly_fee: c.monthlyFee,
   employee_count: c.employeeCount,
   establishments: c.establishments,

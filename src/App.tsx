@@ -214,31 +214,49 @@ export default function App() {
       const externalClients = await clientService.importExternalClients();
       console.log("DEBUG: Clientes importados (primeiros 3):", externalClients.slice(0, 3));
       if (externalClients.length > 0) {
-        // Map responsible staff name (from import) to staff ID (for destination)
-        const unmatchedNames = new Set<string>();
+        // Map responsible staff from import to staff ID (ONLY when it's a valid staff UUID).
+        // Rules:
+        // - If import has empty responsible -> CLEAR (null)
+        // - If import has a valid staff UUID that exists -> SET (uuid)
+        // - If import has something else (name/code) -> KEEP existing (do not overwrite)
+        const unmatchedRefs = new Set<string>();
         const clientsWithStaffId = externalClients.map(client => {
-          const responsibleIdFromClient = client.responsibleStaff || '';
-          
-          // The responsibleStaff field from the import is an ID. We match it against the imported staff's ID.
-          const responsible = externalStaff.find(s => 
-            s.id === responsibleIdFromClient
-          );
+          const rawResponsible = (client.responsibleStaff || '').trim();
 
-          if (!responsible && responsibleIdFromClient) {
-            unmatchedNames.add(responsibleIdFromClient); // This will now log unmatched IDs
+          // Decide action
+          let responsibleStaffAction: 'set' | 'clear' | 'keep' = 'keep';
+          let responsibleStaff: string = client.responsibleStaff || '';
+
+          if (!rawResponsible) {
+            responsibleStaffAction = 'clear';
+            responsibleStaff = '';
+          } else {
+            // Import provides an ID; only accept if it matches a staff member we imported
+            const responsible = externalStaff.find(s => s.id === rawResponsible);
+            if (responsible) {
+              responsibleStaffAction = 'set';
+              responsibleStaff = responsible.id;
+            } else {
+              // Non-empty but not a known UUID -> do not overwrite
+              responsibleStaffAction = 'keep';
+              unmatchedRefs.add(rawResponsible);
+              // Keep whatever was there, but action 'keep' ensures DB won't overwrite
+              responsibleStaff = rawResponsible;
+            }
           }
 
           return {
             ...client,
-            // Overwrite the name with the ID for the upsert operation
-            responsibleStaff: responsible ? responsible.id : '' 
-          };
+            responsibleStaff,
+            // Extra field consumed by clientService.bulkUpsert (not used elsewhere)
+            responsibleStaffAction
+          } as any;
         });
         await clientService.bulkUpsert(clientsWithStaffId);
 
         let successMessage = `Sucesso! ${externalClients.length} clientes processados.`;
         if (unmatchedNames.size > 0) {
-          successMessage += ` Atenção: os seguintes responsáveis não foram encontrados e não foram atualizados: ${Array.from(unmatchedNames).join(', ')}`;
+          successMessage += ` Atenção: os seguintes responsáveis vindos da origem não foram reconhecidos e foram ignorados (mantive o responsável atual no CRM): ${Array.from(unmatchedNames).join(', ')}`;
         }
         setSyncSuccess(successMessage);
         setTimeout(() => setSyncSuccess(null), 15000); // Longer timeout to read the message
