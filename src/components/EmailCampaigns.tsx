@@ -174,19 +174,14 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
 
     setIsSending(true);
     setValidationIssues([]); // Clear issues on send
-
-    // Ensure Supabase session/auth is set for Edge Functions (prevents Invalid JWT / 401)
+    // (Opcional) Se existir sessão autenticada, envia o JWT para a Edge Function.
+    // Se não houver sessão (app sem Auth), a função deve estar com verify_jwt=false.
     try {
-      if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
-      const { data: { session }, error: sessionErr } = await storeClient.auth.getSession();
-      if (sessionErr) throw sessionErr;
-      if (!session) throw new Error("Sessão inválida ou expirada. Faça login novamente.");
-      storeClient.functions.setAuth(session.access_token);
-    } catch (authErr: any) {
-      alert(authErr?.message || "Sessão inválida ou expirada. Faça login novamente.");
-      setIsSending(false);
-      return;
-    }
+      if (storeClient) {
+        const { data: { session } } = await storeClient.auth.getSession();
+        if (session?.access_token) storeClient.functions.setAuth(session.access_token);
+      }
+    } catch (_) { /* ignore */ }
 
     const recipients = clients.filter(c => selectedRecipients.includes(c.id));
     const invalidEmails = recipients.filter(c => !c.email || !c.email.includes('@'));
@@ -330,10 +325,12 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     try {
       if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
 
-      // Garante que o token de autenticação está atualizado
+      // (Opcional) Se existir sessão autenticada, envia o JWT para a Edge Function.
+      // Se não houver sessão (app sem Auth), a função deve estar com verify_jwt=false.
       const { data: { session } } = await storeClient.auth.getSession();
-      if (!session) throw new Error("Sessão inválida ou expirada. Faça login novamente.");
-      storeClient.functions.setAuth(session.access_token);
+      if (session?.access_token) {
+        storeClient.functions.setAuth(session.access_token);
+      }
 
       const { error } = await storeClient.functions.invoke('send-email', {
         body: { to: 'mpr@mpr.pt', from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: testSubject, html: finalHtml },

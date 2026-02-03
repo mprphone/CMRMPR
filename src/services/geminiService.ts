@@ -12,10 +12,15 @@ import { ensureStoreClient } from './supabase';
  * - functions.setAuth(access_token)
  */
 async function ensureFunctionAuth(storeClient: any) {
-  const { data: { session }, error } = await storeClient.auth.getSession();
-  if (error || !session?.access_token) {
-    throw new Error("Sessão inválida ou expirada. Faça login novamente e recarregue a página.");
-  }
+  // Se existir sessão autenticada, envia o JWT; se não existir, continua.
+  // Para funcionar sem sessão, configure a Edge Function com verify_jwt = false.
+  try {
+    const { data: { session } } = await storeClient.auth.getSession();
+    if (session?.access_token) {
+      storeClient.functions.setAuth(session.access_token);
+    }
+  } catch (_) { /* ignore */ }
+}
   storeClient.functions.setAuth(session.access_token);
 }
 
