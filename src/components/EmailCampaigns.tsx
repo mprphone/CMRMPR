@@ -90,11 +90,16 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
       const result = await generateTemplateWithAI(aiTopic, aiTone);
       setEditingTemplate(prev => ({ ...prev, subject: result.subject, body: result.body }));
     } catch (err: any) {
-      const errorMessage = err.message || "Ocorreu um erro desconhecido.";
-      if (errorMessage.includes('Invalid JWT')) {
+      let detailedError = err.message;
+      if (err.context && typeof err.context.json === 'function') {
+        const functionError = await err.context.json().catch(() => null);
+        if (functionError && functionError.error) detailedError = functionError.error;
+        else if (functionError && functionError.message) detailedError = functionError.message;
+      }
+      if (detailedError.includes('Invalid JWT')) {
           alert("A sua sessão expirou. Por favor, recarregue a página e tente novamente.");
       } else {
-        alert("Falha na IA: " + errorMessage + "\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
+        alert("Falha na IA: " + detailedError + "\n\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
       }
       console.error(err);
     } finally {

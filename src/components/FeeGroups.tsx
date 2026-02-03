@@ -217,11 +217,17 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
       const updatedClients = clients.map(c => c.id === client.id ? updatedClientWithAI : c);
       setClients(updatedClients);
     } catch (err: any) {
-      const errorMessage = err.message || "Ocorreu um erro desconhecido.";
-      if (errorMessage.includes('Invalid JWT')) {
+      let detailedError = err.message;
+      if (err.context && typeof err.context.json === 'function') {
+        const functionError = await err.context.json().catch(() => null);
+        if (functionError && functionError.error) detailedError = functionError.error;
+        else if (functionError && functionError.message) detailedError = functionError.message;
+      }
+
+      if (detailedError.includes('Invalid JWT')) {
           alert("A sua sessão expirou. Por favor, recarregue a página e tente novamente.");
       } else {
-          alert("Erro ao contactar a IA: " + errorMessage);
+          alert("Erro ao contactar a IA: " + detailedError);
       }
       console.error(err);
     } finally {

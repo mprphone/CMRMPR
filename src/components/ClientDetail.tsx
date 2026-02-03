@@ -121,7 +121,13 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
         setEditedClient(prev => ({ ...prev, aiAnalysisCache: advice }));
         setIsDirty(true);
     } catch (err: any) {
-        alert("Falha na IA: " + err.message + "\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
+        let detailedError = err.message;
+        if (err.context && typeof err.context.json === 'function') {
+            const functionError = await err.context.json().catch(() => null);
+            if (functionError && functionError.error) detailedError = functionError.error;
+            else if (functionError && functionError.message) detailedError = functionError.message;
+        }
+        alert("Falha na IA: " + detailedError + "\n\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
         console.error(err);
     } finally {
         setIsLoadingAi(false);
