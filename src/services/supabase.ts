@@ -94,8 +94,7 @@ const mapClientToDb = (c: Client) => ({
   status: c.status,
   sector: c.sector,
   responsavel_interno_id: (c.responsibleStaff && c.responsibleStaff.includes('-')) ? c.responsibleStaff : null,
-      responsavel_action: ((c as any).responsibleStaffAction as string) || (c.responsibleStaff ? 'set' : 'clear'),
-  monthly_fee: c.monthlyFee,
+monthly_fee: c.monthlyFee,
   employee_count: c.employeeCount,
   establishments: c.establishments,
   banks: c.banks,
@@ -173,7 +172,8 @@ export const clientService = {
       entity_type: c.entityType || 'SOCIEDADE',
       sector: c.sector || 'Geral',
       status: c.status || 'Ativo',
-      responsavel_interno_id: (c.responsibleStaff && c.responsibleStaff.includes('-')) ? c.responsibleStaff : null
+      responsavel_interno_id: (c.responsibleStaff && c.responsibleStaff.includes('-')) ? c.responsibleStaff : null,
+      responsavel_action: ((c as any).responsibleStaffAction as string) || 'keep'
     }));
 
     const { error } = await storeClient.rpc('bulk_upsert_clients', { clients_data: clientsToUpsert });
