@@ -70,7 +70,20 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     );
   }, [availableRecipients, recipientSearch]);
 
-  const handleTemplateChange = (templateId: string) => {
+  
+  const getFailureCountFromStatus = (status: string) => {
+    const m = status.match(/(\d+)\s*falhas?/i);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+
+  const getRecipientIdsForGroup = (groupId: string) => {
+    if (groupId === 'all') return clients.map(c => c.id);
+    const group = groups.find(g => g.id === groupId);
+    if (!group) return [];
+    return clients.filter(c => group.clientIds.includes(c.id)).map(c => c.id);
+  };
+
+const handleTemplateChange = (templateId: string) => {
     const template = templates.find(t => t.id === templateId);
     if (template) {
       setSelectedTemplateId(templateId);
@@ -87,6 +100,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
 
     setIsGenerating(true);
     try {
+      // A autenticação é agora gerida centralmente em geminiService.ts
       const result = await generateTemplateWithAI(aiTopic, aiTone);
       setEditingTemplate(prev => ({ ...prev, subject: result.subject, body: result.body }));
     } catch (err: any) {
@@ -518,8 +532,10 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
               <select
                 value={selectedGroupId}
                 onChange={e => {
-                  setSelectedGroupId(e.target.value);
-                  setSelectedRecipients([]); // Reset selection on group change
+                  const newGroupId = e.target.value;
+                  setSelectedGroupId(newGroupId);
+                  setSelectedRecipients(getRecipientIdsForGroup(newGroupId)); // Pré-seleciona todos do grupo
+                  setRecipientSearch(''); // limpa pesquisa do modal
                 }}
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
               >
@@ -610,6 +626,8 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
               {history.map(item => {
                 const isScheduled = item.status === 'Agendada' && item.scheduled_at;
                 const displayDate = isScheduled ? new Date(item.scheduled_at) : new Date(item.sent_at);
+                const failureCount = getFailureCountFromStatus(item.status);
+                const hasFailures = failureCount > 0;
 
                 return (
                   <tr key={item.id} className="hover:bg-slate-50">
@@ -620,10 +638,10 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
                     <td className="px-4 py-3 text-center">
                         <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full ${
                             isScheduled ? 'bg-yellow-100 text-yellow-700' 
-                            : item.status.includes('falhas') ? 'bg-red-100 text-red-700' 
+                            : hasFailures ? 'bg-red-100 text-red-700' 
                             : 'bg-green-100 text-green-700'
                         }`}>
-                            {isScheduled ? <Clock size={12} /> : <CheckCircle size={12} />}
+                            {isScheduled ? <Clock size={12} /> : hasFailures ? <AlertCircle size={12} /> : <CheckCircle size={12} />}
                             {item.status}
                         </span>
                     </td>

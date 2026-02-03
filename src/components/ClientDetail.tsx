@@ -117,11 +117,6 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
       responsibleStaff: responsibleStaffName
     };
     try {
-        const storeClient = ensureStoreClient();
-        const { data: { session } } = await storeClient.auth.getSession();
-        if (!session) throw new Error("Sessão inválida ou expirada. Faça login novamente.");
-        storeClient.functions.setAuth(session.access_token);
-
         const advice = await analyzeClientWithAI(clientForAI, stats);
         setAiAnalysis(advice);
         setEditedClient(prev => ({ ...prev, aiAnalysisCache: advice }));

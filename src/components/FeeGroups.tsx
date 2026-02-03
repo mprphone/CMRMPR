@@ -206,11 +206,6 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
   const runAiAnalysis = async (client: Client) => {
     setAnalyzingClientId(client.id);
     try {
-      const storeClient = ensureStoreClient();
-      const { data: { session } } = await storeClient.auth.getSession();
-      if (!session) throw new Error("Sessão inválida ou expirada. Faça login novamente.");
-      storeClient.functions.setAuth(session.access_token);
-
       const stats = calculateClientProfitability(client, tasks, areaCosts as Record<TaskArea, number>, staff, turnoverBrackets);
       const analysisResult = await analyzeClientWithAI(client, stats);    
       const updatedClientWithAI = { ...client, aiAnalysisCache: analysisResult };
