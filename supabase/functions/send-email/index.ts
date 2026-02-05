@@ -39,9 +39,13 @@ function normalizeInnerHtml(inner: string) {
     const lines = inner.split(/\r?\n/).map(l => l.trim());
     const blocks: string[] = [];
     let buf: string[] = [];
+    const formatText = (s: string) => {
+      const escaped = escHtml(s);
+      return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    };
     const flush = () => {
       if (buf.length) {
-        blocks.push(`<p style="margin:0 0 14px 0;">${escHtml(buf.join(" "))}</p>`);
+        blocks.push(`<p style="margin:0 0 14px 0;">${formatText(buf.join(" "))}</p>`);
         buf = [];
       }
     };
@@ -65,15 +69,12 @@ function normalizeInnerHtml(inner: string) {
 function wrapEmailHtml(innerHtml: string) {
   const logoUrl = Deno.env.get("EMAIL_LOGO_URL") || "";
   const brandName = Deno.env.get("EMAIL_BRAND_NAME") || "MPR Negócios";
-  const brandColor = Deno.env.get("EMAIL_BRAND_COLOR") || "#1F4B99"; // professional blue
-  const brandTagline = Deno.env.get("EMAIL_BRAND_TAGLINE") || "";
   const footerHtml = Deno.env.get("EMAIL_FOOTER_HTML") || "";
   const preheader = Deno.env.get("EMAIL_PREHEADER") || "";
 
   const bodyHtml = normalizeInnerHtml(innerHtml);
 
-  // Modern-but-safe: system fonts; larger size; generous line-height; white card; soft UI.
-  // Use table layout for Outlook compatibility.
+  // Clean, classic email layout (no "card"), Outlook-safe.
   return `<!doctype html>
 <html lang="pt">
 <head>
@@ -82,57 +83,37 @@ function wrapEmailHtml(innerHtml: string) {
   <meta name="x-apple-disable-message-reformatting" />
   <title>${escHtml(brandName)}</title>
 </head>
-<body style="margin:0;padding:0;background:#F6F7FB;">
+<body style="margin:0;padding:0;background:#FFFFFF;">
   ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;visibility:hidden;mso-hide:all;">${escHtml(preheader)}</div>` : ""}
 
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#F6F7FB;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#FFFFFF;">
     <tr>
-      <td align="center" style="padding:32px 16px;">
-        <!-- Card -->
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="width:600px;max-width:600px;background:#ffffff;border:1px solid #E5EAF3;border-radius:18px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,0.06);">
-          <!-- Header -->
+      <td align="center" style="padding:26px 14px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="720" style="width:720px;max-width:720px;">
           <tr>
-            <td style="padding:22px 26px;border-bottom:1px solid #EEF2F7;background:#FFFFFF;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
-                <tr>
-                  <td align="left" valign="middle" style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,Helvetica,sans-serif;">
-                    ${logoUrl
-                      ? `<img src="${logoUrl}" alt="${escHtml(brandName)}" width="160" style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:160px;" />`
-                      : `<div style="font-size:18px;font-weight:700;color:#0F172A;letter-spacing:0.2px;">${escHtml(brandName)}</div>`}
-                    ${brandTagline ? `<div style="margin-top:4px;font-size:11px;letter-spacing:0.6px;text-transform:uppercase;color:#64748B;">${escHtml(brandTagline)}</div>` : ""}
-                  </td>
-                </tr>
-              </table>
+            <td style="padding:2px 0 14px 0;font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#111827;">
+              ${logoUrl
+                ? `<img src="${logoUrl}" alt="${escHtml(brandName)}" width="140" style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:140px;" />`
+                : `<div style="font-size:16px;font-weight:700;color:#0F172A;">${escHtml(brandName)}</div>`}
             </td>
           </tr>
-
-          <!-- Accent bar -->
           <tr>
-            <td style="height:3px;background:${brandColor};font-size:0;line-height:0;">&nbsp;</td>
-          </tr>
-
-          <!-- Content -->
-          <tr>
-            <td style="padding:30px 30px 14px 30px;">
-              <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,Helvetica,sans-serif;font-size:16px;line-height:1.8;color:#0F172A;">
-                ${bodyHtml}
-              </div>
+            <td style="font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:#111827;">
+              ${bodyHtml}
             </td>
           </tr>
-
-          <!-- Footer -->
+          ${footerHtml ? `
           <tr>
-            <td style="padding:18px 30px 22px 30px;border-top:1px solid #EEF2F7;background:#F8FAFF;">
-              <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#64748B;">
-                ${footerHtml || ""}
-              </div>
+            <td style="padding-top:16px;font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#6B7280;">
+              ${footerHtml}
+            </td>
+          </tr>` : ""}
+          <tr>
+            <td style="padding-top:12px;font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:11px;color:#9CA3AF;">
+              Se não visualizar corretamente, responda a este email.
             </td>
           </tr>
         </table>
-
-        <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,Helvetica,sans-serif;font-size:11px;color:#94A3B8;margin-top:12px;">
-          Se não visualizar corretamente, responda a este email.
-        </div>
       </td>
     </tr>
   </table>
