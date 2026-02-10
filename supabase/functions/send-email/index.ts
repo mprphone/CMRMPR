@@ -68,13 +68,13 @@ function normalizeInnerHtml(inner: string) {
 
 function wrapEmailHtml(innerHtml: string) {
   const logoUrl = Deno.env.get("EMAIL_LOGO_URL") || "";
-  const brandName = Deno.env.get("EMAIL_BRAND_NAME") || "MPR Negócios";
+  const brandName = Deno.env.get("EMAIL_BRAND_NAME") || "MPR Negocios";
   const footerHtml = Deno.env.get("EMAIL_FOOTER_HTML") || "";
   const preheader = Deno.env.get("EMAIL_PREHEADER") || "";
 
   const bodyHtml = normalizeInnerHtml(innerHtml);
 
-  // Clean, classic email layout (no "card"), Outlook-safe.
+  // Minimal, left-aligned layout (no centered container/card).
   return `<!doctype html>
 <html lang="pt">
 <head>
@@ -83,44 +83,18 @@ function wrapEmailHtml(innerHtml: string) {
   <meta name="x-apple-disable-message-reformatting" />
   <title>${escHtml(brandName)}</title>
 </head>
-<body style="margin:0;padding:0;background:#FFFFFF;">
+<body style="margin:0;padding:20px 18px;background:#FFFFFF;">
   ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;visibility:hidden;mso-hide:all;">${escHtml(preheader)}</div>` : ""}
-
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#FFFFFF;">
-    <tr>
-      <td align="center" style="padding:26px 14px;">
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="720" style="width:720px;max-width:720px;">
-          <tr>
-            <td style="padding:2px 0 14px 0;font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#111827;">
-              ${logoUrl
-                ? `<img src="${logoUrl}" alt="${escHtml(brandName)}" width="140" style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:140px;" />`
-                : `<div style="font-size:16px;font-weight:700;color:#0F172A;">${escHtml(brandName)}</div>`}
-            </td>
-          </tr>
-          <tr>
-            <td style="font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:#111827;">
-              ${bodyHtml}
-            </td>
-          </tr>
-          ${footerHtml ? `
-          <tr>
-            <td style="padding-top:16px;font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#6B7280;">
-              ${footerHtml}
-            </td>
-          </tr>` : ""}
-          <tr>
-            <td style="padding-top:12px;font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:11px;color:#9CA3AF;">
-              Se não visualizar corretamente, responda a este email.
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
+  <div style="font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:#111827;">
+    ${logoUrl
+      ? `<div style="margin:0 0 12px 0;"><img src="${logoUrl}" alt="${escHtml(brandName)}" width="140" style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:140px;" /></div>`
+      : `<div style="margin:0 0 12px 0;font-size:16px;font-weight:700;color:#0F172A;">${escHtml(brandName)}</div>`}
+    ${bodyHtml}
+    ${footerHtml ? `<div style="margin-top:16px;font-size:12px;line-height:1.6;color:#6B7280;">${footerHtml}</div>` : ""}
+  </div>
 </body>
 </html>`;
 }
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });

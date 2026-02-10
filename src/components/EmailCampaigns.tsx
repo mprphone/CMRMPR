@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Client, FeeGroup, Staff, EmailTemplate, CampaignHistory, GlobalSettings, CampaignRecipientResult } from '../types';
 import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2, Search, CheckCircle, AlertCircle, Clock, Bold, FileText } from 'lucide-react';
 import { generateTemplateWithAI } from '../services/geminiService';
@@ -291,13 +291,13 @@ const handleTemplateChange = (templateId: string) => {
 
   const handleAiAssist = async () => {
     if (!aiTopic) {
-      alert("Por favor, insira um tÃ³pico para o email.");
+      alert("Por favor, insira um tópico para o email.");
       return;
     }
 
     setIsGenerating(true);
     try {
-      // A autenticaÃ§Ã£o Ã© agora gerida centralmente em geminiService.ts
+      // A autenticação é agora gerida centralmente em geminiService.ts
       const result = await generateTemplateWithAI(aiTopic, aiTone);
       setEditingTemplate(prev => ({ ...prev, subject: result.subject, body: result.body }));
     } catch (err: any) {
@@ -308,7 +308,7 @@ const handleTemplateChange = (templateId: string) => {
         else if (functionError && functionError.message) detailedError = functionError.message;
       }
       if (detailedError.includes('Invalid JWT')) {
-          alert("A sua sessÃ£o expirou. Por favor, recarregue a pÃ¡gina e tente novamente.");
+          alert("A sua sessão expirou. Por favor, recarregue a página e tente novamente.");
       } else {
         alert("Falha na IA: " + detailedError + "\n\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
       }
@@ -321,11 +321,11 @@ const handleTemplateChange = (templateId: string) => {
 
   const handleSendCampaign = async () => {
     if (selectedRecipients.length === 0) {
-      alert("Selecione pelo menos um destinatÃ¡rio.");
+      alert("Selecione pelo menos um destinatário.");
       return;
     }
     if (!globalSettings.fromEmail || !globalSettings.fromName) {
-      alert("Por favor, configure o seu Nome e Email de Remetente nas ConfiguraÃ§Ãµes.");
+      alert("Por favor, configure o seu Nome e Email de Remetente nas Configurações.");
       return;
     }
 
@@ -337,7 +337,7 @@ const handleTemplateChange = (templateId: string) => {
       }
       const scheduleDate = new Date(scheduleDateTime);
       if (scheduleDate < new Date()) {
-        alert("A data de agendamento nÃ£o pode ser no passado.");
+        alert("A data de agendamento não pode ser no passado.");
         return;
       }
       if (!confirm(`Tem a certeza que deseja agendar esta campanha para ${scheduleDate.toLocaleString('pt-PT')} para ${selectedRecipients.length} cliente(s)?`)) {
@@ -385,8 +385,8 @@ const handleTemplateChange = (templateId: string) => {
 
     setIsSending(true);
     setValidationIssues([]); // Clear issues on send
-    // (Opcional) Se existir sessÃ£o autenticada, envia o JWT para a Edge Function.
-    // Se nÃ£o houver sessÃ£o (app sem Auth), a funÃ§Ã£o deve estar com verify_jwt=false.
+    // (Opcional) Se existir sessão autenticada, envia o JWT para a Edge Function.
+    // Se não houver sessão (app sem Auth), a função deve estar com verify_jwt=false.
     try {
       if (storeClient) {
         const { data: { session } } = await storeClient.auth.getSession();
@@ -399,7 +399,7 @@ const handleTemplateChange = (templateId: string) => {
     const proposedFees = selectedGroup?.proposed_fees || {};
     const invalidEmails = recipients.filter(c => !c.email || !c.email.includes('@'));
     if (invalidEmails.length) {
-      alert(`Existem ${invalidEmails.length} destinatÃ¡rio(s) sem email vÃ¡lido. Corrija antes de enviar.`);
+      alert(`Existem ${invalidEmails.length} destinatário(s) sem email válido. Corrija antes de enviar.`);
       setIsSending(false);
       return;
     }
@@ -407,7 +407,7 @@ const handleTemplateChange = (templateId: string) => {
     if (needsNovaAvenca) {
       const missing = recipients.filter(c => proposedFees[c.id] === undefined || proposedFees[c.id] === null);
       if (missing.length) {
-        alert(`Existem ${missing.length} destinatÃ¡rio(s) sem valor de nova avenÃ§a definido neste grupo. Atualize as novas avenÃ§as antes de enviar.`);
+        alert(`Existem ${missing.length} destinatário(s) sem valor de nova avença definido neste grupo. Atualize as novas avenças antes de enviar.`);
         setIsSending(false);
         return;
       }
@@ -430,7 +430,7 @@ const handleTemplateChange = (templateId: string) => {
       let finalBody = applyTemplateVars(body, client, responsibleName, novaAvenca);
 
       try {
-        if (!storeClient) throw new Error("Cliente Supabase nÃ£o inicializado.");
+        if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
         
         const finalHtml = buildCampaignEmailHtml(finalBody, globalSettings.emailSignature || '');
 
@@ -449,8 +449,8 @@ const handleTemplateChange = (templateId: string) => {
           if (funcError && funcError.error) detailedError = funcError.error;
         }
 
-        if (detailedError.includes('Invalid JWT') || detailedError.includes('SessÃ£o invÃ¡lida')) {
-          alert("A sua sessÃ£o expirou ou Ã© invÃ¡lida. A campanha foi interrompida. Por favor, recarregue a pÃ¡gina e tente novamente.");
+        if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
+          alert("A sua sessão expirou ou é inválida. A campanha foi interrompida. Por favor, recarregue a página e tente novamente.");
           jwtError = true;
           break; // Stop campaign on auth error
         }
@@ -486,7 +486,7 @@ const handleTemplateChange = (templateId: string) => {
       // and save each entry from `campaignLogs` here, linked to `savedRecord.id`.
       setHistory([savedRecord, ...history]);
     } catch (err: any) {
-      alert("Falha ao gravar o histÃ³rico da campanha: " + err.message);
+      alert("Falha ao gravar o histórico da campanha: " + err.message);
     }
 
     setCampaignResult({ successCount, errorCount, details: campaignLogs });
@@ -495,11 +495,11 @@ const handleTemplateChange = (templateId: string) => {
 
   const handleSendTestEmail = async () => {
     if (availableRecipients.length === 0) {
-      alert("NÃ£o hÃ¡ clientes na lista de destinatÃ¡rios para usar como exemplo.");
+      alert("Não há clientes na lista de destinatários para usar como exemplo.");
       return;
     }
     if (!globalSettings.fromEmail || !globalSettings.fromName) {
-      alert("Por favor, configure o seu Nome e Email de Remetente nas ConfiguraÃ§Ãµes.");
+      alert("Por favor, configure o seu Nome e Email de Remetente nas Configurações.");
       return;
     }
 
@@ -509,7 +509,7 @@ const handleTemplateChange = (templateId: string) => {
     if (testClient.responsibleStaff) {
       if (testClient.responsibleStaff.includes('-')) { // It's a UUID
         const staffMember = staff.find(s => s.id === testClient.responsibleStaff);
-        responsibleName = staffMember ? staffMember.name : 'ResponsÃ¡vel Desconhecido';
+        responsibleName = staffMember ? staffMember.name : 'Responsável Desconhecido';
       } else { // It's a name
         responsibleName = testClient.responsibleStaff;
       }
@@ -529,16 +529,16 @@ const handleTemplateChange = (templateId: string) => {
 
     const finalHtml = buildCampaignEmailHtml(testBody, globalSettings.emailSignature || '');
 
-    const confirmationMessage = `Isto irÃ¡ enviar um email de teste REAL para 'mpr@mpr.pt' a partir de '${globalSettings.fromEmail}'.\n\nAssunto: ${testSubject}\n\nDeseja continuar?`;
+    const confirmationMessage = `Isto irá enviar um email de teste REAL para 'mpr@mpr.pt' a partir de '${globalSettings.fromEmail}'.\n\nAssunto: ${testSubject}\n\nDeseja continuar?`;
 
     if (!confirm(confirmationMessage)) return;
 
     setIsSending(true);
     try {
-      if (!storeClient) throw new Error("Cliente Supabase nÃ£o inicializado.");
+      if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
 
-      // (Opcional) Se existir sessÃ£o autenticada, envia o JWT para a Edge Function.
-      // Se nÃ£o houver sessÃ£o (app sem Auth), a funÃ§Ã£o deve estar com verify_jwt=false.
+      // (Opcional) Se existir sessão autenticada, envia o JWT para a Edge Function.
+      // Se não houver sessão (app sem Auth), a função deve estar com verify_jwt=false.
       const { data: { session } } = await storeClient.auth.getSession();
       if (session?.access_token) {
         storeClient.functions.setAuth(session.access_token);
@@ -556,8 +556,8 @@ const handleTemplateChange = (templateId: string) => {
         if (functionError && functionError.error) detailedError = functionError.error;
         else if (functionError && functionError.message) detailedError = functionError.message;
       }
-      if (detailedError.includes('Invalid JWT') || detailedError.includes('SessÃ£o invÃ¡lida')) {
-        alert("A sua sessÃ£o expirou ou Ã© invÃ¡lida. Por favor, recarregue a pÃ¡gina e tente novamente.");
+      if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
+        alert("A sua sessão expirou ou é inválida. Por favor, recarregue a página e tente novamente.");
       } else {
         alert(`Erro ao enviar email de teste: ${detailedError}`);
       }
@@ -570,7 +570,7 @@ const handleTemplateChange = (templateId: string) => {
   const handleSaveTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTemplate || !editingTemplate.name) {
-      alert("O nome do template Ã© obrigatÃ³rio.");
+      alert("O nome do template é obrigatório.");
       return;
     }
 
@@ -609,7 +609,7 @@ const handleTemplateChange = (templateId: string) => {
       alert("Nenhum template selecionado para apagar.");
       return;
     }
-    if (confirm("Tem a certeza que deseja apagar este template? Esta aÃ§Ã£o nÃ£o pode ser desfeita.")) {
+    if (confirm("Tem a certeza que deseja apagar este template? Esta ação não pode ser desfeita.")) {
       try {
         await templateService.delete(selectedTemplateId);
         const updatedTemplates = templates.filter(t => t.id !== selectedTemplateId);
@@ -638,12 +638,12 @@ const handleTemplateChange = (templateId: string) => {
     variablesFound.forEach(variable => {
         const varName = variable.replace(/{{|}}/g, '');
         if (!allVariables.includes(varName as any)) {
-            issues.push(`A variÃ¡vel ${variable} nÃ£o Ã© reconhecida.`);
+            issues.push(`A variável ${variable} não é reconhecida.`);
         }
     });
 
     if (issues.length === 0) {
-        alert("Nenhum problema encontrado. As variÃ¡veis parecem estar corretas.");
+        alert("Nenhum problema encontrado. As variáveis parecem estar corretas.");
     }
     setValidationIssues(issues);
   };
@@ -653,7 +653,7 @@ const handleTemplateChange = (templateId: string) => {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Campanhas de Email</h2>
-          <p className="text-sm text-slate-500">Crie, personalize e envie comunicaÃ§Ãµes para os seus clientes.</p>
+          <p className="text-sm text-slate-500">Crie, personalize e envie comunicações para os seus clientes.</p>
         </div>
       </div>
 
@@ -716,7 +716,7 @@ const handleTemplateChange = (templateId: string) => {
             />
             <div className="flex justify-between items-start mt-2">
               <div className="text-xs text-slate-500">
-                <span className="font-bold">VariÃ¡veis disponÃ­veis:</span>
+                <span className="font-bold">Variáveis disponíveis:</span>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {allVariables.map(variable => (
                     <code key={variable} className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-md font-mono">{`{{${variable}}}`}</code>
@@ -724,7 +724,7 @@ const handleTemplateChange = (templateId: string) => {
                 </div>
               </div>
               <button onClick={validateCurrentTemplate} className="text-xs font-bold bg-slate-100 text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-2">
-                <CheckCircle size={14}/> Verificar VariÃ¡veis
+                <CheckCircle size={14}/> Verificar Variáveis
               </button>
             </div>
             {validationIssues.length > 0 && (
@@ -741,7 +741,7 @@ const handleTemplateChange = (templateId: string) => {
         {/* Settings & Recipients Column */}
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Users size={18} /> DestinatÃ¡rios</h3>
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Users size={18} /> Destinatários</h3>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Enviar para o Grupo:</label>
               <select
@@ -749,7 +749,7 @@ const handleTemplateChange = (templateId: string) => {
                 onChange={e => {
                   const newGroupId = e.target.value;
                   setSelectedGroupId(newGroupId);
-                  setSelectedRecipients(getRecipientIdsForGroup(newGroupId)); // PrÃ©-seleciona todos do grupo
+                  setSelectedRecipients(getRecipientIdsForGroup(newGroupId)); // Pré-seleciona todos do grupo
                   setRecipientSearch(''); // limpa pesquisa do modal
                 }}
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
@@ -761,7 +761,7 @@ const handleTemplateChange = (templateId: string) => {
             <div className="mt-4 border-t pt-4">
                 <div className="flex justify-between items-center">
                     <p className="text-sm">
-                        <span className="font-bold text-blue-600">{selectedRecipients.length}</span> destinatÃ¡rio(s) selecionado(s) de <span className="font-bold">{availableRecipients.length}</span>
+                        <span className="font-bold text-blue-600">{selectedRecipients.length}</span> destinatário(s) selecionado(s) de <span className="font-bold">{availableRecipients.length}</span>
                     </p>
                     <button onClick={() => setIsRecipientModalOpen(true)} className="bg-blue-50 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-100">
                         Selecionar
@@ -795,8 +795,8 @@ const handleTemplateChange = (templateId: string) => {
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Velocidade de Envio</label>
                 <select value={sendDelay} onChange={e => setSendDelay(Number(e.target.value))} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option value={200}>Muito RÃ¡pido (5/seg)</option>
-                  <option value={500}>RÃ¡pido (2/seg)</option>
+                  <option value={200}>Muito Rápido (5/seg)</option>
+                  <option value={500}>Rápido (2/seg)</option>
                   <option value={2000}>Lento (1/2 seg)</option>
                   <option value={5000}>Muito Lento (1/5 seg)</option>
                 </select>
@@ -814,7 +814,7 @@ const handleTemplateChange = (templateId: string) => {
                 className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-black transition-all flex justify-center items-center gap-2 disabled:opacity-50"
               >
                 {isSending ? <RefreshCcw size={18} className="animate-spin" /> : <Send size={18} />}
-                {isSending ? 'A Enviar...' : `Enviar Campanha para ${selectedRecipients.length} DestinatÃ¡rios`}
+                {isSending ? 'A Enviar...' : `Enviar Campanha para ${selectedRecipients.length} Destinatários`}
               </button>
             </div>
           </div>
@@ -824,7 +824,7 @@ const handleTemplateChange = (templateId: string) => {
       {/* History Section */}
       <div className="mt-8 bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <History size={18} /> HistÃ³rico de Campanhas Enviadas
+          <History size={18} /> Histórico de Campanhas Enviadas
         </h3>
         <div className="overflow-x-auto max-h-96 custom-scrollbar">
           <table className="w-full text-sm text-left">
@@ -833,7 +833,7 @@ const handleTemplateChange = (templateId: string) => {
                 <th className="px-4 py-3">Data</th>
                 <th className="px-4 py-3">Assunto</th>
                 <th className="px-4 py-3">Grupo</th>
-                <th className="px-4 py-3 text-center">DestinatÃ¡rios</th>
+                <th className="px-4 py-3 text-center">Destinatários</th>
                 <th className="px-4 py-3 text-center">Estado</th>
               </tr>
             </thead>
@@ -858,7 +858,7 @@ const handleTemplateChange = (templateId: string) => {
                           type="button"
                           disabled={!isSentCampaign}
                           onClick={() => isSentCampaign && setSelectedHistoryCampaign(item)}
-                          title={!isSentCampaign ? 'Apenas campanhas enviadas tÃªm detalhe.' : hasDetails ? 'Ver detalhe dos destinatÃ¡rios' : 'Campanha sem detalhe guardado'}
+                          title={!isSentCampaign ? 'Apenas campanhas enviadas têm detalhe.' : hasDetails ? 'Ver detalhe dos destinatários' : 'Campanha sem detalhe guardado'}
                           className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full transition-colors ${
                             isScheduled ? 'bg-yellow-100 text-yellow-700' 
                             : hasFailures ? 'bg-red-100 text-red-700' 
@@ -930,7 +930,7 @@ const handleTemplateChange = (templateId: string) => {
                   className="w-full px-3 py-2 border rounded-lg text-sm h-40 font-mono"
                 />
                 <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Caixa de VariÃ¡veis (clique para inserir)</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Caixa de Variáveis (clique para inserir)</p>
                   <div className="flex flex-wrap gap-1">
                     {allVariables.map(variable => (
                       <button
@@ -947,7 +947,7 @@ const handleTemplateChange = (templateId: string) => {
               </div>
               <div className="flex justify-end gap-3 pt-4">
                 <button type="button" onClick={() => setIsTemplateModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">Cancelar</button>
-                <button type="button" disabled title="Funcionalidade de aprovaÃ§Ã£o futura" className="bg-gray-300 text-white px-4 py-2 rounded-lg text-sm font-bold cursor-not-allowed">Aprovar</button>
+                <button type="button" disabled title="Funcionalidade de aprovação futura" className="bg-gray-300 text-white px-4 py-2 rounded-lg text-sm font-bold cursor-not-allowed">Aprovar</button>
                 <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
                   <Save size={16} /> Salvar Template
                 </button>
@@ -964,11 +964,11 @@ const handleTemplateChange = (templateId: string) => {
             <h3 className="text-lg font-bold mb-4">Assistente IA para Templates</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">TÃ³pico do Email</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Tópico do Email</label>
                 <input type="text" value={aiTopic} onChange={e => setAiTopic(e.target.value)} placeholder="Ex: Lembrete sobre o IES" className="w-full px-3 py-2 border rounded-lg text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Tom de ComunicaÃ§Ã£o</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Tom de Comunicação</label>
                 <select value={aiTone} onChange={e => setAiTone(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                   <option>Profissional</option>
                   <option>Informal</option>
@@ -980,7 +980,7 @@ const handleTemplateChange = (templateId: string) => {
             <div className="flex justify-end gap-3 pt-6">
               <button onClick={() => setIsAiModalOpen(false)} className="px-4 py-2 text-slate-600">Cancelar</button>
               <button onClick={handleAiAssist} disabled={isGenerating} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50">
-                {isGenerating ? <RefreshCcw size={16} className="animate-spin" /> : <BrainCircuit size={16} />} Gerar ConteÃºdo
+                {isGenerating ? <RefreshCcw size={16} className="animate-spin" /> : <BrainCircuit size={16} />} Gerar Conteúdo
               </button>
             </div>
           </div>
@@ -1009,7 +1009,7 @@ const handleTemplateChange = (templateId: string) => {
                 <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-slate-50">
                     <tr>
-                    <th className="p-2 text-left">DestinatÃ¡rio</th>
+                    <th className="p-2 text-left">Destinatário</th>
                     <th className="p-2 text-left">Email</th>
                     <th className="p-2 text-center">Estado</th>
                     <th className="p-2 text-left">Detalhe</th>
@@ -1066,7 +1066,7 @@ const handleTemplateChange = (templateId: string) => {
                     <table className="w-full text-xs">
                       <thead className="sticky top-0 bg-slate-50">
                         <tr>
-                          <th className="p-2 text-left">DestinatÃ¡rio</th>
+                          <th className="p-2 text-left">Destinatário</th>
                           <th className="p-2 text-left">Email</th>
                           <th className="p-2 text-center">Estado</th>
                           <th className="p-2 text-left">Detalhe</th>
@@ -1089,7 +1089,7 @@ const handleTemplateChange = (templateId: string) => {
                 </>
               ) : (
                 <div className="border rounded-lg p-8 text-center text-sm text-slate-500 italic">
-                  Esta campanha nÃ£o tem detalhe por destinatÃ¡rio guardado.
+                  Esta campanha não tem detalhe por destinatário guardado.
                 </div>
               )}
 
@@ -1106,7 +1106,7 @@ const handleTemplateChange = (templateId: string) => {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl flex flex-col max-h-[80vh]">
                 <div className="p-6 border-b flex justify-between items-center">
-                    <h3 className="text-xl font-bold">Selecionar DestinatÃ¡rios</h3>
+                    <h3 className="text-xl font-bold">Selecionar Destinatários</h3>
                     <button onClick={() => setIsRecipientModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
                 </div>
                 
@@ -1139,7 +1139,7 @@ const handleTemplateChange = (templateId: string) => {
                             }}
                             className="text-xs font-medium text-blue-600 hover:underline"
                         >
-                            {filteredRecipients.length > 0 && filteredRecipients.every(c => selectedRecipients.includes(c.id)) ? 'Desselecionar VisÃ­veis' : 'Selecionar VisÃ­veis'}
+                            {filteredRecipients.length > 0 && filteredRecipients.every(c => selectedRecipients.includes(c.id)) ? 'Desselecionar Visíveis' : 'Selecionar Visíveis'}
                         </button>
                     </div>
                     <div className="border rounded-lg bg-slate-50/50 p-2 space-y-1">
@@ -1165,7 +1165,7 @@ const handleTemplateChange = (templateId: string) => {
                     </div>
                 </div>
 
-                <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={() => setIsRecipientModalOpen(false)} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">Confirmar SeleÃ§Ã£o</button></div>
+                <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={() => setIsRecipientModalOpen(false)} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">Confirmar Seleção</button></div>
             </div>
         </div>
       )}

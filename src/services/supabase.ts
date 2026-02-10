@@ -500,9 +500,16 @@ export const campaignHistoryService = {
     const storeClient = ensureStoreClient();
     let { data, error } = await storeClient.from('email_campaign_history').insert(campaign).select().single();
 
-    // Backward compatibility for DBs that still don't have recipient_results.
-    if (error && campaign && 'recipient_results' in campaign && /recipient_results/i.test(error.message || '')) {
-      const { recipient_results, ...fallbackPayload } = campaign as any;
+    // Backward compatibility for DBs where optional history columns do not exist yet.
+    const schemaColumnError = /could not find .* column .* in the schema cache|column .* does not exist/i;
+    if (error && campaign && schemaColumnError.test(error.message || '')) {
+      const fallbackPayload: any = { ...campaign };
+      delete fallbackPayload.recipient_results;
+      delete fallbackPayload.recipient_ids;
+      delete fallbackPayload.scheduled_at;
+      delete fallbackPayload.send_delay;
+      delete fallbackPayload.template_id;
+
       const retry = await storeClient.from('email_campaign_history').insert(fallbackPayload).select().single();
       data = retry.data;
       error = retry.error;
