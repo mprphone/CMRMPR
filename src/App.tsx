@@ -14,10 +14,10 @@ import Login from './components/Login';
 import FeeGroups from './components/FeeGroups';
 import { DEFAULT_TASKS, DEFAULT_AREA_COSTS, DEFAULT_TURNOVER_BRACKETS, DEFAULT_STAFF } from './constants';
 import { 
-  Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashOperation
+  Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation
 } from './types';
 import { 
-  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashOperationService
+  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService
 } from './services/supabase';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Insurance from './components/Insurance';
@@ -60,6 +60,7 @@ export default function App() {
   const [insurancePolicies, setInsurancePolicies] = useState<InsurancePolicy[]>([]);
   const [workSafetyServices, setWorkSafetyServices] = useState<WorkSafetyService[]>([]);
   const [cashPayments, setCashPayments] = useState<CashPayment[]>([]);
+  const [cashAgreements, setCashAgreements] = useState<CashAgreement[]>([]);
   const [cashOperations, setCashOperations] = useState<CashOperation[]>([]);
   const [logo, setLogo] = useState(() => localStorage.getItem('appLogo') || '');
 
@@ -140,6 +141,7 @@ export default function App() {
     const shtPromise = workSafetyService.getAll().catch(e => { console.error("Erro SHT:", e); return []; });
     const bracketsPromise = turnoverBracketService.getAll().catch(e => { console.error("Erro Patamares:", e); return []; });
     const cashPaymentsPromise = cashPaymentService.getAll().catch(e => { console.error("Erro Pagamentos Caixa:", e); return []; });
+    const cashAgreementsPromise = cashAgreementService.getAll().catch(e => { console.error("Erro Acordos Caixa:", e); return []; });
     const cashOperationsPromise = cashOperationService.getAll().catch(e => { console.error("Erro Operações Caixa:", e); return []; });
 
     const [
@@ -153,11 +155,12 @@ export default function App() {
       shtData,
       bracketsData,
       cashPaymentsData,
+      cashAgreementsData,
       cashOperationsData
     ] = await Promise.all([
       clientsPromise, staffPromise, groupsPromise, templatesPromise, 
       campaignHistoryPromise, quoteHistoryPromise, insurancePromise, shtPromise, bracketsPromise,
-      cashPaymentsPromise, cashOperationsPromise
+      cashPaymentsPromise, cashAgreementsPromise, cashOperationsPromise
     ]);
 
     setClients(clientsData);
@@ -169,6 +172,7 @@ export default function App() {
     setInsurancePolicies(insuranceData);
     setWorkSafetyServices(shtData);
     setCashPayments(cashPaymentsData);
+    setCashAgreements(cashAgreementsData);
     setCashOperations(cashOperationsData);
     setTurnoverBrackets(
       bracketsData.length > 0 ? bracketsData : DEFAULT_TURNOVER_BRACKETS.map(b => ({ ...b, id: generateUUID() }))
@@ -390,6 +394,8 @@ export default function App() {
                   groups={groups}
                   cashPayments={cashPayments}
                   setCashPayments={setCashPayments}
+                  cashAgreements={cashAgreements}
+                  setCashAgreements={setCashAgreements}
                   cashOperations={cashOperations}
                   setCashOperations={setCashOperations}
                 />

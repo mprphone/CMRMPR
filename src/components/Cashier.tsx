@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Client, FeeGroup, CashPayment, CashOperation } from '../types';
-import { cashPaymentService, cashOperationService } from '../services/supabase';
+import { Client, FeeGroup, CashPayment, CashAgreement, CashOperation } from '../types';
+import { cashPaymentService, cashAgreementService, cashOperationService } from '../services/supabase';
 import { Landmark, Check, X, Save, RefreshCcw, Printer, ArrowLeft, DollarSign, Banknote, Download, History, CreditCard, Plus } from 'lucide-react';
 
 interface CashierProps {
@@ -8,13 +8,38 @@ interface CashierProps {
   groups: FeeGroup[];
   cashPayments: CashPayment[];
   setCashPayments: (payments: CashPayment[]) => void;
+  cashAgreements: CashAgreement[];
+  setCashAgreements: React.Dispatch<React.SetStateAction<CashAgreement[]>>;
   cashOperations: CashOperation[];
   setCashOperations: (operations: CashOperation[]) => void;
 }
 
 const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+const vatMultiplier = 1.23;
+interface ClientPaymentPlan {
+  id?: string;
+  clientId: string;
+  year: number;
+  paidUntilMonth: number;
+  monthlyAmount: number;
+  notes: string;
+  called: boolean;
+  letterSent: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
-const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCashPayments, cashOperations, setCashOperations }) => {
+interface PlanFormState {
+  monthlyAmount: string;
+  payUntilMonth: number;
+  notes: string;
+  called: boolean;
+  letterSent: boolean;
+}
+
+const buildPlanKey = (clientId: string, year: number) => `${clientId}-${year}`;
+
+const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCashPayments, cashAgreements, setCashAgreements, cashOperations, setCashOperations }) => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [pendingChanges, setPendingChanges] = useState<Map<string, Partial<CashPayment>>>(new Map());
   const [isSaving, setIsSaving] = useState(false);
@@ -31,6 +56,16 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const [depositAmount, setDepositAmount] = useState('');
   const [mbWayDepositAmount, setMbWayDepositAmount] = useState('');
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [selectedPlanClient, setSelectedPlanClient] = useState<Client | null>(null);
+  const [planForm, setPlanForm] = useState<PlanFormState>({
+    monthlyAmount: '',
+    payUntilMonth: 12,
+    notes: '',
+    called: false,
+    letterSent: false,
+  });
 
   const cashGroup = useMemo(() => groups.find(g => g.name.toLowerCase().includes('pagamento numerário')), [groups]);
   const groupClients = useMemo(() => {
@@ -39,6 +74,51 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       .filter(c => cashGroup.clientIds.includes(c.id))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [clients, cashGroup]);
+
+  const agreementsMap = useMemo(() => {
+    return new Map(
+      cashAgreements
+        .filter(agreement => agreement.agreementYear === currentYear)
+        .map(agreement => [buildPlanKey(agreement.clientId, agreement.agreementYear), agreement])
+    );
+  }, [cashAgreements, currentYear]);
+
+  const getClientPlan = useCallback((clientId: string) => {
+    const agreement = agreementsMap.get(buildPlanKey(clientId, currentYear));
+    if (!agreement) return undefined;
+
+    return {
+      id: agreement.id,
+      clientId: agreement.clientId,
+      year: agreement.agreementYear,
+      paidUntilMonth: agreement.paidUntilMonth,
+      monthlyAmount: agreement.monthlyAmount,
+      notes: agreement.notes,
+      called: agreement.called,
+      letterSent: agreement.letterSent,
+      createdAt: agreement.createdAt,
+      updatedAt: agreement.updatedAt,
+    } as ClientPaymentPlan;
+  }, [agreementsMap, currentYear]);
+
+  const getMonthAmount = useCallback((client: Client, monthNumber: number) => {
+    const plan = getClientPlan(client.id);
+    if (plan && monthNumber <= plan.paidUntilMonth) {
+      return plan.monthlyAmount;
+    }
+    return client.monthlyFee * vatMultiplier;
+  }, [getClientPlan]);
+
+  const plansForCurrentYear = useMemo(() => {
+    return groupClients
+      .map(client => ({ client, plan: getClientPlan(client.id) }))
+      .filter((entry): entry is { client: Client; plan: ClientPaymentPlan } => Boolean(entry.plan));
+  }, [groupClients, getClientPlan]);
+
+  const selectedClientPlan = useMemo(() => {
+    if (!selectedPlanClient) return null;
+    return getClientPlan(selectedPlanClient.id) || null;
+  }, [currentYear, getClientPlan, selectedPlanClient]);
 
   const paymentsMap = useMemo(() => {
     const map = new Map<string, Map<number, CashPayment>>();
@@ -56,6 +136,17 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     });
     return map;
   }, [cashPayments, pendingChanges, currentYear]);
+
+  const consolidatedPayments = useMemo(() => {
+    const map = new Map<string, Partial<CashPayment>>();
+    cashPayments.forEach(payment => {
+      map.set(`${payment.clientId}-${payment.paymentYear}-${payment.paymentMonth}`, payment);
+    });
+    pendingChanges.forEach((change, key) => {
+      map.set(key, change);
+    });
+    return map;
+  }, [cashPayments, pendingChanges]);
 
   const { cashInHand, mbWayInHand } = useMemo(() => {
     let cashTotal = 0;
@@ -82,15 +173,114 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     });
 
     return { cashInHand: cashTotal, mbWayInHand: mbWayTotal };
-  }, [cashPayments, pendingChanges]);
+  }, [consolidatedPayments]);
 
   const totalSessionExpenses = useMemo(() => {
     return sessionExpenses.reduce((sum, exp) => sum + exp.amount, 0);
   }, [sessionExpenses]);
 
+  const agreementDebtByClient = useMemo(() => {
+    const debtMap = new Map<string, { agreedTotal: number; paidTotal: number; debt: number }>();
+
+    groupClients.forEach(client => {
+      const agreement = getClientPlan(client.id);
+      if (!agreement) return;
+
+      const agreedTotal = agreement.monthlyAmount * agreement.paidUntilMonth;
+      let paidTotal = 0;
+
+      for (let month = 1; month <= agreement.paidUntilMonth; month++) {
+        const payment = consolidatedPayments.get(`${client.id}-${currentYear}-${month}`);
+        if (payment && payment.amountPaid !== -1) {
+          paidTotal += payment.amountPaid || 0;
+        }
+      }
+
+      debtMap.set(client.id, {
+        agreedTotal,
+        paidTotal,
+        debt: Math.max(0, agreedTotal - paidTotal),
+      });
+    });
+
+    return debtMap;
+  }, [groupClients, getClientPlan, consolidatedPayments, currentYear]);
+
+  const handleOpenPlanModal = (client: Client) => {
+    const existingPlan = getClientPlan(client.id);
+
+    setSelectedPlanClient(client);
+    setPlanForm({
+      monthlyAmount: existingPlan ? existingPlan.monthlyAmount.toFixed(2) : (client.monthlyFee * vatMultiplier).toFixed(2),
+      payUntilMonth: existingPlan?.paidUntilMonth || 12,
+      notes: existingPlan?.notes || '',
+      called: existingPlan?.called || false,
+      letterSent: existingPlan?.letterSent || false,
+    });
+    setIsPlanModalOpen(true);
+  };
+
+  const handleSavePlan = async () => {
+    if (!selectedPlanClient) return;
+
+    const monthlyAmount = parseFloat(planForm.monthlyAmount);
+    if (!Number.isFinite(monthlyAmount) || monthlyAmount <= 0) {
+      alert('Indique um valor mensal valido para o acordo.');
+      return;
+    }
+
+    const paidUntilMonth = Math.min(12, Math.max(1, Number(planForm.payUntilMonth) || 12));
+    const existingPlan = getClientPlan(selectedPlanClient.id);
+
+    try {
+      setIsSavingPlan(true);
+      const savedAgreement = await cashAgreementService.upsert({
+        id: existingPlan?.id,
+        clientId: selectedPlanClient.id,
+        agreementYear: currentYear,
+        paidUntilMonth,
+        monthlyAmount,
+        notes: planForm.notes.trim(),
+        called: planForm.called,
+        letterSent: planForm.letterSent,
+      });
+
+      setCashAgreements(prev => {
+        const next = prev.filter(a => !(a.clientId === savedAgreement.clientId && a.agreementYear === savedAgreement.agreementYear));
+        return [...next, savedAgreement];
+      });
+
+      setIsPlanModalOpen(false);
+      setSelectedPlanClient(null);
+    } catch (err: any) {
+      alert('Erro ao guardar acordo: ' + err.message);
+    } finally {
+      setIsSavingPlan(false);
+    }
+  };
+
+  const handleRemovePlan = async () => {
+    if (!selectedPlanClient) return;
+    const existingPlan = getClientPlan(selectedPlanClient.id);
+    if (!existingPlan?.id) return;
+
+    try {
+      setIsSavingPlan(true);
+      await cashAgreementService.delete(existingPlan.id);
+      setCashAgreements(prev => prev.filter(a => a.id !== existingPlan.id));
+      setIsPlanModalOpen(false);
+      setSelectedPlanClient(null);
+    } catch (err: any) {
+      alert('Erro ao remover acordo: ' + err.message);
+    } finally {
+      setIsSavingPlan(false);
+    }
+  };
+
   const handlePaymentToggle = (client: Client, month: number) => {
-    const changeKey = `${client.id}-${currentYear}-${month + 1}`;
-    const currentPaymentState = paymentsMap.get(client.id)?.get(month + 1);
+    const monthNumber = month + 1;
+    const changeKey = `${client.id}-${currentYear}-${monthNumber}`;
+    const currentPaymentState = paymentsMap.get(client.id)?.get(monthNumber);
 
     // If it's already processed, do nothing.
     if (currentPaymentState?.cashOperationId) return;
@@ -102,7 +292,16 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setPendingChanges(new Map(pendingChanges.set(changeKey, newChange)));
     } else {
       // It's currently considered pending (either not existing, or marked for deletion). We want to pay it.
-      const newPayment: Partial<CashPayment> = { id: currentPaymentState?.id || crypto.randomUUID(), clientId: client.id, paymentYear: currentYear, paymentMonth: month + 1, amountPaid: client.monthlyFee * 1.23, paidAt: new Date().toISOString(), cashOperationId: null, paymentMethod: paymentMode };
+      const newPayment: Partial<CashPayment> = {
+        id: currentPaymentState?.id || crypto.randomUUID(),
+        clientId: client.id,
+        paymentYear: currentYear,
+        paymentMonth: monthNumber,
+        amountPaid: getMonthAmount(client, monthNumber),
+        paidAt: new Date().toISOString(),
+        cashOperationId: null,
+        paymentMethod: paymentMode
+      };
       setPendingChanges(new Map(pendingChanges.set(changeKey, newPayment)));
     }
   };
@@ -349,6 +548,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                 <option>Numerário</option>
                 <option>MB Way</option>
             </select>
+            <span className="text-xs font-bold text-amber-700">A = Acordo</span>
           </div>
           <button onClick={handleSaveChanges} disabled={isSaving || pendingChanges.size === 0} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm disabled:opacity-50">
             {isSaving ? <RefreshCcw size={16} className="animate-spin" /> : <Save size={16} />} Gravar Pagamentos
@@ -363,51 +563,135 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {groupClients.map(client => (
-                <tr key={client.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-2 font-bold text-slate-700">{client.name}</td>
-                  {months.map((_, index) => {
-                    const payment = paymentsMap.get(client.id)?.get(index + 1);
-                    let status: 'pending' | 'paid_cash' | 'paid_mbway' | 'processed' = 'pending';
-                    if (payment) { // A payment record exists (from DB or pending changes)
-                      if (payment.amountPaid === -1) { // Marked for deletion, so it's pending again
-                        status = 'pending';
-                      } else if (payment.cashOperationId) {
-                        status = 'processed';
-                      } else if (payment.paymentMethod === 'MB Way') {
-                        status = 'paid_mbway';
-                      } else { // Default to cash if method is not specified or is 'Numerário'
-                        status = 'paid_cash';
-                      }
-                    }
-                    const isPendingChange = pendingChanges.has(`${client.id}-${currentYear}-${index + 1}`);
+              {groupClients.map(client => {
+                const clientPlan = getClientPlan(client.id);
+                const debtInfo = agreementDebtByClient.get(client.id);
 
-                    return (
-                      <td key={index} className="p-1 text-center">
+                return (
+                  <tr key={client.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-bold text-slate-700">{client.name}</p>
+                          {clientPlan ? (
+                            <p className="text-[11px] text-slate-500">
+                              Acordo ate {months[clientPlan.paidUntilMonth - 1]} | Mensal {clientPlan.monthlyAmount.toFixed(2)} EUR | Divida {(debtInfo?.debt || 0).toFixed(2)} EUR
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-slate-400">Sem acordo definido</p>
+                          )}
+                        </div>
                         <button
-                          onClick={() => handlePaymentToggle(client, index)}
-                          disabled={status === 'processed'}
-                          className={`w-full h-8 rounded-md text-xs font-bold transition-all
+                          type="button"
+                          onClick={() => handleOpenPlanModal(client)}
+                          className="text-[11px] font-bold text-blue-600 hover:underline whitespace-nowrap"
+                        >
+                          {clientPlan ? 'Editar acordo' : 'Adicionar acordo'}
+                        </button>
+                      </div>
+                    </td>
+                    {months.map((_, index) => {
+                      const monthNumber = index + 1;
+                      const payment = paymentsMap.get(client.id)?.get(monthNumber);
+                      let status: 'pending' | 'agreement' | 'paid_cash' | 'paid_mbway' | 'processed' = 'pending';
+                      if (payment) {
+                        if (payment.amountPaid === -1) {
+                          status = clientPlan && monthNumber <= clientPlan.paidUntilMonth ? 'agreement' : 'pending';
+                        } else if (payment.cashOperationId) {
+                          status = 'processed';
+                        } else if (payment.paymentMethod === 'MB Way') {
+                          status = 'paid_mbway';
+                        } else {
+                          status = 'paid_cash';
+                        }
+                      } else if (clientPlan && monthNumber <= clientPlan.paidUntilMonth) {
+                        status = 'agreement';
+                      }
+
+                      const isPendingChange = pendingChanges.has(`${client.id}-${currentYear}-${monthNumber}`);
+
+                      return (
+                        <td key={index} className="p-1 text-center">
+                          <button
+                            onClick={() => handlePaymentToggle(client, index)}
+                            disabled={status === 'processed'}
+                            className={`w-full h-8 rounded-md text-xs font-bold transition-all
                             ${status === 'paid_cash' ? 'bg-green-500 text-white' : ''}
                             ${status === 'paid_mbway' ? 'bg-blue-500 text-white' : ''}
+                            ${status === 'agreement' ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : ''}
                             ${status === 'pending' ? 'bg-slate-100 text-slate-400 hover:bg-green-200' : ''}
                             ${status === 'processed' ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : ''}
                             ${isPendingChange ? 'ring-2 ring-blue-500' : ''}
                           `}
-                        >
-                          {status === 'paid_cash' && <Check size={14} className="mx-auto" />}
-                          {status === 'paid_mbway' && <CreditCard size={14} className="mx-auto" />}
-                          {status === 'processed' && <Check size={14} className="mx-auto" />}
-                          {status === 'pending' && (client.monthlyFee * 1.23).toFixed(0)}
-                        </button>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                          >
+                            {status === 'paid_cash' && <Check size={14} className="mx-auto" />}
+                            {status === 'paid_mbway' && <CreditCard size={14} className="mx-auto" />}
+                            {status === 'processed' && <Check size={14} className="mx-auto" />}
+                            {status === 'agreement' && 'A'}
+                            {status === 'pending' && getMonthAmount(client, monthNumber).toFixed(0)}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-bold text-slate-800">Acordos e Notas de Cobranca ({currentYear})</h3>
+          <span className="text-xs text-slate-500 font-medium">{plansForCurrentYear.length} acordo(s) ativo(s)</span>
+        </div>
+        {plansForCurrentYear.length === 0 ? (
+          <p className="text-sm text-slate-400 italic text-center py-4">
+            Ainda nao existem acordos definidos para este ano.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+                <tr>
+                  <th className="px-3 py-2 text-left">Cliente</th>
+                  <th className="px-3 py-2 text-right">Valor mensal</th>
+                  <th className="px-3 py-2 text-left">Ate mes</th>
+                  <th className="px-3 py-2 text-right">Divida</th>
+                  <th className="px-3 py-2 text-left">Acompanhamento</th>
+                  <th className="px-3 py-2 text-left">Notas</th>
+                  <th className="px-3 py-2 text-right">Acao</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {plansForCurrentYear.map(({ client, plan }) => (
+                  <tr key={buildPlanKey(client.id, currentYear)} className="hover:bg-slate-50">
+                    <td className="px-3 py-2 font-medium text-slate-700">{client.name}</td>
+                    <td className="px-3 py-2 text-right font-bold text-slate-800">{plan.monthlyAmount.toFixed(2)} EUR</td>
+                    <td className="px-3 py-2">{months[plan.paidUntilMonth - 1]}</td>
+                    <td className="px-3 py-2 text-right font-bold text-orange-600">{(agreementDebtByClient.get(client.id)?.debt || 0).toFixed(2)} EUR</td>
+                    <td className="px-3 py-2 text-xs">
+                      Ligacao: {plan.called ? 'Sim' : 'Nao'} | Carta: {plan.letterSent ? 'Sim' : 'Nao'}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-slate-600 max-w-xs truncate" title={plan.notes || ''}>
+                      {plan.notes || 'Sem notas'}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPlanModal(client)}
+                        className="text-xs font-bold text-blue-600 hover:underline"
+                      >
+                        Editar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Session Expenses Section */}
@@ -473,6 +757,123 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         </div>
       </div>
 
+      {isPlanModalOpen && selectedPlanClient && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-xl font-bold">Acordo de Pagamento e Notas</h3>
+                <p className="text-xs text-slate-500">{selectedPlanClient.name} | Ano {currentYear}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPlanModalOpen(false);
+                  setSelectedPlanClient(null);
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Valor mensal do acordo (EUR)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={planForm.monthlyAmount}
+                  onChange={e => setPlanForm(prev => ({ ...prev, monthlyAmount: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Acordo ate ao mes</label>
+                <select
+                  value={planForm.payUntilMonth}
+                  onChange={e => setPlanForm(prev => ({ ...prev, payUntilMonth: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  {months.map((month, index) => (
+                    <option key={month} value={index + 1}>
+                      {month}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={planForm.called}
+                  onChange={e => setPlanForm(prev => ({ ...prev, called: e.target.checked }))}
+                />
+                Ligamos ao cliente
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={planForm.letterSent}
+                  onChange={e => setPlanForm(prev => ({ ...prev, letterSent: e.target.checked }))}
+                />
+                Carta enviada
+              </label>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-xs font-bold text-slate-500 mb-1">Notas</label>
+              <textarea
+                value={planForm.notes}
+                onChange={e => setPlanForm(prev => ({ ...prev, notes: e.target.value }))}
+                className="w-full min-h-[110px] px-3 py-2 border rounded-lg text-sm"
+                placeholder="Ex: ligacao em 05/02, cliente pediu nova chamada na proxima semana..."
+              />
+            </div>
+
+            <div className="flex justify-between items-center pt-6">
+              <div>
+                {selectedClientPlan && (
+                  <button
+                    type="button"
+                    onClick={handleRemovePlan}
+                    disabled={isSavingPlan}
+                    className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg font-bold"
+                  >
+                    {isSavingPlan ? 'A remover...' : 'Remover acordo'}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPlanModalOpen(false);
+                    setSelectedPlanClient(null);
+                  }}
+                  disabled={isSavingPlan}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePlan}
+                  disabled={isSavingPlan}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSavingPlan ? <RefreshCcw size={16} className="animate-spin" /> : <Save size={16} />}
+                  {isSavingPlan ? 'A guardar...' : 'Guardar acordo'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Expense Modal */}
       {isExpenseModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -518,3 +919,5 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 };
 
 export default Cashier;
+
+

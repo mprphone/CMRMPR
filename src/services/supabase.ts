@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, SupabaseClientOptions } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashOperation } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -368,6 +368,71 @@ export const cashPaymentService = {
   async deleteMany(ids: string[]): Promise<void> {
     const storeClient = ensureStoreClient();
     const { error } = await storeClient.from('cash_payments').delete().in('id', ids);
+    if (error) throw error;
+  }
+};
+
+export const cashAgreementService = {
+  async getAll(): Promise<CashAgreement[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('cash_payment_agreements')
+      .select('*')
+      .order('agreement_year', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map(a => ({
+      id: a.id,
+      clientId: a.client_id,
+      agreementYear: a.agreement_year,
+      paidUntilMonth: a.paid_until_month,
+      monthlyAmount: a.monthly_amount,
+      notes: a.notes || '',
+      called: a.called || false,
+      letterSent: a.letter_sent || false,
+      createdAt: a.created_at,
+      updatedAt: a.updated_at,
+    }));
+  },
+  async upsert(agreement: Partial<CashAgreement>): Promise<CashAgreement> {
+    const storeClient = ensureStoreClient();
+
+    const payload = {
+      id: agreement.id,
+      client_id: agreement.clientId,
+      agreement_year: agreement.agreementYear,
+      paid_until_month: agreement.paidUntilMonth,
+      monthly_amount: agreement.monthlyAmount,
+      notes: agreement.notes || '',
+      called: agreement.called || false,
+      letter_sent: agreement.letterSent || false,
+    };
+
+    const { data, error } = await storeClient
+      .from('cash_payment_agreements')
+      .upsert(payload, { onConflict: 'client_id,agreement_year' })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return {
+      id: data.id,
+      clientId: data.client_id,
+      agreementYear: data.agreement_year,
+      paidUntilMonth: data.paid_until_month,
+      monthlyAmount: data.monthly_amount,
+      notes: data.notes || '',
+      called: data.called || false,
+      letterSent: data.letter_sent || false,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
+  },
+  async delete(id: string): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient.from('cash_payment_agreements').delete().match({ id });
     if (error) throw error;
   }
 };

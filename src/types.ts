@@ -1,4 +1,3 @@
-
 export enum TaskArea {
   CONTABILIDADE = 'Contabilidade',
   RH = 'Recursos Humanos',
@@ -229,6 +228,18 @@ export interface CashPayment {
   cashOperationId: string | null;
 }
 
+export interface CashAgreement {
+  id: string;
+  clientId: string;
+  agreementYear: number;
+  paidUntilMonth: number;
+  monthlyAmount: number;
+  notes: string;
+  called: boolean;
+  letterSent: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
 export interface CashOperation {
   id: string;
   createdAt: string;
@@ -263,3 +274,4 @@ export interface TurnoverBracket {
   minPercent: number;
   maxPercent: number;
 }
+
