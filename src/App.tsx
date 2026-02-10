@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Session } from '@supabase/supabase-js';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -125,24 +125,24 @@ export default function App() {
     setIsLoadingData(true);
 
     if (!storeClient) {
-      alert("Configuração do Servidor de Gestão em falta ou inválida. Verifique as configurações.");
+      alert("ConfiguraÃ§Ã£o do Servidor de GestÃ£o em falta ou invÃ¡lida. Verifique as configuraÃ§Ãµes.");
       setIsLoadingData(false);
       return;
     }
 
-    // Carregamos cada um individualmente para que se um falhar, os outros apareçam
+    // Carregamos cada um individualmente para que se um falhar, os outros apareÃ§am
     const clientsPromise = clientService.getAll().catch(e => { console.error("Erro Clientes:", e); return []; });
     const staffPromise = staffService.getAll().catch(e => { console.error("Erro Staff:", e); return []; });
     const groupsPromise = groupService.getAll().catch(e => { console.error("Erro Grupos:", e); return []; });
     const templatesPromise = templateService.getAll().catch(e => { console.error("Erro Templates:", e); return []; });
-    const campaignHistoryPromise = campaignHistoryService.getAll().catch(e => { console.error("Erro Histórico Campanhas:", e); return []; });
-    const quoteHistoryPromise = quoteHistoryService.getAll().catch(e => { console.error("Erro Histórico Propostas:", e); return []; });
+    const campaignHistoryPromise = campaignHistoryService.getAll().catch(e => { console.error("Erro HistÃ³rico Campanhas:", e); return []; });
+    const quoteHistoryPromise = quoteHistoryService.getAll().catch(e => { console.error("Erro HistÃ³rico Propostas:", e); return []; });
     const insurancePromise = insuranceService.getAll().catch(e => { console.error("Erro Seguros:", e); return []; });
     const shtPromise = workSafetyService.getAll().catch(e => { console.error("Erro SHT:", e); return []; });
     const bracketsPromise = turnoverBracketService.getAll().catch(e => { console.error("Erro Patamares:", e); return []; });
     const cashPaymentsPromise = cashPaymentService.getAll().catch(e => { console.error("Erro Pagamentos Caixa:", e); return []; });
     const cashAgreementsPromise = cashAgreementService.getAll().catch(e => { console.error("Erro Acordos Caixa:", e); return []; });
-    const cashOperationsPromise = cashOperationService.getAll().catch(e => { console.error("Erro Operações Caixa:", e); return []; });
+    const cashOperationsPromise = cashOperationService.getAll().catch(e => { console.error("Erro OperaÃ§Ãµes Caixa:", e); return []; });
 
     const [
       clientsData,
@@ -190,7 +190,7 @@ export default function App() {
       setSelectedClient(savedClient);
     } catch (err: any) {
       console.error("Erro ao gravar cliente:", err);
-      alert("Falha ao gravar as alterações do cliente: " + err.message);
+      alert("Falha ao gravar as alteraÃ§Ãµes do cliente: " + err.message);
     }
   };
 
@@ -200,15 +200,15 @@ export default function App() {
       setStaff(staff.map(s => s.id === savedStaff.id ? savedStaff : s));
       setSelectedStaff(savedStaff); // Keep the detail view open with updated data
     } catch (err: any) {
-      console.error("Erro ao gravar funcionário:", err);
-      alert("Falha ao gravar as alterações do funcionário: " + err.message);
+      console.error("Erro ao gravar funcionÃ¡rio:", err);
+      alert("Falha ao gravar as alteraÃ§Ãµes do funcionÃ¡rio: " + err.message);
     }
   };
 
   const handleFullSync = async () => {
     setIsSyncing(true);
     try {
-      console.log("--- INÍCIO DA SINCROZINAÇÃO ---");
+      console.log("--- INÃCIO DA SINCROZINAÃ‡ÃƒO ---");
       // 1. Staff
       const externalStaff = await staffService.importExternalStaff();
       console.log("DEBUG: Staff importado (primeiros 3):", externalStaff.slice(0, 3));
@@ -259,8 +259,8 @@ export default function App() {
         await clientService.bulkUpsert(clientsWithStaffId);
 
         let successMessage = `Sucesso! ${externalClients.length} clientes processados.`;
-        if (unmatchedNames.size > 0) {
-          successMessage += ` Atenção: os seguintes responsáveis vindos da origem não foram reconhecidos e foram ignorados (mantive o responsável atual no CRM): ${Array.from(unmatchedNames).join(', ')}`;
+        if (unmatchedRefs.size > 0) {
+          successMessage += ` AtenÃ§Ã£o: os seguintes responsÃ¡veis vindos da origem nÃ£o foram reconhecidos e foram ignorados (mantive o responsÃ¡vel atual no CRM): ${Array.from(unmatchedRefs).join(', ')}`;
         }
         setSyncSuccess(successMessage);
         setTimeout(() => setSyncSuccess(null), 15000); // Longer timeout to read the message
@@ -271,10 +271,10 @@ export default function App() {
       
       // 3. AGUARDAR E RECARREGAR
       await new Promise(resolve => setTimeout(resolve, 1000));
-      console.log("--- FIM DA SINCROZINAÇÃO, A RECARREGAR DADOS ---");
+      console.log("--- FIM DA SINCROZINAÃ‡ÃƒO, A RECARREGAR DADOS ---");
       await fetchData();
     } catch (err: any) {
-      alert("Falha na sincronização: " + err.message);
+      alert("Falha na sincronizaÃ§Ã£o: " + err.message);
     } finally {
       setIsSyncing(false);
     }
@@ -321,15 +321,15 @@ export default function App() {
               <RefreshCcw className="mx-auto text-blue-500 mb-4 animate-spin" size={40} />
               <h3 className="text-lg font-bold text-slate-800">A carregar dados...</h3>
               <p className="text-slate-500 text-sm mt-2 max-w-md mx-auto">
-                A ligar ao servidor de gestão para obter a informação mais recente.
+                A ligar ao servidor de gestÃ£o para obter a informaÃ§Ã£o mais recente.
               </p>
             </div>
           ) : clients.length === 0 && !isSyncing && (
             <div className="bg-white border-2 border-dashed border-slate-200 p-12 rounded-3xl text-center">
               <AlertTriangle className="mx-auto text-amber-500 mb-4" size={40} />
-              <h3 className="text-lg font-bold text-slate-800">Ainda não há clientes visíveis</h3>
+              <h3 className="text-lg font-bold text-slate-800">Ainda nÃ£o hÃ¡ clientes visÃ­veis</h3>
               <p className="text-slate-500 text-sm mt-2 max-w-md mx-auto">
-                Se já sincronizou os seus clientes, clique no botão de recarregar. Se o problema persistir, verifique as suas configurações de ligação ao Supabase.
+                Se jÃ¡ sincronizou os seus clientes, clique no botÃ£o de recarregar. Se o problema persistir, verifique as suas configuraÃ§Ãµes de ligaÃ§Ã£o ao Supabase.
               </p>
               <button onClick={fetchData} className="mt-6 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 mx-auto">
                 <RefreshCcw size={14} /> Tentar recarregar dados
@@ -447,10 +447,11 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center">
           <div className="bg-white p-8 rounded-3xl shadow-2xl flex flex-col items-center gap-4">
             <RefreshCcw className="animate-spin text-blue-600" size={40} />
-            <p className="font-black text-slate-800 uppercase tracking-tight">A atualizar a sua base de gestão...</p>
+            <p className="font-black text-slate-800 uppercase tracking-tight">A atualizar a sua base de gestÃ£o...</p>
           </div>
         </div>
       )}
     </div>
   );
 }
+
