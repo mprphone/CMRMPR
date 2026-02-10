@@ -498,9 +498,18 @@ export const campaignHistoryService = {
   },
   async create(campaign: Partial<CampaignHistory>): Promise<CampaignHistory> {
     const storeClient = ensureStoreClient();
-    const { data, error } = await storeClient.from('email_campaign_history').insert(campaign).select().single();
+    let { data, error } = await storeClient.from('email_campaign_history').insert(campaign).select().single();
+
+    // Backward compatibility for DBs that still don't have recipient_results.
+    if (error && campaign && 'recipient_results' in campaign && /recipient_results/i.test(error.message || '')) {
+      const { recipient_results, ...fallbackPayload } = campaign as any;
+      const retry = await storeClient.from('email_campaign_history').insert(fallbackPayload).select().single();
+      data = retry.data;
+      error = retry.error;
+    }
+
     if (error) throw error;
-    return data;
+    return data as CampaignHistory;
   }
 };
 

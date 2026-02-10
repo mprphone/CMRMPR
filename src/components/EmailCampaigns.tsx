@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Client, FeeGroup, Staff, EmailTemplate, CampaignHistory, GlobalSettings } from '../types';
-import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2, Search, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Client, FeeGroup, Staff, EmailTemplate, CampaignHistory, GlobalSettings, CampaignRecipientResult } from '../types';
+import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2, Search, CheckCircle, AlertCircle, Clock, Bold, FileText } from 'lucide-react';
 import { generateTemplateWithAI } from '../services/geminiService';
 import { templateService, campaignHistoryService, storeClient } from '../services/supabase';
 
@@ -46,11 +46,180 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
   const [recipientSearch, setRecipientSearch] = useState('');
   const [campaignResult, setCampaignResult] = useState<{ successCount: number; errorCount: number; details: { name: string; email: string; status: 'success' | 'error'; error?: string }[] } | null>(null);
   const [validationIssues, setValidationIssues] = useState<string[]>([]);
+  const [selectedHistoryCampaign, setSelectedHistoryCampaign] = useState<CampaignHistory | null>(null);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const templateBodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const formatMoney = (value: any) => {
     const n = Number(value);
     if (Number.isNaN(n)) return String(value ?? '');
-    return `${n.toFixed(0)}€`;
+    return `${n.toFixed(2).replace('.', ',')} EUR`;
+  };
+
+  const escapeHtml = (input: string) => {
+    return input
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  const decodeBasicEntities = (input: string) => {
+    return input
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&euro;/gi, ' EUR');
+  };
+
+  const stripHtmlToText = (input: string) => {
+    const withBreaks = input
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '- ')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<\/tr>/gi, '\n')
+      .replace(/<\/td>/gi, ' ')
+      .replace(/<[^>]+>/g, '');
+
+    return decodeBasicEntities(withBreaks)
+      .replace(/\r\n/g, '\n')
+      .replace(/\t/g, ' ')
+      .replace(/[ \u00A0]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  };
+
+  const formatInlineText = (text: string) => {
+    const escaped = escapeHtml(text.trim());
+    return escaped
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/__(.+?)__/g, '<strong>$1</strong>');
+  };
+
+  const renderBodyAsCleanHtml = (rawBody: string) => {
+    const plainBody = stripHtmlToText(rawBody);
+    if (!plainBody) return '';
+
+    const lines = plainBody.split('\n').map(line => line.trim());
+    const blocks: string[] = [];
+    let listItems: string[] = [];
+
+    const flushList = () => {
+      if (listItems.length === 0) return;
+      blocks.push(`<ul style="margin:0 0 14px 20px;padding:0;">${listItems.join('')}</ul>`);
+      listItems = [];
+    };
+
+    for (const line of lines) {
+      if (!line) {
+        flushList();
+        continue;
+      }
+
+      if (/^[-*]\s+/.test(line)) {
+        const listText = line.replace(/^[-*]\s+/, '');
+        listItems.push(`<li style="margin:0 0 8px 0;">${formatInlineText(listText)}</li>`);
+        continue;
+      }
+
+      flushList();
+
+      const keyValueMatch = line.match(/^([A-Za-z0-9()./%\s-]{2,40}:)\s*(.+)$/);
+      if (keyValueMatch) {
+        const label = escapeHtml(keyValueMatch[1]);
+        const value = formatInlineText(keyValueMatch[2]);
+        blocks.push(`<p style="margin:0 0 12px 0;"><strong>${label}</strong> ${value}</p>`);
+        continue;
+      }
+
+      blocks.push(`<p style="margin:0 0 14px 0;">${formatInlineText(line)}</p>`);
+    }
+
+    flushList();
+    return blocks.join('');
+  };
+
+  const buildCampaignEmailHtml = (messageBody: string, signatureHtml: string) => {
+    const bodyHtml = renderBodyAsCleanHtml(messageBody);
+    const signatureBlock = signatureHtml ? `<div style="margin-top:16px;">${signatureHtml}</div>` : '';
+    const optOutFooter = `<p style="margin:18px 0 0 0;font-size:11px;line-height:1.5;color:#6B7280;">Para deixar de receber comunicacoes de marketing, por favor responda a este email com o assunto "Remover".</p>`;
+    return `${bodyHtml}${signatureBlock}${optOutFooter}`;
+  };
+
+  const getCleanBaseTemplate = () => ({
+    subject: 'Atualizacao de avenca contabilistica - {{name}}',
+    body: [
+      'Ola {{name}},',
+      '',
+      'Informamos uma atualizacao da sua avenca de contabilidade.',
+      '',
+      '**Nova avenca:** {{nova_avenca}}',
+      '**Avenca atual:** {{avenca_atual}}',
+      '**Entrada em vigor:** dia 1 do proximo mes',
+      '',
+      'Se tiver alguma questao, responda a este email.',
+      '',
+      'Com os melhores cumprimentos,',
+      '{{responsible_name}}',
+    ].join('\n'),
+  });
+
+  const applyBoldMarkdown = (
+    currentValue: string,
+    onChange: (nextValue: string) => void,
+    textarea: HTMLTextAreaElement | null
+  ) => {
+    const start = textarea?.selectionStart ?? currentValue.length;
+    const end = textarea?.selectionEnd ?? currentValue.length;
+    const hasSelection = end > start;
+    const selectedText = hasSelection ? currentValue.slice(start, end) : 'texto importante';
+    const replacement = `**${selectedText}**`;
+    const nextValue = `${currentValue.slice(0, start)}${replacement}${currentValue.slice(end)}`;
+
+    onChange(nextValue);
+
+    requestAnimationFrame(() => {
+      if (!textarea) return;
+      const selectionStart = start + 2;
+      const selectionEnd = selectionStart + selectedText.length;
+      textarea.focus();
+      textarea.setSelectionRange(selectionStart, selectionEnd);
+    });
+  };
+
+  const handleApplyCleanBaseTemplateComposer = () => {
+    const baseTemplate = getCleanBaseTemplate();
+    setSubject(baseTemplate.subject);
+    setBody(baseTemplate.body);
+  };
+
+  const handleApplyCleanBaseTemplateModal = () => {
+    const baseTemplate = getCleanBaseTemplate();
+    setEditingTemplate(prev => {
+      if (!prev) return prev;
+      return { ...prev, subject: baseTemplate.subject, body: baseTemplate.body };
+    });
+  };
+
+  const handleBoldComposer = () => {
+    applyBoldMarkdown(body, setBody, bodyTextareaRef.current);
+  };
+
+  const handleBoldModal = () => {
+    const currentBody = editingTemplate?.body || '';
+    applyBoldMarkdown(
+      currentBody,
+      (nextValue) => setEditingTemplate(prev => (prev ? { ...prev, body: nextValue } : prev)),
+      templateBodyTextareaRef.current
+    );
   };
 
   const applyTemplateVars = (text: string, client: Client, responsibleName: string, novaAvenca?: number) => {
@@ -97,6 +266,13 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     return m ? parseInt(m[1], 10) : 0;
   };
 
+  const getRecipientResults = (item: CampaignHistory): CampaignRecipientResult[] => {
+    if (!Array.isArray(item.recipient_results)) return [];
+    return item.recipient_results.filter((entry): entry is CampaignRecipientResult => {
+      return !!entry && typeof entry === 'object' && typeof entry.name === 'string' && typeof entry.email === 'string' && (entry.status === 'success' || entry.status === 'error');
+    });
+  };
+
   const getRecipientIdsForGroup = (groupId: string) => {
     if (groupId === 'all') return clients.map(c => c.id);
     const group = groups.find(g => g.id === groupId);
@@ -115,13 +291,13 @@ const handleTemplateChange = (templateId: string) => {
 
   const handleAiAssist = async () => {
     if (!aiTopic) {
-      alert("Por favor, insira um tópico para o email.");
+      alert("Por favor, insira um tÃ³pico para o email.");
       return;
     }
 
     setIsGenerating(true);
     try {
-      // A autenticação é agora gerida centralmente em geminiService.ts
+      // A autenticaÃ§Ã£o Ã© agora gerida centralmente em geminiService.ts
       const result = await generateTemplateWithAI(aiTopic, aiTone);
       setEditingTemplate(prev => ({ ...prev, subject: result.subject, body: result.body }));
     } catch (err: any) {
@@ -132,7 +308,7 @@ const handleTemplateChange = (templateId: string) => {
         else if (functionError && functionError.message) detailedError = functionError.message;
       }
       if (detailedError.includes('Invalid JWT')) {
-          alert("A sua sessão expirou. Por favor, recarregue a página e tente novamente.");
+          alert("A sua sessÃ£o expirou. Por favor, recarregue a pÃ¡gina e tente novamente.");
       } else {
         alert("Falha na IA: " + detailedError + "\n\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
       }
@@ -145,11 +321,11 @@ const handleTemplateChange = (templateId: string) => {
 
   const handleSendCampaign = async () => {
     if (selectedRecipients.length === 0) {
-      alert("Selecione pelo menos um destinatário.");
+      alert("Selecione pelo menos um destinatÃ¡rio.");
       return;
     }
     if (!globalSettings.fromEmail || !globalSettings.fromName) {
-      alert("Por favor, configure o seu Nome e Email de Remetente nas Configurações.");
+      alert("Por favor, configure o seu Nome e Email de Remetente nas ConfiguraÃ§Ãµes.");
       return;
     }
 
@@ -161,7 +337,7 @@ const handleTemplateChange = (templateId: string) => {
       }
       const scheduleDate = new Date(scheduleDateTime);
       if (scheduleDate < new Date()) {
-        alert("A data de agendamento não pode ser no passado.");
+        alert("A data de agendamento nÃ£o pode ser no passado.");
         return;
       }
       if (!confirm(`Tem a certeza que deseja agendar esta campanha para ${scheduleDate.toLocaleString('pt-PT')} para ${selectedRecipients.length} cliente(s)?`)) {
@@ -174,7 +350,7 @@ const handleTemplateChange = (templateId: string) => {
       const groupName = selectedGroupId === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
 
       // NOTE: The CampaignHistory type and 'campaign_history' table in Supabase
-      // must be updated to include: recipient_ids (text[]), scheduled_at (timestamptz), send_delay (int4), template_id (uuid)
+      // must be updated to include: recipient_ids (text[]), scheduled_at (timestamptz), send_delay (int4), template_id (uuid), recipient_results (jsonb)
       const scheduledCampaign: Partial<CampaignHistory> = {
         subject,
         body,
@@ -190,7 +366,7 @@ const handleTemplateChange = (templateId: string) => {
       try {
         const savedRecord = await campaignHistoryService.create(scheduledCampaign);
         setHistory([savedRecord, ...history]);
-        alert(`Campanha agendada com sucesso para ${scheduleDate.toLocaleString('pt-PT')}.\n\nNOTA: É necessário um processo no servidor (cron job) para processar e enviar campanhas agendadas.`);
+        alert(`Campanha agendada com sucesso para ${scheduleDate.toLocaleString('pt-PT')}.\n\nNOTA: E necessario um processo no servidor (cron job) para processar e enviar campanhas agendadas.`);
         setSelectedRecipients([]);
         setIsScheduled(false);
         setScheduleDateTime('');
@@ -209,8 +385,8 @@ const handleTemplateChange = (templateId: string) => {
 
     setIsSending(true);
     setValidationIssues([]); // Clear issues on send
-    // (Opcional) Se existir sessão autenticada, envia o JWT para a Edge Function.
-    // Se não houver sessão (app sem Auth), a função deve estar com verify_jwt=false.
+    // (Opcional) Se existir sessÃ£o autenticada, envia o JWT para a Edge Function.
+    // Se nÃ£o houver sessÃ£o (app sem Auth), a funÃ§Ã£o deve estar com verify_jwt=false.
     try {
       if (storeClient) {
         const { data: { session } } = await storeClient.auth.getSession();
@@ -223,7 +399,7 @@ const handleTemplateChange = (templateId: string) => {
     const proposedFees = selectedGroup?.proposed_fees || {};
     const invalidEmails = recipients.filter(c => !c.email || !c.email.includes('@'));
     if (invalidEmails.length) {
-      alert(`Existem ${invalidEmails.length} destinatário(s) sem email válido. Corrija antes de enviar.`);
+      alert(`Existem ${invalidEmails.length} destinatÃ¡rio(s) sem email vÃ¡lido. Corrija antes de enviar.`);
       setIsSending(false);
       return;
     }
@@ -231,17 +407,16 @@ const handleTemplateChange = (templateId: string) => {
     if (needsNovaAvenca) {
       const missing = recipients.filter(c => proposedFees[c.id] === undefined || proposedFees[c.id] === null);
       if (missing.length) {
-        alert(`Existem ${missing.length} destinatário(s) sem valor de nova avença definido neste grupo. Atualize as novas avenças antes de enviar.`);
+        alert(`Existem ${missing.length} destinatÃ¡rio(s) sem valor de nova avenÃ§a definido neste grupo. Atualize as novas avenÃ§as antes de enviar.`);
         setIsSending(false);
         return;
       }
     }
     let successCount = 0;
     let errorCount = 0;
-    const campaignLogs: { name: string; email: string; status: 'success' | 'error'; error?: string }[] = [];
+    const campaignLogs: CampaignRecipientResult[] = [];
     let jwtError = false;
 
-    const optOutFooter = `<br><br><p style="font-size:10px; color:#999;">Para deixar de receber comunicações de marketing, por favor responda a este email com o assunto "Remover".</p>`;
     for (const client of recipients) {
       // Personalize email for each client
       let responsibleName = 'N/A';
@@ -255,9 +430,9 @@ const handleTemplateChange = (templateId: string) => {
       let finalBody = applyTemplateVars(body, client, responsibleName, novaAvenca);
 
       try {
-        if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
+        if (!storeClient) throw new Error("Cliente Supabase nÃ£o inicializado.");
         
-        const finalHtml = finalBody.replace(/\n/g, '<br>') + `<br><br>${globalSettings.emailSignature || ''}` + optOutFooter;
+        const finalHtml = buildCampaignEmailHtml(finalBody, globalSettings.emailSignature || '');
 
         const { error } = await storeClient.functions.invoke('send-email', {
           body: { to: client.email, from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: finalSubject, html: finalHtml },
@@ -274,8 +449,8 @@ const handleTemplateChange = (templateId: string) => {
           if (funcError && funcError.error) detailedError = funcError.error;
         }
 
-        if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
-          alert("A sua sessão expirou ou é inválida. A campanha foi interrompida. Por favor, recarregue a página e tente novamente.");
+        if (detailedError.includes('Invalid JWT') || detailedError.includes('SessÃ£o invÃ¡lida')) {
+          alert("A sua sessÃ£o expirou ou Ã© invÃ¡lida. A campanha foi interrompida. Por favor, recarregue a pÃ¡gina e tente novamente.");
           jwtError = true;
           break; // Stop campaign on auth error
         }
@@ -298,7 +473,9 @@ const handleTemplateChange = (templateId: string) => {
     const newHistoryRecord: Partial<CampaignHistory> = {
       subject,
       body,
-      recipient_count: successCount,
+      recipient_count: selectedRecipients.length,
+      recipient_ids: selectedRecipients,
+      recipient_results: campaignLogs,
       group_name: groupName,
       status: `Enviada (${successCount} sucesso, ${errorCount} falhas)`
     };
@@ -309,7 +486,7 @@ const handleTemplateChange = (templateId: string) => {
       // and save each entry from `campaignLogs` here, linked to `savedRecord.id`.
       setHistory([savedRecord, ...history]);
     } catch (err: any) {
-      alert("Falha ao gravar o histórico da campanha: " + err.message);
+      alert("Falha ao gravar o histÃ³rico da campanha: " + err.message);
     }
 
     setCampaignResult({ successCount, errorCount, details: campaignLogs });
@@ -318,11 +495,11 @@ const handleTemplateChange = (templateId: string) => {
 
   const handleSendTestEmail = async () => {
     if (availableRecipients.length === 0) {
-      alert("Não há clientes na lista de destinatários para usar como exemplo.");
+      alert("NÃ£o hÃ¡ clientes na lista de destinatÃ¡rios para usar como exemplo.");
       return;
     }
     if (!globalSettings.fromEmail || !globalSettings.fromName) {
-      alert("Por favor, configure o seu Nome e Email de Remetente nas Configurações.");
+      alert("Por favor, configure o seu Nome e Email de Remetente nas ConfiguraÃ§Ãµes.");
       return;
     }
 
@@ -332,7 +509,7 @@ const handleTemplateChange = (templateId: string) => {
     if (testClient.responsibleStaff) {
       if (testClient.responsibleStaff.includes('-')) { // It's a UUID
         const staffMember = staff.find(s => s.id === testClient.responsibleStaff);
-        responsibleName = staffMember ? staffMember.name : 'Responsável Desconhecido';
+        responsibleName = staffMember ? staffMember.name : 'ResponsÃ¡vel Desconhecido';
       } else { // It's a name
         responsibleName = testClient.responsibleStaff;
       }
@@ -346,23 +523,22 @@ const handleTemplateChange = (templateId: string) => {
     let testBody = applyTemplateVars(body, testClient, responsibleName, novaAvenca);
 
     if (testSubject.includes('{{nova_avenca}}') || testBody.includes('{{nova_avenca}}')) {
-      testSubject = testSubject.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENÇA]');
-      testBody = testBody.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENÇA]');
+      testSubject = testSubject.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENCA]');
+      testBody = testBody.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENCA]');
     }
 
-    const optOutFooter = `<br><br><p style="font-size:10px; color:#999;">Para deixar de receber comunicações de marketing, por favor responda a este email com o assunto "Remover".</p>`;
-    const finalHtml = testBody.replace(/\n/g, '<br>') + `<br><br>${globalSettings.emailSignature || ''}` + optOutFooter;
+    const finalHtml = buildCampaignEmailHtml(testBody, globalSettings.emailSignature || '');
 
-    const confirmationMessage = `Isto irá enviar um email de teste REAL para 'mpr@mpr.pt' a partir de '${globalSettings.fromEmail}'.\n\nAssunto: ${testSubject}\n\nDeseja continuar?`;
+    const confirmationMessage = `Isto irÃ¡ enviar um email de teste REAL para 'mpr@mpr.pt' a partir de '${globalSettings.fromEmail}'.\n\nAssunto: ${testSubject}\n\nDeseja continuar?`;
 
     if (!confirm(confirmationMessage)) return;
 
     setIsSending(true);
     try {
-      if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
+      if (!storeClient) throw new Error("Cliente Supabase nÃ£o inicializado.");
 
-      // (Opcional) Se existir sessão autenticada, envia o JWT para a Edge Function.
-      // Se não houver sessão (app sem Auth), a função deve estar com verify_jwt=false.
+      // (Opcional) Se existir sessÃ£o autenticada, envia o JWT para a Edge Function.
+      // Se nÃ£o houver sessÃ£o (app sem Auth), a funÃ§Ã£o deve estar com verify_jwt=false.
       const { data: { session } } = await storeClient.auth.getSession();
       if (session?.access_token) {
         storeClient.functions.setAuth(session.access_token);
@@ -380,8 +556,8 @@ const handleTemplateChange = (templateId: string) => {
         if (functionError && functionError.error) detailedError = functionError.error;
         else if (functionError && functionError.message) detailedError = functionError.message;
       }
-      if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
-        alert("A sua sessão expirou ou é inválida. Por favor, recarregue a página e tente novamente.");
+      if (detailedError.includes('Invalid JWT') || detailedError.includes('SessÃ£o invÃ¡lida')) {
+        alert("A sua sessÃ£o expirou ou Ã© invÃ¡lida. Por favor, recarregue a pÃ¡gina e tente novamente.");
       } else {
         alert(`Erro ao enviar email de teste: ${detailedError}`);
       }
@@ -394,7 +570,7 @@ const handleTemplateChange = (templateId: string) => {
   const handleSaveTemplate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTemplate || !editingTemplate.name) {
-      alert("O nome do template é obrigatório.");
+      alert("O nome do template Ã© obrigatÃ³rio.");
       return;
     }
 
@@ -433,7 +609,7 @@ const handleTemplateChange = (templateId: string) => {
       alert("Nenhum template selecionado para apagar.");
       return;
     }
-    if (confirm("Tem a certeza que deseja apagar este template? Esta ação não pode ser desfeita.")) {
+    if (confirm("Tem a certeza que deseja apagar este template? Esta aÃ§Ã£o nÃ£o pode ser desfeita.")) {
       try {
         await templateService.delete(selectedTemplateId);
         const updatedTemplates = templates.filter(t => t.id !== selectedTemplateId);
@@ -462,12 +638,12 @@ const handleTemplateChange = (templateId: string) => {
     variablesFound.forEach(variable => {
         const varName = variable.replace(/{{|}}/g, '');
         if (!allVariables.includes(varName as any)) {
-            issues.push(`A variável ${variable} não é reconhecida.`);
+            issues.push(`A variÃ¡vel ${variable} nÃ£o Ã© reconhecida.`);
         }
     });
 
     if (issues.length === 0) {
-        alert("Nenhum problema encontrado. As variáveis parecem estar corretas.");
+        alert("Nenhum problema encontrado. As variÃ¡veis parecem estar corretas.");
     }
     setValidationIssues(issues);
   };
@@ -477,7 +653,7 @@ const handleTemplateChange = (templateId: string) => {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Campanhas de Email</h2>
-          <p className="text-sm text-slate-500">Crie, personalize e envie comunicações para os seus clientes.</p>
+          <p className="text-sm text-slate-500">Crie, personalize e envie comunicaÃ§Ãµes para os seus clientes.</p>
         </div>
       </div>
 
@@ -515,7 +691,24 @@ const handleTemplateChange = (templateId: string) => {
               className="w-full px-3 py-2 border rounded-lg text-sm mb-2"
               placeholder="Assunto do seu email"
             />
+            <div className="flex items-center gap-2 mb-2">
+              <button
+                type="button"
+                onClick={handleApplyCleanBaseTemplateComposer}
+                className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200"
+              >
+                <FileText size={13} /> Modelo Base
+              </button>
+              <button
+                type="button"
+                onClick={handleBoldComposer}
+                className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200"
+              >
+                <Bold size={13} /> Negrito
+              </button>
+            </div>
             <textarea 
+              ref={bodyTextareaRef}
               value={body}
               onChange={e => setBody(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg text-sm h-80 font-mono"
@@ -523,7 +716,7 @@ const handleTemplateChange = (templateId: string) => {
             />
             <div className="flex justify-between items-start mt-2">
               <div className="text-xs text-slate-500">
-                <span className="font-bold">Variáveis disponíveis:</span>
+                <span className="font-bold">VariÃ¡veis disponÃ­veis:</span>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {allVariables.map(variable => (
                     <code key={variable} className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-md font-mono">{`{{${variable}}}`}</code>
@@ -531,7 +724,7 @@ const handleTemplateChange = (templateId: string) => {
                 </div>
               </div>
               <button onClick={validateCurrentTemplate} className="text-xs font-bold bg-slate-100 text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-2">
-                <CheckCircle size={14}/> Verificar Variáveis
+                <CheckCircle size={14}/> Verificar VariÃ¡veis
               </button>
             </div>
             {validationIssues.length > 0 && (
@@ -548,7 +741,7 @@ const handleTemplateChange = (templateId: string) => {
         {/* Settings & Recipients Column */}
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Users size={18} /> Destinatários</h3>
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Users size={18} /> DestinatÃ¡rios</h3>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Enviar para o Grupo:</label>
               <select
@@ -556,7 +749,7 @@ const handleTemplateChange = (templateId: string) => {
                 onChange={e => {
                   const newGroupId = e.target.value;
                   setSelectedGroupId(newGroupId);
-                  setSelectedRecipients(getRecipientIdsForGroup(newGroupId)); // Pré-seleciona todos do grupo
+                  setSelectedRecipients(getRecipientIdsForGroup(newGroupId)); // PrÃ©-seleciona todos do grupo
                   setRecipientSearch(''); // limpa pesquisa do modal
                 }}
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
@@ -568,7 +761,7 @@ const handleTemplateChange = (templateId: string) => {
             <div className="mt-4 border-t pt-4">
                 <div className="flex justify-between items-center">
                     <p className="text-sm">
-                        <span className="font-bold text-blue-600">{selectedRecipients.length}</span> destinatário(s) selecionado(s) de <span className="font-bold">{availableRecipients.length}</span>
+                        <span className="font-bold text-blue-600">{selectedRecipients.length}</span> destinatÃ¡rio(s) selecionado(s) de <span className="font-bold">{availableRecipients.length}</span>
                     </p>
                     <button onClick={() => setIsRecipientModalOpen(true)} className="bg-blue-50 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-100">
                         Selecionar
@@ -602,8 +795,8 @@ const handleTemplateChange = (templateId: string) => {
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Velocidade de Envio</label>
                 <select value={sendDelay} onChange={e => setSendDelay(Number(e.target.value))} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option value={200}>Muito Rápido (5/seg)</option>
-                  <option value={500}>Rápido (2/seg)</option>
+                  <option value={200}>Muito RÃ¡pido (5/seg)</option>
+                  <option value={500}>RÃ¡pido (2/seg)</option>
                   <option value={2000}>Lento (1/2 seg)</option>
                   <option value={5000}>Muito Lento (1/5 seg)</option>
                 </select>
@@ -621,7 +814,7 @@ const handleTemplateChange = (templateId: string) => {
                 className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-black transition-all flex justify-center items-center gap-2 disabled:opacity-50"
               >
                 {isSending ? <RefreshCcw size={18} className="animate-spin" /> : <Send size={18} />}
-                {isSending ? 'A Enviar...' : `Enviar Campanha para ${selectedRecipients.length} Destinatários`}
+                {isSending ? 'A Enviar...' : `Enviar Campanha para ${selectedRecipients.length} DestinatÃ¡rios`}
               </button>
             </div>
           </div>
@@ -631,7 +824,7 @@ const handleTemplateChange = (templateId: string) => {
       {/* History Section */}
       <div className="mt-8 bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <History size={18} /> Histórico de Campanhas Enviadas
+          <History size={18} /> HistÃ³rico de Campanhas Enviadas
         </h3>
         <div className="overflow-x-auto max-h-96 custom-scrollbar">
           <table className="w-full text-sm text-left">
@@ -640,7 +833,7 @@ const handleTemplateChange = (templateId: string) => {
                 <th className="px-4 py-3">Data</th>
                 <th className="px-4 py-3">Assunto</th>
                 <th className="px-4 py-3">Grupo</th>
-                <th className="px-4 py-3 text-center">Destinatários</th>
+                <th className="px-4 py-3 text-center">DestinatÃ¡rios</th>
                 <th className="px-4 py-3 text-center">Estado</th>
               </tr>
             </thead>
@@ -650,6 +843,9 @@ const handleTemplateChange = (templateId: string) => {
                 const displayDate = isScheduled ? new Date(item.scheduled_at) : new Date(item.sent_at);
                 const failureCount = getFailureCountFromStatus(item.status);
                 const hasFailures = failureCount > 0;
+                const isSentCampaign = !isScheduled && item.status.toLowerCase().includes('enviada');
+                const recipientResults = getRecipientResults(item);
+                const hasDetails = recipientResults.length > 0;
 
                 return (
                   <tr key={item.id} className="hover:bg-slate-50">
@@ -658,14 +854,20 @@ const handleTemplateChange = (templateId: string) => {
                     <td className="px-4 py-3 text-xs">{item.group_name}</td>
                     <td className="px-4 py-3 text-center font-bold">{item.recipient_count}</td>
                     <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full ${
+                        <button
+                          type="button"
+                          disabled={!isSentCampaign}
+                          onClick={() => isSentCampaign && setSelectedHistoryCampaign(item)}
+                          title={!isSentCampaign ? 'Apenas campanhas enviadas tÃªm detalhe.' : hasDetails ? 'Ver detalhe dos destinatÃ¡rios' : 'Campanha sem detalhe guardado'}
+                          className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full transition-colors ${
                             isScheduled ? 'bg-yellow-100 text-yellow-700' 
                             : hasFailures ? 'bg-red-100 text-red-700' 
                             : 'bg-green-100 text-green-700'
-                        }`}>
+                          } ${isSentCampaign ? 'hover:brightness-95 cursor-pointer' : 'cursor-default'}`}
+                        >
                             {isScheduled ? <Clock size={12} /> : hasFailures ? <AlertCircle size={12} /> : <CheckCircle size={12} />}
                             {item.status}
-                        </span>
+                        </button>
                     </td>
                   </tr>
                 )
@@ -705,9 +907,30 @@ const handleTemplateChange = (templateId: string) => {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Corpo do Email</label>
-                <textarea value={editingTemplate.body || ''} onChange={e => setEditingTemplate({...editingTemplate, body: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm h-40 font-mono" />
+                <div className="flex items-center gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={handleApplyCleanBaseTemplateModal}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200"
+                  >
+                    <FileText size={13} /> Modelo Base
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBoldModal}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200"
+                  >
+                    <Bold size={13} /> Negrito
+                  </button>
+                </div>
+                <textarea
+                  ref={templateBodyTextareaRef}
+                  value={editingTemplate.body || ''}
+                  onChange={e => setEditingTemplate({...editingTemplate, body: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg text-sm h-40 font-mono"
+                />
                 <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Caixa de Variáveis (clique para inserir)</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Caixa de VariÃ¡veis (clique para inserir)</p>
                   <div className="flex flex-wrap gap-1">
                     {allVariables.map(variable => (
                       <button
@@ -724,7 +947,7 @@ const handleTemplateChange = (templateId: string) => {
               </div>
               <div className="flex justify-end gap-3 pt-4">
                 <button type="button" onClick={() => setIsTemplateModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">Cancelar</button>
-                <button type="button" disabled title="Funcionalidade de aprovação futura" className="bg-gray-300 text-white px-4 py-2 rounded-lg text-sm font-bold cursor-not-allowed">Aprovar</button>
+                <button type="button" disabled title="Funcionalidade de aprovaÃ§Ã£o futura" className="bg-gray-300 text-white px-4 py-2 rounded-lg text-sm font-bold cursor-not-allowed">Aprovar</button>
                 <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
                   <Save size={16} /> Salvar Template
                 </button>
@@ -741,11 +964,11 @@ const handleTemplateChange = (templateId: string) => {
             <h3 className="text-lg font-bold mb-4">Assistente IA para Templates</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Tópico do Email</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">TÃ³pico do Email</label>
                 <input type="text" value={aiTopic} onChange={e => setAiTopic(e.target.value)} placeholder="Ex: Lembrete sobre o IES" className="w-full px-3 py-2 border rounded-lg text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Tom de Comunicação</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Tom de ComunicaÃ§Ã£o</label>
                 <select value={aiTone} onChange={e => setAiTone(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                   <option>Profissional</option>
                   <option>Informal</option>
@@ -757,7 +980,7 @@ const handleTemplateChange = (templateId: string) => {
             <div className="flex justify-end gap-3 pt-6">
               <button onClick={() => setIsAiModalOpen(false)} className="px-4 py-2 text-slate-600">Cancelar</button>
               <button onClick={handleAiAssist} disabled={isGenerating} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50">
-                {isGenerating ? <RefreshCcw size={16} className="animate-spin" /> : <BrainCircuit size={16} />} Gerar Conteúdo
+                {isGenerating ? <RefreshCcw size={16} className="animate-spin" /> : <BrainCircuit size={16} />} Gerar ConteÃºdo
               </button>
             </div>
           </div>
@@ -786,7 +1009,7 @@ const handleTemplateChange = (templateId: string) => {
                 <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-slate-50">
                     <tr>
-                    <th className="p-2 text-left">Destinatário</th>
+                    <th className="p-2 text-left">DestinatÃ¡rio</th>
                     <th className="p-2 text-left">Email</th>
                     <th className="p-2 text-center">Estado</th>
                     <th className="p-2 text-left">Detalhe</th>
@@ -809,12 +1032,81 @@ const handleTemplateChange = (templateId: string) => {
         </div>
       )}
 
+      {/* History Recipient Details Modal */}
+      {selectedHistoryCampaign && (() => {
+        const details = getRecipientResults(selectedHistoryCampaign);
+        const successCount = details.filter(d => d.status === 'success').length;
+        const errorCount = details.filter(d => d.status === 'error').length;
+        const sentAtText = selectedHistoryCampaign.sent_at ? new Date(selectedHistoryCampaign.sent_at).toLocaleString('pt-PT') : '-';
+
+        return (
+          <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="text-lg font-bold">Detalhe de Envios</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">{sentAtText} - {selectedHistoryCampaign.subject}</p>
+                </div>
+                <button onClick={() => setSelectedHistoryCampaign(null)}><X size={20} /></button>
+              </div>
+
+              {details.length > 0 ? (
+                <>
+                  <div className="grid grid-cols-2 gap-4 text-center mb-4">
+                    <div className="bg-green-50 p-4 rounded-lg">
+                      <p className="text-xs font-bold uppercase text-green-700">Sucessos</p>
+                      <p className="text-2xl font-bold">{successCount}</p>
+                    </div>
+                    <div className="bg-red-50 p-4 rounded-lg">
+                      <p className="text-xs font-bold uppercase text-red-700">Falhas</p>
+                      <p className="text-2xl font-bold">{errorCount}</p>
+                    </div>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto border rounded-lg custom-scrollbar">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-50">
+                        <tr>
+                          <th className="p-2 text-left">DestinatÃ¡rio</th>
+                          <th className="p-2 text-left">Email</th>
+                          <th className="p-2 text-center">Estado</th>
+                          <th className="p-2 text-left">Detalhe</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {details.map((detail, i) => (
+                          <tr key={`${detail.email}-${i}`} className={detail.status === 'error' ? 'bg-red-50/50' : ''}>
+                            <td className="p-2 font-medium">{detail.name}</td>
+                            <td className="p-2 text-slate-500">{detail.email}</td>
+                            <td className={`p-2 text-center font-bold ${detail.status === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                              {detail.status === 'success' ? 'Enviado' : 'Falhou'}
+                            </td>
+                            <td className="p-2 text-red-500 italic">{detail.error || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="border rounded-lg p-8 text-center text-sm text-slate-500 italic">
+                  Esta campanha nÃ£o tem detalhe por destinatÃ¡rio guardado.
+                </div>
+              )}
+
+              <div className="text-right mt-4">
+                <button onClick={() => setSelectedHistoryCampaign(null)} className="bg-slate-700 text-white px-6 py-2 rounded-lg font-bold">Fechar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Recipient Selection Modal */}
       {isRecipientModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl flex flex-col max-h-[80vh]">
                 <div className="p-6 border-b flex justify-between items-center">
-                    <h3 className="text-xl font-bold">Selecionar Destinatários</h3>
+                    <h3 className="text-xl font-bold">Selecionar DestinatÃ¡rios</h3>
                     <button onClick={() => setIsRecipientModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
                 </div>
                 
@@ -847,7 +1139,7 @@ const handleTemplateChange = (templateId: string) => {
                             }}
                             className="text-xs font-medium text-blue-600 hover:underline"
                         >
-                            {filteredRecipients.length > 0 && filteredRecipients.every(c => selectedRecipients.includes(c.id)) ? 'Desselecionar Visíveis' : 'Selecionar Visíveis'}
+                            {filteredRecipients.length > 0 && filteredRecipients.every(c => selectedRecipients.includes(c.id)) ? 'Desselecionar VisÃ­veis' : 'Selecionar VisÃ­veis'}
                         </button>
                     </div>
                     <div className="border rounded-lg bg-slate-50/50 p-2 space-y-1">
@@ -873,7 +1165,7 @@ const handleTemplateChange = (templateId: string) => {
                     </div>
                 </div>
 
-                <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={() => setIsRecipientModalOpen(false)} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">Confirmar Seleção</button></div>
+                <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={() => setIsRecipientModalOpen(false)} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">Confirmar SeleÃ§Ã£o</button></div>
             </div>
         </div>
       )}
@@ -882,3 +1174,7 @@ const handleTemplateChange = (templateId: string) => {
 };
 
 export default EmailCampaigns;
+
+
+
+

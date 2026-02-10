@@ -148,14 +148,26 @@ export interface EmailTemplate {
   body: string;
 }
 
+export interface CampaignRecipientResult {
+  name: string;
+  email: string;
+  status: 'success' | 'error';
+  error?: string;
+}
+
 export interface CampaignHistory {
   id: string;
   sent_at: string;
   subject: string;
   body: string;
   recipient_count: number;
+  recipient_ids?: string[];
+  recipient_results?: CampaignRecipientResult[];
   group_name: string;
   status: string;
+  scheduled_at?: string | null;
+  send_delay?: number | null;
+  template_id?: string | null;
 }
 
 export interface QuoteHistory {

@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+﻿import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleGenerativeAI } from "npm:@google/generative-ai";
 
 const corsHeaders = {
@@ -43,18 +43,29 @@ serve(async (req) => {
     const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
     const prompt = `
-Atue como um especialista em comunicação para um gabinete de contabilidade em Portugal.
-Crie um template de email (assunto e corpo) sobre o seguinte tópico: "${topic}".
+Atue como um especialista em comunicacao para um gabinete de contabilidade em Portugal.
+Crie um template de email (assunto e corpo) sobre o seguinte topico: "${topic}".
 O tom do email deve ser: ${tone}.
 
-O email deve ser dirigido a um cliente. Utilize as variáveis {{name}} e {{responsible_name}} onde for apropriado.
-As variáveis de cliente disponíveis são: {{name}}, {{nif}}, {{email}}, {{phone}}, {{address}}, {{sector}}, {{entityType}}, {{turnover}}, {{avenca_atual}}, {{nova_avenca}}.
-Termine o email de forma cordial, em nome da equipa do gabinete.
+Objetivo de estilo:
+- Texto curto, limpo e direto (maximo ~140 palavras).
+- Evitar linguagem burocratica e paragrafos longos.
+- Destacar apenas o essencial com **negrito**.
+- Sempre que fizer sentido, usar linhas do tipo "Campo: valor" para facilitar leitura.
+
+Estrutura recomendada:
+1) Saudacao curta.
+2) Motivo em 1 frase.
+3) Pontos importantes em linhas curtas.
+4) Fecho cordial.
+
+O email deve ser dirigido ao cliente e pode usar variaveis.
+Variaveis disponiveis: {{name}}, {{responsible_name}}, {{nif}}, {{email}}, {{phone}}, {{address}}, {{sector}}, {{entityType}}, {{turnover}}, {{avenca_atual}}, {{nova_avenca}}.
 
 Responda APENAS em formato JSON com a seguinte estrutura:
 {
-  "subject": "<Assunto do email, usando variáveis se necessário>",
-  "body": "<Corpo do email, em texto simples, usando \\n para novas linhas.>"
+  "subject": "<Assunto do email, usando variaveis se necessario>",
+  "body": "<Corpo do email em texto simples, sem HTML, usando \\n para novas linhas e **negrito** no que for mais importante.>"
 }
 `.trim();
 
@@ -63,18 +74,18 @@ Responda APENAS em formato JSON com a seguinte estrutura:
 
     const jsonCandidate = extractJson(text);
     if (!jsonCandidate) {
-      throw new Error("A IA não devolveu JSON válido. Resposta recebida: " + text.slice(0, 300));
+      throw new Error("A IA nÃ£o devolveu JSON vÃ¡lido. Resposta recebida: " + text.slice(0, 300));
     }
 
     let parsed: any;
     try {
       parsed = JSON.parse(jsonCandidate);
     } catch {
-      throw new Error("Falha ao interpretar JSON da IA. Conteúdo recebido: " + jsonCandidate.slice(0, 300));
+      throw new Error("Falha ao interpretar JSON da IA. ConteÃºdo recebido: " + jsonCandidate.slice(0, 300));
     }
 
     if (!parsed?.subject || !parsed?.body) {
-      throw new Error("JSON inválido: faltam campos 'subject' e/ou 'body'.");
+      throw new Error("JSON invÃ¡lido: faltam campos 'subject' e/ou 'body'.");
     }
 
     return new Response(JSON.stringify({ subject: parsed.subject, body: parsed.body }), {
@@ -86,7 +97,7 @@ Responda APENAS em formato JSON com a seguinte estrutura:
 
     let errorMessage = error?.message || "Erro desconhecido.";
     if (typeof errorMessage === "string" && (errorMessage.includes("429") || errorMessage.toLowerCase().includes("rate limit"))) {
-      errorMessage = "Limite de pedidos à IA atingido. Por favor, aguarde um minuto antes de tentar novamente.";
+      errorMessage = "Limite de pedidos Ã  IA atingido. Por favor, aguarde um minuto antes de tentar novamente.";
     }
 
     return new Response(JSON.stringify({ error: errorMessage }), {
@@ -95,3 +106,5 @@ Responda APENAS em formato JSON com a seguinte estrutura:
     });
   }
 });
+
+
