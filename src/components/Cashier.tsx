@@ -233,7 +233,20 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     });
   }, [plansForCurrentYear, agreementDebtByClient, getDisplayedPlanStatus]);
 
-  const handleOpenPlanModal = (client: Client) => {
+  const resetPlanFormSelection = useCallback(() => {
+    setSelectedPlanClient(null);
+    setPlanForm({
+      monthlyAmount: '',
+      debtAmount: '',
+      payUntilMonth: 12,
+      payUntilYear: currentYear,
+      notes: '',
+      called: false,
+      letterSent: false,
+    });
+  }, [currentYear]);
+
+  const fillPlanFormForClient = useCallback((client: Client) => {
     const existingPlan = getClientPlan(client.id);
     const defaultMonthlyAmount = client.monthlyFee * vatMultiplier;
     const defaultPaidUntilMonth = 12;
@@ -253,11 +266,31 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       called: existingPlan?.called || false,
       letterSent: existingPlan?.letterSent || false,
     });
+  }, [currentYear, getClientPlan]);
+
+  const handleOpenPlanModal = (client?: Client) => {
+    if (client) {
+      fillPlanFormForClient(client);
+    } else {
+      resetPlanFormSelection();
+    }
     setIsPlanModalOpen(true);
   };
 
+  const handlePlanClientChange = (clientId: string) => {
+    const client = groupClients.find(c => c.id === clientId);
+    if (!client) {
+      resetPlanFormSelection();
+      return;
+    }
+    fillPlanFormForClient(client);
+  };
+
   const handleSavePlan = async () => {
-    if (!selectedPlanClient) return;
+    if (!selectedPlanClient) {
+      alert('Selecione um cliente para criar o acordo.');
+      return;
+    }
 
     const monthlyAmount = parseFloat(planForm.monthlyAmount);
     const debtAmount = parseFloat(planForm.debtAmount);
@@ -316,7 +349,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       });
 
       setIsPlanModalOpen(false);
-      setSelectedPlanClient(null);
+      resetPlanFormSelection();
     } catch (err: any) {
       alert('Erro ao guardar acordo: ' + err.message);
     } finally {
@@ -363,7 +396,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       await cashAgreementService.delete(existingPlan.id);
       setCashAgreements(prev => prev.filter(a => a.id !== existingPlan.id));
       setIsPlanModalOpen(false);
-      setSelectedPlanClient(null);
+      resetPlanFormSelection();
     } catch (err: any) {
       alert('Erro ao remover acordo: ' + err.message);
     } finally {
@@ -720,14 +753,23 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
           <div className="flex items-center gap-2">
             <label className="text-sm font-bold">Modo de Pagamento:</label>
             <select value={paymentMode} onChange={e => setPaymentMode(e.target.value as any)} className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm">
-                <option>Numerário</option>
+                <option>Numer??rio</option>
                 <option>MB Way</option>
             </select>
             <span className="text-xs font-bold text-amber-700">A = Acordo</span>
           </div>
-          <button onClick={handleSaveChanges} disabled={isSaving || pendingChanges.size === 0} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm disabled:opacity-50">
-            {isSaving ? <RefreshCcw size={16} className="animate-spin" /> : <Save size={16} />} Gravar Pagamentos
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleOpenPlanModal()}
+              className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-emerald-700 font-bold shadow-sm"
+            >
+              <Plus size={16} /> Adicionar acordo
+            </button>
+            <button onClick={handleSaveChanges} disabled={isSaving || pendingChanges.size === 0} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm disabled:opacity-50">
+              {isSaving ? <RefreshCcw size={16} className="animate-spin" /> : <Save size={16} />} Gravar Pagamentos
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -745,7 +787,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                 return (
                   <tr key={client.id} className="hover:bg-slate-50">
                     <td className="px-4 py-2">
-                      <div className="flex items-center justify-between gap-3">
+                      <div>
                         <div>
                           <p className="font-bold text-slate-700">{client.name}</p>
                           {clientPlan ? (
@@ -756,13 +798,6 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                             <p className="text-[11px] text-slate-400">Sem acordo definido</p>
                           )}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenPlanModal(client)}
-                          className="text-[11px] font-bold text-blue-600 hover:underline whitespace-nowrap"
-                        >
-                          {clientPlan ? 'Editar acordo' : 'Adicionar acordo'}
-                        </button>
                       </div>
                     </td>
                     {months.map((_, index) => {
@@ -999,14 +1034,14 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         </div>
       </div>
 
-      {isPlanModalOpen && selectedPlanClient && (
+      {isPlanModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
             <div className="flex justify-between items-center mb-4">
               <div>
                 <h3 className="text-xl font-bold">Acordo de Pagamento e Notas</h3>
-                <p className="text-xs text-slate-500">{selectedPlanClient.name}</p>
-                {selectedClientPlan && (
+                <p className="text-xs text-slate-500">{selectedPlanClient ? selectedPlanClient.name : 'Selecionar cliente'}</p>
+                {selectedClientPlan && selectedPlanClient && (
                   <p className="text-xs text-slate-500">
                     Estado: {getDisplayedPlanStatus(selectedClientPlan, agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0)} | Divida em aberto: {(agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0).toFixed(2)} EUR
                   </p>
@@ -1016,11 +1051,27 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                 type="button"
                 onClick={() => {
                   setIsPlanModalOpen(false);
-                  setSelectedPlanClient(null);
+                  resetPlanFormSelection();
                 }}
               >
                 <X size={20} />
               </button>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-slate-500 mb-1">Cliente</label>
+              <select
+                value={selectedPlanClient?.id || ''}
+                onChange={e => handlePlanClientChange(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+              >
+                <option value="">Selecionar cliente</option>
+                {groupClients.map(client => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1123,7 +1174,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                   type="button"
                   onClick={() => {
                     setIsPlanModalOpen(false);
-                    setSelectedPlanClient(null);
+                    resetPlanFormSelection();
                   }}
                   disabled={isSavingPlan}
                   className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm"
