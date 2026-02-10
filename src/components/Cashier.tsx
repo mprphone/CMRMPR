@@ -22,6 +22,7 @@ interface ClientPaymentPlan {
   year: number;
   paidUntilMonth: number;
   monthlyAmount: number;
+  debtAmount: number;
   notes: string;
   called: boolean;
   letterSent: boolean;
@@ -31,6 +32,7 @@ interface ClientPaymentPlan {
 
 interface PlanFormState {
   monthlyAmount: string;
+  debtAmount: string;
   payUntilMonth: number;
   notes: string;
   called: boolean;
@@ -61,6 +63,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const [selectedPlanClient, setSelectedPlanClient] = useState<Client | null>(null);
   const [planForm, setPlanForm] = useState<PlanFormState>({
     monthlyAmount: '',
+    debtAmount: '',
     payUntilMonth: 12,
     notes: '',
     called: false,
@@ -93,6 +96,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       year: agreement.agreementYear,
       paidUntilMonth: agreement.paidUntilMonth,
       monthlyAmount: agreement.monthlyAmount,
+      debtAmount: agreement.debtAmount,
       notes: agreement.notes,
       called: agreement.called,
       letterSent: agreement.letterSent,
@@ -152,15 +156,6 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     let cashTotal = 0;
     let mbWayTotal = 0;
 
-    // Consolidate all payments (DB + pending changes)
-    const consolidatedPayments = new Map<string, Partial<CashPayment>>();
-    cashPayments.forEach(p => {
-        consolidatedPayments.set(`${p.clientId}-${p.paymentYear}-${p.paymentMonth}`, p);
-    });
-    pendingChanges.forEach((change, key) => {
-        consolidatedPayments.set(key, change);
-    });
-
     consolidatedPayments.forEach(payment => {
       // Only sum payments that are not yet processed and not marked for deletion
       if (!payment.cashOperationId && payment.amountPaid !== -1) {
@@ -180,16 +175,15 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   }, [sessionExpenses]);
 
   const agreementDebtByClient = useMemo(() => {
-    const debtMap = new Map<string, { agreedTotal: number; paidTotal: number; debt: number }>();
+    const debtMap = new Map<string, { debtConfigured: number; paidTotal: number; debt: number }>();
 
     groupClients.forEach(client => {
       const agreement = getClientPlan(client.id);
       if (!agreement) return;
 
-      const agreedTotal = agreement.monthlyAmount * agreement.paidUntilMonth;
       let paidTotal = 0;
 
-      for (let month = 1; month <= agreement.paidUntilMonth; month++) {
+      for (let month = 1; month <= 12; month++) {
         const payment = consolidatedPayments.get(`${client.id}-${currentYear}-${month}`);
         if (payment && payment.amountPaid !== -1) {
           paidTotal += payment.amountPaid || 0;
@@ -197,9 +191,9 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       }
 
       debtMap.set(client.id, {
-        agreedTotal,
+        debtConfigured: agreement.debtAmount,
         paidTotal,
-        debt: Math.max(0, agreedTotal - paidTotal),
+        debt: Math.max(0, agreement.debtAmount - paidTotal),
       });
     });
 
@@ -208,11 +202,17 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
   const handleOpenPlanModal = (client: Client) => {
     const existingPlan = getClientPlan(client.id);
+    const defaultMonthlyAmount = client.monthlyFee * vatMultiplier;
+    const defaultPaidUntilMonth = 12;
+    const monthlyAmount = existingPlan ? existingPlan.monthlyAmount : defaultMonthlyAmount;
+    const paidUntilMonth = existingPlan?.paidUntilMonth || defaultPaidUntilMonth;
+    const debtAmount = existingPlan ? existingPlan.debtAmount : monthlyAmount * paidUntilMonth;
 
     setSelectedPlanClient(client);
     setPlanForm({
-      monthlyAmount: existingPlan ? existingPlan.monthlyAmount.toFixed(2) : (client.monthlyFee * vatMultiplier).toFixed(2),
-      payUntilMonth: existingPlan?.paidUntilMonth || 12,
+      monthlyAmount: monthlyAmount.toFixed(2),
+      debtAmount: debtAmount.toFixed(2),
+      payUntilMonth: paidUntilMonth,
       notes: existingPlan?.notes || '',
       called: existingPlan?.called || false,
       letterSent: existingPlan?.letterSent || false,
@@ -224,8 +224,13 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     if (!selectedPlanClient) return;
 
     const monthlyAmount = parseFloat(planForm.monthlyAmount);
+    const debtAmount = parseFloat(planForm.debtAmount);
     if (!Number.isFinite(monthlyAmount) || monthlyAmount <= 0) {
       alert('Indique um valor mensal valido para o acordo.');
+      return;
+    }
+    if (!Number.isFinite(debtAmount) || debtAmount < 0) {
+      alert('Indique um valor de divida valido para o acordo.');
       return;
     }
 
@@ -240,6 +245,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         agreementYear: currentYear,
         paidUntilMonth,
         monthlyAmount,
+        debtAmount,
         notes: planForm.notes.trim(),
         called: planForm.called,
         letterSent: planForm.letterSent,
@@ -304,6 +310,70 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       };
       setPendingChanges(new Map(pendingChanges.set(changeKey, newPayment)));
     }
+  };
+
+  const handlePayInstallment = (client: Client, method: 'NumerÃ¡rio' | 'MB Way') => {
+    const agreement = getClientPlan(client.id);
+    if (!agreement) {
+      alert('Este cliente nao tem acordo definido.');
+      return;
+    }
+
+    const debtInfo = agreementDebtByClient.get(client.id);
+    if (!debtInfo || debtInfo.debt <= 0) {
+      alert('Nao existe divida pendente para este acordo.');
+      return;
+    }
+
+    let targetMonth: number | null = null;
+
+    for (let month = 1; month <= agreement.paidUntilMonth; month++) {
+      const payment = paymentsMap.get(client.id)?.get(month);
+      if (!payment || payment.amountPaid === -1) {
+        targetMonth = month;
+        break;
+      }
+    }
+
+    if (!targetMonth) {
+      for (let month = agreement.paidUntilMonth + 1; month <= 12; month++) {
+        const payment = paymentsMap.get(client.id)?.get(month);
+        if (!payment || payment.amountPaid === -1) {
+          targetMonth = month;
+          break;
+        }
+      }
+    }
+
+    if (!targetMonth) {
+      alert('Nao existem meses disponiveis para registar esta prestacao no ano atual.');
+      return;
+    }
+
+    const currentPaymentState = paymentsMap.get(client.id)?.get(targetMonth);
+    if (currentPaymentState?.cashOperationId) {
+      alert('O mes selecionado ja foi processado em caixa.');
+      return;
+    }
+
+    const amountToPay = Math.min(agreement.monthlyAmount, debtInfo.debt);
+    const changeKey = `${client.id}-${currentYear}-${targetMonth}`;
+    const newPayment: Partial<CashPayment> = {
+      id: currentPaymentState?.id || crypto.randomUUID(),
+      clientId: client.id,
+      paymentYear: currentYear,
+      paymentMonth: targetMonth,
+      amountPaid: amountToPay,
+      paidAt: new Date().toISOString(),
+      cashOperationId: null,
+      paymentMethod: method,
+    };
+
+    setPendingChanges(prev => {
+      const next = new Map(prev);
+      next.set(changeKey, newPayment);
+      return next;
+    });
   };
 
   const handleSaveChanges = useCallback(async (silent = false): Promise<CashPayment[] | null> => {
@@ -678,13 +748,31 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                       {plan.notes || 'Sem notas'}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenPlanModal(client)}
-                        className="text-xs font-bold text-blue-600 hover:underline"
-                      >
-                        Editar
-                      </button>
+                      <div className="flex items-center justify-end gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handlePayInstallment(client, 'NumerÃ¡rio')}
+                          disabled={(agreementDebtByClient.get(client.id)?.debt || 0) <= 0}
+                          className="text-[11px] px-2 py-1 rounded-md bg-green-100 text-green-700 font-bold hover:bg-green-200 disabled:opacity-40"
+                        >
+                          Pagar Numerario
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePayInstallment(client, 'MB Way')}
+                          disabled={(agreementDebtByClient.get(client.id)?.debt || 0) <= 0}
+                          className="text-[11px] px-2 py-1 rounded-md bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 disabled:opacity-40"
+                        >
+                          Pagar MB Way
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPlanModal(client)}
+                          className="text-xs font-bold text-blue-600 hover:underline"
+                        >
+                          Editar
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -776,7 +864,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Valor mensal do acordo (EUR)</label>
                 <input
@@ -785,6 +873,18 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                   step="0.01"
                   value={planForm.monthlyAmount}
                   onChange={e => setPlanForm(prev => ({ ...prev, monthlyAmount: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Valor da divida do acordo (EUR)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={planForm.debtAmount}
+                  onChange={e => setPlanForm(prev => ({ ...prev, debtAmount: e.target.value }))}
                   className="w-full px-3 py-2 border rounded-lg text-sm"
                   placeholder="0.00"
                 />

@@ -234,6 +234,7 @@ export interface CashAgreement {
   agreementYear: number;
   paidUntilMonth: number;
   monthlyAmount: number;
+  debtAmount: number;
   notes: string;
   called: boolean;
   letterSent: boolean;
