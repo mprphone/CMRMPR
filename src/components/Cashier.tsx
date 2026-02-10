@@ -23,6 +23,7 @@ interface ClientPaymentPlan {
   paidUntilMonth: number;
   monthlyAmount: number;
   debtAmount: number;
+  status: 'Ativo' | 'Anulado' | 'Concluido';
   notes: string;
   called: boolean;
   letterSent: boolean;
@@ -97,6 +98,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       paidUntilMonth: agreement.paidUntilMonth,
       monthlyAmount: agreement.monthlyAmount,
       debtAmount: agreement.debtAmount,
+      status: agreement.status,
       notes: agreement.notes,
       called: agreement.called,
       letterSent: agreement.letterSent,
@@ -200,6 +202,100 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     return debtMap;
   }, [groupClients, getClientPlan, consolidatedPayments, currentYear]);
 
+  const getDisplayedPlanStatus = useCallback(
+    (plan: ClientPaymentPlan, debt: number): 'Ativo' | 'Anulado' | 'Concluido' => {
+      if (plan.status === 'Anulado') return 'Anulado';
+      if (debt <= 0) return 'Concluido';
+      return 'Ativo';
+    },
+    []
+  );
+
+  const activePlansForCurrentYear = useMemo(() => {
+    return plansForCurrentYear.filter(({ client, plan }) => {
+      const debt = agreementDebtByClient.get(client.id)?.debt || 0;
+      return getDisplayedPlanStatus(plan, debt) === 'Ativo';
+    });
+  }, [plansForCurrentYear, agreementDebtByClient, getDisplayedPlanStatus]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const carryOpenAgreementsToCurrentYear = async () => {
+      const previousYear = currentYear - 1;
+      const currentYearClientIds = new Set(
+        cashAgreements
+          .filter(agreement => agreement.agreementYear === currentYear)
+          .map(agreement => agreement.clientId)
+      );
+
+      const previousYearAgreements = cashAgreements.filter(
+        agreement =>
+          agreement.agreementYear === previousYear &&
+          agreement.status !== 'Anulado'
+      );
+
+      const agreementsToCreate = previousYearAgreements
+        .filter(agreement => !currentYearClientIds.has(agreement.clientId))
+        .map(agreement => {
+          const paidInPreviousYear = cashPayments
+            .filter(payment => payment.clientId === agreement.clientId && payment.paymentYear === previousYear)
+            .reduce((sum, payment) => sum + payment.amountPaid, 0);
+
+          const remainingDebt = Math.max(0, agreement.debtAmount - paidInPreviousYear);
+          if (remainingDebt <= 0) return null;
+
+          return {
+            clientId: agreement.clientId,
+            agreementYear: currentYear,
+            paidUntilMonth: 12,
+            monthlyAmount: agreement.monthlyAmount,
+            debtAmount: remainingDebt,
+            status: 'Ativo' as const,
+            notes: agreement.notes || '',
+            called: false,
+            letterSent: false,
+          };
+        })
+        .filter((agreement): agreement is NonNullable<typeof agreement> => Boolean(agreement));
+
+      if (agreementsToCreate.length === 0) return;
+
+      try {
+        const savedAgreements = await Promise.all(
+          agreementsToCreate.map(agreement => cashAgreementService.upsert(agreement))
+        );
+
+        if (isCancelled || savedAgreements.length === 0) return;
+
+        setCashAgreements(prev => {
+          const merged = [...prev];
+          savedAgreements.forEach(savedAgreement => {
+            const index = merged.findIndex(
+              agreement =>
+                agreement.clientId === savedAgreement.clientId &&
+                agreement.agreementYear === savedAgreement.agreementYear
+            );
+            if (index >= 0) {
+              merged[index] = savedAgreement;
+            } else {
+              merged.push(savedAgreement);
+            }
+          });
+          return merged;
+        });
+      } catch (error) {
+        console.error('Erro ao transitar acordos para o novo ano:', error);
+      }
+    };
+
+    carryOpenAgreementsToCurrentYear();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [cashAgreements, cashPayments, currentYear, setCashAgreements]);
+
   const handleOpenPlanModal = (client: Client) => {
     const existingPlan = getClientPlan(client.id);
     const defaultMonthlyAmount = client.monthlyFee * vatMultiplier;
@@ -236,6 +332,12 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
     const paidUntilMonth = Math.min(12, Math.max(1, Number(planForm.payUntilMonth) || 12));
     const existingPlan = getClientPlan(selectedPlanClient.id);
+    const nextStatus =
+      existingPlan?.status === 'Anulado'
+        ? 'Anulado'
+        : debtAmount <= 0
+          ? 'Concluido'
+          : 'Ativo';
 
     try {
       setIsSavingPlan(true);
@@ -246,6 +348,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         paidUntilMonth,
         monthlyAmount,
         debtAmount,
+        status: nextStatus,
         notes: planForm.notes.trim(),
         called: planForm.called,
         letterSent: planForm.letterSent,
@@ -260,6 +363,35 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setSelectedPlanClient(null);
     } catch (err: any) {
       alert('Erro ao guardar acordo: ' + err.message);
+    } finally {
+      setIsSavingPlan(false);
+    }
+  };
+
+  const handleSetPlanStatus = async (client: Client, status: 'Ativo' | 'Anulado' | 'Concluido') => {
+    const existingPlan = getClientPlan(client.id);
+    if (!existingPlan?.id) return;
+
+    try {
+      setIsSavingPlan(true);
+      const savedAgreement = await cashAgreementService.upsert({
+        id: existingPlan.id,
+        clientId: existingPlan.clientId,
+        agreementYear: existingPlan.year,
+        paidUntilMonth: existingPlan.paidUntilMonth,
+        monthlyAmount: existingPlan.monthlyAmount,
+        debtAmount: existingPlan.debtAmount,
+        status,
+        notes: existingPlan.notes,
+        called: existingPlan.called,
+        letterSent: existingPlan.letterSent,
+      });
+
+      setCashAgreements(prev =>
+        prev.map(agreement => (agreement.id === savedAgreement.id ? savedAgreement : agreement))
+      );
+    } catch (err: any) {
+      alert('Erro ao atualizar estado do acordo: ' + err.message);
     } finally {
       setIsSavingPlan(false);
     }
@@ -284,6 +416,11 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   };
 
   const handlePaymentToggle = (client: Client, month: number) => {
+    if (getClientPlan(client.id)) {
+      alert('Este cliente tem acordo. Use os botões "Pagar Numerário" ou "Pagar MB Way" na tabela de acordos.');
+      return;
+    }
+
     const monthNumber = month + 1;
     const changeKey = `${client.id}-${currentYear}-${monthNumber}`;
     const currentPaymentState = paymentsMap.get(client.id)?.get(monthNumber);
@@ -312,22 +449,45 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     }
   };
 
-  const handlePayInstallment = (client: Client, method: 'NumerÃ¡rio' | 'MB Way') => {
+  const handlePayInstallment = (client: Client, method: 'Numerário' | 'MB Way') => {
     const agreement = getClientPlan(client.id);
     if (!agreement) {
-      alert('Este cliente nao tem acordo definido.');
+      alert('Este cliente não tem acordo definido.');
+      return;
+    }
+
+    if (agreement.status === 'Anulado') {
+      alert('Este acordo está anulado. Reative o acordo para registar novas prestações.');
       return;
     }
 
     const debtInfo = agreementDebtByClient.get(client.id);
     if (!debtInfo || debtInfo.debt <= 0) {
-      alert('Nao existe divida pendente para este acordo.');
+      alert('Não existe dívida pendente para este acordo.');
       return;
     }
 
-    let targetMonth: number | null = null;
+    const defaultAmount = Math.min(agreement.monthlyAmount, debtInfo.debt);
+    const amountInput = window.prompt(
+      `Valor a registar (${method}) para ${client.name}:`,
+      defaultAmount.toFixed(2).replace('.', ',')
+    );
 
-    for (let month = 1; month <= agreement.paidUntilMonth; month++) {
+    if (amountInput === null) return;
+
+    const parsedAmount = Number(amountInput.replace(',', '.').trim());
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      alert('Indique um valor válido superior a zero.');
+      return;
+    }
+
+    const amountToPay = Math.min(parsedAmount, debtInfo.debt);
+    if (parsedAmount > debtInfo.debt) {
+      alert(`O valor excede a dívida em aberto. Será registado apenas ${amountToPay.toFixed(2)} EUR.`);
+    }
+
+    let targetMonth: number | null = null;
+    for (let month = 1; month <= 12; month++) {
       const payment = paymentsMap.get(client.id)?.get(month);
       if (!payment || payment.amountPaid === -1) {
         targetMonth = month;
@@ -336,27 +496,16 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     }
 
     if (!targetMonth) {
-      for (let month = agreement.paidUntilMonth + 1; month <= 12; month++) {
-        const payment = paymentsMap.get(client.id)?.get(month);
-        if (!payment || payment.amountPaid === -1) {
-          targetMonth = month;
-          break;
-        }
-      }
-    }
-
-    if (!targetMonth) {
-      alert('Nao existem meses disponiveis para registar esta prestacao no ano atual.');
+      alert('Não existem meses disponíveis para registar esta prestação no ano atual.');
       return;
     }
 
     const currentPaymentState = paymentsMap.get(client.id)?.get(targetMonth);
     if (currentPaymentState?.cashOperationId) {
-      alert('O mes selecionado ja foi processado em caixa.');
+      alert('O mês selecionado já foi processado em caixa.');
       return;
     }
 
-    const amountToPay = Math.min(agreement.monthlyAmount, debtInfo.debt);
     const changeKey = `${client.id}-${currentYear}-${targetMonth}`;
     const newPayment: Partial<CashPayment> = {
       id: currentPaymentState?.id || crypto.randomUUID(),
@@ -375,7 +524,6 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       return next;
     });
   };
-
   const handleSaveChanges = useCallback(async (silent = false): Promise<CashPayment[] | null> => {
     if (pendingChanges.size === 0) return null;
     setIsSaving(true);
@@ -608,9 +756,9 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         <div className="p-4 border-b flex justify-between items-center">
           <div className="flex items-center gap-2">
             <span className="text-sm font-bold">Ano:</span>
-            <button onClick={() => setCurrentYear(y => y - 1)} className="p-1 rounded-full hover:bg-slate-200">‹</button>
+            <button onClick={() => setCurrentYear(y => y - 1)} className="p-1 rounded-full hover:bg-slate-200">{'<'}</button>
             <span className="font-bold text-lg w-16 text-center">{currentYear}</span>
-            <button onClick={() => setCurrentYear(y => y + 1)} className="p-1 rounded-full hover:bg-slate-200">›</button>
+            <button onClick={() => setCurrentYear(y => y + 1)} className="p-1 rounded-full hover:bg-slate-200">{'>'}</button>
           </div>
           <div className="flex items-center gap-2">
             <label className="text-sm font-bold">Modo de Pagamento:</label>
@@ -663,10 +811,12 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                     {months.map((_, index) => {
                       const monthNumber = index + 1;
                       const payment = paymentsMap.get(client.id)?.get(monthNumber);
-                      let status: 'pending' | 'agreement' | 'paid_cash' | 'paid_mbway' | 'processed' = 'pending';
+                      const hasAgreement = Boolean(clientPlan);
+                      const agreementCancelled = clientPlan?.status === 'Anulado';
+                      let status: 'pending' | 'agreement' | 'agreement_cancelled' | 'paid_cash' | 'paid_mbway' | 'processed' = 'pending';
                       if (payment) {
                         if (payment.amountPaid === -1) {
-                          status = clientPlan && monthNumber <= clientPlan.paidUntilMonth ? 'agreement' : 'pending';
+                          status = hasAgreement ? (agreementCancelled ? 'agreement_cancelled' : 'agreement') : 'pending';
                         } else if (payment.cashOperationId) {
                           status = 'processed';
                         } else if (payment.paymentMethod === 'MB Way') {
@@ -674,30 +824,34 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                         } else {
                           status = 'paid_cash';
                         }
-                      } else if (clientPlan && monthNumber <= clientPlan.paidUntilMonth) {
-                        status = 'agreement';
+                      } else if (hasAgreement) {
+                        status = agreementCancelled ? 'agreement_cancelled' : 'agreement';
                       }
 
                       const isPendingChange = pendingChanges.has(`${client.id}-${currentYear}-${monthNumber}`);
+                      const disableMonthToggle = status === 'processed' || hasAgreement;
 
                       return (
                         <td key={index} className="p-1 text-center">
                           <button
                             onClick={() => handlePaymentToggle(client, index)}
-                            disabled={status === 'processed'}
+                            disabled={disableMonthToggle}
                             className={`w-full h-8 rounded-md text-xs font-bold transition-all
                             ${status === 'paid_cash' ? 'bg-green-500 text-white' : ''}
                             ${status === 'paid_mbway' ? 'bg-blue-500 text-white' : ''}
                             ${status === 'agreement' ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : ''}
+                            ${status === 'agreement_cancelled' ? 'bg-red-100 text-red-700' : ''}
                             ${status === 'pending' ? 'bg-slate-100 text-slate-400 hover:bg-green-200' : ''}
-                            ${status === 'processed' ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : ''}
+                            ${disableMonthToggle ? 'cursor-not-allowed' : ''}
+                            ${status === 'processed' ? 'bg-slate-300 text-slate-500' : ''}
                             ${isPendingChange ? 'ring-2 ring-blue-500' : ''}
                           `}
                           >
                             {status === 'paid_cash' && <Check size={14} className="mx-auto" />}
-                            {status === 'paid_mbway' && <CreditCard size={14} className="mx-auto" />}
+                            {status === 'paid_mbway' && <Check size={14} className="mx-auto" />}
                             {status === 'processed' && <Check size={14} className="mx-auto" />}
                             {status === 'agreement' && 'A'}
+                            {status === 'agreement_cancelled' && 'A'}
                             {status === 'pending' && getMonthAmount(client, monthNumber).toFixed(0)}
                           </button>
                         </td>
@@ -714,7 +868,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold text-slate-800">Acordos e Notas de Cobranca ({currentYear})</h3>
-          <span className="text-xs text-slate-500 font-medium">{plansForCurrentYear.length} acordo(s) ativo(s)</span>
+          <span className="text-xs text-slate-500 font-medium">{activePlansForCurrentYear.length} acordo(s) ativo(s)</span>
         </div>
         {plansForCurrentYear.length === 0 ? (
           <p className="text-sm text-slate-400 italic text-center py-4">
@@ -729,53 +883,92 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                   <th className="px-3 py-2 text-right">Valor mensal</th>
                   <th className="px-3 py-2 text-left">Ate mes</th>
                   <th className="px-3 py-2 text-right">Divida</th>
+                  <th className="px-3 py-2 text-left">Estado</th>
                   <th className="px-3 py-2 text-left">Acompanhamento</th>
                   <th className="px-3 py-2 text-left">Notas</th>
                   <th className="px-3 py-2 text-right">Acao</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {plansForCurrentYear.map(({ client, plan }) => (
-                  <tr key={buildPlanKey(client.id, currentYear)} className="hover:bg-slate-50">
-                    <td className="px-3 py-2 font-medium text-slate-700">{client.name}</td>
-                    <td className="px-3 py-2 text-right font-bold text-slate-800">{plan.monthlyAmount.toFixed(2)} EUR</td>
-                    <td className="px-3 py-2">{months[plan.paidUntilMonth - 1]}</td>
-                    <td className="px-3 py-2 text-right font-bold text-orange-600">{(agreementDebtByClient.get(client.id)?.debt || 0).toFixed(2)} EUR</td>
-                    <td className="px-3 py-2 text-xs">
-                      Ligacao: {plan.called ? 'Sim' : 'Nao'} | Carta: {plan.letterSent ? 'Sim' : 'Nao'}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-600 max-w-xs truncate" title={plan.notes || ''}>
-                      {plan.notes || 'Sem notas'}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <div className="flex items-center justify-end gap-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => handlePayInstallment(client, 'NumerÃ¡rio')}
-                          disabled={(agreementDebtByClient.get(client.id)?.debt || 0) <= 0}
-                          className="text-[11px] px-2 py-1 rounded-md bg-green-100 text-green-700 font-bold hover:bg-green-200 disabled:opacity-40"
-                        >
-                          Pagar Numerario
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handlePayInstallment(client, 'MB Way')}
-                          disabled={(agreementDebtByClient.get(client.id)?.debt || 0) <= 0}
-                          className="text-[11px] px-2 py-1 rounded-md bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 disabled:opacity-40"
-                        >
-                          Pagar MB Way
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenPlanModal(client)}
-                          className="text-xs font-bold text-blue-600 hover:underline"
-                        >
-                          Editar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {plansForCurrentYear.map(({ client, plan }) => {
+                  const debt = agreementDebtByClient.get(client.id)?.debt || 0;
+                  const displayedStatus = getDisplayedPlanStatus(plan, debt);
+                  const canRegisterPayment = displayedStatus === 'Ativo' && debt > 0;
+
+                  return (
+                    <tr key={buildPlanKey(client.id, currentYear)} className="hover:bg-slate-50">
+                      <td className="px-3 py-2 font-medium text-slate-700">{client.name}</td>
+                      <td className="px-3 py-2 text-right font-bold text-slate-800">{plan.monthlyAmount.toFixed(2)} EUR</td>
+                      <td className="px-3 py-2">{months[plan.paidUntilMonth - 1]}</td>
+                      <td className="px-3 py-2 text-right font-bold text-orange-600">{debt.toFixed(2)} EUR</td>
+                      <td className="px-3 py-2">
+                        <span className={`inline-flex items-center px-2 py-1 rounded-md text-[11px] font-bold
+                          ${displayedStatus === 'Ativo' ? 'bg-green-100 text-green-700' : ''}
+                          ${displayedStatus === 'Anulado' ? 'bg-red-100 text-red-700' : ''}
+                          ${displayedStatus === 'Concluido' ? 'bg-slate-200 text-slate-700' : ''}
+                        `}>
+                          {displayedStatus}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        Ligacao: {plan.called ? 'Sim' : 'Nao'} | Carta: {plan.letterSent ? 'Sim' : 'Nao'}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-600 max-w-xs truncate" title={plan.notes || ''}>
+                        {plan.notes || 'Sem notas'}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handlePayInstallment(client, 'Numerário')}
+                            disabled={!canRegisterPayment}
+                            className="text-[11px] px-2 py-1 rounded-md bg-green-100 text-green-700 font-bold hover:bg-green-200 disabled:opacity-40"
+                          >
+                            Pagar Numerario
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePayInstallment(client, 'MB Way')}
+                            disabled={!canRegisterPayment}
+                            className="text-[11px] px-2 py-1 rounded-md bg-blue-100 text-blue-700 font-bold hover:bg-blue-200 disabled:opacity-40"
+                          >
+                            Pagar MB Way
+                          </button>
+                          {displayedStatus === 'Anulado' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleSetPlanStatus(client, 'Ativo')}
+                              disabled={isSavingPlan}
+                              className="text-[11px] px-2 py-1 rounded-md bg-emerald-100 text-emerald-700 font-bold hover:bg-emerald-200 disabled:opacity-40"
+                            >
+                              Reativar
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm('Marcar este acordo como anulado?')) {
+                                  handleSetPlanStatus(client, 'Anulado');
+                                }
+                              }}
+                              disabled={isSavingPlan}
+                              className="text-[11px] px-2 py-1 rounded-md bg-red-100 text-red-700 font-bold hover:bg-red-200 disabled:opacity-40"
+                            >
+                              Anular
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPlanModal(client)}
+                            className="text-xs font-bold text-blue-600 hover:underline"
+                          >
+                            Editar
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -852,6 +1045,11 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
               <div>
                 <h3 className="text-xl font-bold">Acordo de Pagamento e Notas</h3>
                 <p className="text-xs text-slate-500">{selectedPlanClient.name} | Ano {currentYear}</p>
+                {selectedClientPlan && (
+                  <p className="text-xs text-slate-500">
+                    Estado: {getDisplayedPlanStatus(selectedClientPlan, agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0)} | Divida em aberto: {(agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0).toFixed(2)} EUR
+                  </p>
+                )}
               </div>
               <button
                 type="button"

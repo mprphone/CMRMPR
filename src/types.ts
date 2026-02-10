@@ -235,6 +235,7 @@ export interface CashAgreement {
   paidUntilMonth: number;
   monthlyAmount: number;
   debtAmount: number;
+  status: 'Ativo' | 'Anulado' | 'Concluido';
   notes: string;
   called: boolean;
   letterSent: boolean;
