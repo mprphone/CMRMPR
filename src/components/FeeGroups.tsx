@@ -371,7 +371,7 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
   const MapSortableHeader = ({ children, sortKey }: { children: React.ReactNode, sortKey: MapSortableKeys }) => {
     const isSorted = mapSortConfig?.key === sortKey;
     return (
-        <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => requestMapSort(sortKey)}>
+        <th className="px-3 py-2 text-[11px] cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => requestMapSort(sortKey)}>
             <div className="flex items-center gap-1">
                 {children}
                 {isSorted ? (
@@ -405,24 +405,24 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
         <div className="max-w-4xl mx-auto bg-white p-10 rounded-2xl print:p-0">
           <h2 className="text-xl font-bold text-slate-800">Mapa de Alteração de Avenças</h2>
           <p className="text-sm text-slate-500 mb-6">Grupo: {selectedGroup?.name}</p>
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+          <table className="w-full text-xs text-left leading-tight">
+            <thead className="text-[10px] text-slate-500 uppercase bg-slate-50">
               <tr>
                 <MapSortableHeader sortKey="name">Cliente</MapSortableHeader>
                 <MapSortableHeader sortKey="monthlyFee">Avença Atual (€)</MapSortableHeader>
                 <MapSortableHeader sortKey="newFee">Nova Avença (€)</MapSortableHeader>
                 <MapSortableHeader sortKey="difference">Diferença (€)</MapSortableHeader>
-                <th className="px-4 py-3 text-right">Ações</th>
+                <th className="px-3 py-2 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sortedMapClients.map(client => (
                 <tr key={client.id}>
-                  <td className="px-4 py-3 font-medium">{client.name}</td>
-                  <td className="px-4 py-3 text-right">{client.monthlyFee.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right font-bold text-blue-600">{client.newFee.toFixed(2)}</td>
-                  <td className={`px-4 py-3 text-right font-bold ${client.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>{client.difference >= 0 ? '+' : ''}{client.difference.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-3 py-2 font-medium">{client.name}</td>
+                  <td className="px-3 py-2 text-right">{client.monthlyFee.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-blue-600">{client.newFee.toFixed(2)}</td>
+                  <td className={`px-3 py-2 text-right font-bold ${client.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>{client.difference >= 0 ? '+' : ''}{client.difference.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-right">
                     <button onClick={() => handleRemoveFromMap(client.id)} className="p-1 text-slate-300 hover:text-red-500" title="Remover do mapa">
                       <Trash2 size={14} />
                     </button>
@@ -432,10 +432,10 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
             </tbody>
             <tfoot className="bg-slate-50 font-bold text-slate-700">
               <tr>
-                <td className="px-4 py-3">TOTAL</td>
-                <td className="px-4 py-3 text-right">{mapTotals.current.toFixed(2)}</td>
-                <td className="px-4 py-3 text-right text-blue-600">{mapTotals.new.toFixed(2)}</td>
-                <td className={`px-4 py-3 text-right ${mapTotals.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>{mapTotals.diff >= 0 ? '+' : ''}{mapTotals.diff.toFixed(2)}</td>
+                <td className="px-3 py-2">TOTAL</td>
+                <td className="px-3 py-2 text-right">{mapTotals.current.toFixed(2)}</td>
+                <td className="px-3 py-2 text-right text-blue-600">{mapTotals.new.toFixed(2)}</td>
+                <td className={`px-3 py-2 text-right ${mapTotals.diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>{mapTotals.diff >= 0 ? '+' : ''}{mapTotals.diff.toFixed(2)}</td>
                 <td></td>
               </tr>
             </tfoot>
@@ -445,7 +445,7 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
     );
   }
 
-  const isAvençasGroup = selectedGroup?.name.toLowerCase().includes('avenças');
+  const isAvencasGroup = selectedGroup?.name.toLowerCase().includes('avenças');
   // View 2: Group Workspace (Detail)
   return (
     <div className="space-y-6 animate-fade-in pb-20">
@@ -461,6 +461,15 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
         </div>
         
         <div className="flex items-center gap-3">
+          {isAvencasGroup && (
+            <button
+              onClick={handleSaveProposedFees}
+              disabled={isSaving || Object.keys(newFees).length === 0}
+              className="bg-white text-slate-700 border border-slate-300 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? <RefreshCcw size={16} className="animate-spin"/> : <Save size={16}/>} Gravar Propostas
+            </button>
+          )}
           <button onClick={() => setIsAddClientModalOpen(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
             <UserPlus size={16} /> Adicionar Clientes
           </button>
@@ -487,7 +496,7 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
         </div>
       </div>
 
-      {isAvençasGroup ? (
+      {isAvencasGroup ? (
         <>
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="overflow-x-auto">
@@ -543,13 +552,6 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
             </div>
           </div>
           <div className="flex justify-end items-center gap-3 mt-6">
-            <button 
-              onClick={handleSaveProposedFees} 
-              disabled={isSaving || Object.keys(newFees).length === 0} 
-              className="bg-white text-slate-700 border border-slate-300 px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? <RefreshCcw size={18} className="animate-spin"/> : <Save size={18}/>} Gravar Propostas
-            </button>
             <button 
               onClick={() => setShowChangeMapPreview(true)} 
               disabled={clientsWithNewFees.length === 0} 
@@ -705,3 +707,4 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
 };
 
 export default FeeGroups;
+
