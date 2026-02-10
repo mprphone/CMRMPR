@@ -47,6 +47,27 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
   const [campaignResult, setCampaignResult] = useState<{ successCount: number; errorCount: number; details: { name: string; email: string; status: 'success' | 'error'; error?: string }[] } | null>(null);
   const [validationIssues, setValidationIssues] = useState<string[]>([]);
 
+  const formatMoney = (value: any) => {
+    const n = Number(value);
+    if (Number.isNaN(n)) return String(value ?? '');
+    return `${n.toFixed(0)}€`;
+  };
+
+  const applyTemplateVars = (text: string, client: Client, responsibleName: string, novaAvenca?: number) => {
+    let out = text;
+    for (const key of clientVariables) {
+      const value = (client as any)[key];
+      const regex = new RegExp(`{{${key}}}`, 'g');
+      out = out.replace(regex, value !== undefined && value !== null ? String(value) : '');
+    }
+    out = out.replace(/{{responsible_name}}/g, responsibleName);
+    out = out.replace(/{{avenca_atual}}/g, formatMoney(client.monthlyFee));
+    if (novaAvenca !== undefined && novaAvenca !== null) {
+      out = out.replace(/{{nova_avenca}}/g, formatMoney(novaAvenca));
+    }
+    return out;
+  };
+
   useEffect(() => {
     // Set initial state from first template if available
     if (templates.length > 0 && !selectedTemplateId) {
@@ -198,11 +219,22 @@ const handleTemplateChange = (templateId: string) => {
     } catch (_) { /* ignore */ }
 
     const recipients = clients.filter(c => selectedRecipients.includes(c.id));
+    const selectedGroup = groups.find(g => g.id === selectedGroupId);
+    const proposedFees = selectedGroup?.proposed_fees || {};
     const invalidEmails = recipients.filter(c => !c.email || !c.email.includes('@'));
     if (invalidEmails.length) {
       alert(`Existem ${invalidEmails.length} destinatário(s) sem email válido. Corrija antes de enviar.`);
       setIsSending(false);
       return;
+    }
+    const needsNovaAvenca = subject.includes('{{nova_avenca}}') || body.includes('{{nova_avenca}}');
+    if (needsNovaAvenca) {
+      const missing = recipients.filter(c => proposedFees[c.id] === undefined || proposedFees[c.id] === null);
+      if (missing.length) {
+        alert(`Existem ${missing.length} destinatário(s) sem valor de nova avença definido neste grupo. Atualize as novas avenças antes de enviar.`);
+        setIsSending(false);
+        return;
+      }
     }
     let successCount = 0;
     let errorCount = 0;
@@ -218,8 +250,9 @@ const handleTemplateChange = (templateId: string) => {
         else { responsibleName = client.responsibleStaff; }
       }
       
-      let finalSubject = subject.replace(/{{name}}/g, client.name).replace(/{{responsible_name}}/g, responsibleName);
-      let finalBody = body.replace(/{{name}}/g, client.name).replace(/{{responsible_name}}/g, responsibleName);
+      const novaAvenca = proposedFees[client.id];
+      let finalSubject = applyTemplateVars(subject, client, responsibleName, novaAvenca);
+      let finalBody = applyTemplateVars(body, client, responsibleName, novaAvenca);
 
       try {
         if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
@@ -305,28 +338,17 @@ const handleTemplateChange = (templateId: string) => {
       }
     }
 
-    let testSubject = subject;
-    let testBody = body;
+    const selectedGroup = groups.find(g => g.id === selectedGroupId);
+    const proposedFees = selectedGroup?.proposed_fees || {};
+    const novaAvenca = proposedFees[testClient.id];
 
-    // Replace all standard client properties
-    for (const key of clientVariables) {
-      const value = (testClient as any)[key];
-      const regex = new RegExp(`{{${key}}}`, 'g');
-      if (value !== undefined && value !== null) {
-        testSubject = testSubject.replace(regex, String(value));
-        testBody = testBody.replace(regex, String(value));
-      }
+    let testSubject = applyTemplateVars(subject, testClient, responsibleName, novaAvenca);
+    let testBody = applyTemplateVars(body, testClient, responsibleName, novaAvenca);
+
+    if (testSubject.includes('{{nova_avenca}}') || testBody.includes('{{nova_avenca}}')) {
+      testSubject = testSubject.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENÇA]');
+      testBody = testBody.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENÇA]');
     }
-
-    // Replace special variables
-    testSubject = testSubject.replace(/{{responsible_name}}/g, responsibleName);
-    testBody = testBody.replace(/{{responsible_name}}/g, responsibleName);
-
-    // Replace aliased and new variables for "Avenças" group
-    testSubject = testSubject.replace(/{{avenca_atual}}/g, String(testClient.monthlyFee));
-    testBody = testBody.replace(/{{avenca_atual}}/g, String(testClient.monthlyFee));
-    testSubject = testSubject.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENÇA]');
-    testBody = testBody.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENÇA]');
 
     const optOutFooter = `<br><br><p style="font-size:10px; color:#999;">Para deixar de receber comunicações de marketing, por favor responda a este email com o assunto "Remover".</p>`;
     const finalHtml = testBody.replace(/\n/g, '<br>') + `<br><br>${globalSettings.emailSignature || ''}` + optOutFooter;
