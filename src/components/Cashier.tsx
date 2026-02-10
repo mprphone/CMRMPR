@@ -90,7 +90,19 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   }, [cashAgreements, currentYear]);
 
   const getClientPlan = useCallback((clientId: string) => {
-    const agreement = agreementsMap.get(buildPlanKey(clientId, currentYear));
+    const agreementForCurrentYear = agreementsMap.get(buildPlanKey(clientId, currentYear));
+    const latestPreviousActiveAgreement = cashAgreements
+      .filter(agreement =>
+        agreement.clientId === clientId &&
+        agreement.agreementYear < currentYear &&
+        agreement.status !== 'Anulado'
+      )
+      .sort((a, b) => {
+        if (a.agreementYear !== b.agreementYear) return b.agreementYear - a.agreementYear;
+        return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+      })[0];
+
+    const agreement = agreementForCurrentYear || latestPreviousActiveAgreement;
     if (!agreement) return undefined;
 
     return {
@@ -107,15 +119,15 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       createdAt: agreement.createdAt,
       updatedAt: agreement.updatedAt,
     } as ClientPaymentPlan;
-  }, [agreementsMap, currentYear]);
+  }, [agreementsMap, currentYear, cashAgreements]);
 
   const getMonthAmount = useCallback((client: Client, monthNumber: number) => {
     const plan = getClientPlan(client.id);
-    if (plan && monthNumber <= plan.paidUntilMonth) {
+    if (plan && currentYear === plan.year && monthNumber <= plan.paidUntilMonth) {
       return plan.monthlyAmount;
     }
     return client.monthlyFee * vatMultiplier;
-  }, [getClientPlan]);
+  }, [getClientPlan, currentYear]);
 
   const plansForCurrentYear = useMemo(() => {
     return groupClients
@@ -361,7 +373,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const handlePaymentToggle = (client: Client, month: number) => {
     const monthNumber = month + 1;
     const plan = getClientPlan(client.id);
-    if (plan && monthNumber <= plan.paidUntilMonth) {
+    if (plan && currentYear === plan.year && monthNumber <= plan.paidUntilMonth) {
       alert('Este mes esta dentro do acordo. Use os botoes "Pagar Numerario" ou "Pagar MB Way" na tabela de acordos.');
       return;
     }
@@ -755,7 +767,11 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                     {months.map((_, index) => {
                       const monthNumber = index + 1;
                       const payment = paymentsMap.get(client.id)?.get(monthNumber);
-                      const hasAgreementForMonth = Boolean(clientPlan && monthNumber <= clientPlan.paidUntilMonth);
+                      const hasAgreementForMonth = Boolean(
+                        clientPlan &&
+                        currentYear === clientPlan.year &&
+                        monthNumber <= clientPlan.paidUntilMonth
+                      );
                       const agreementCancelled = clientPlan?.status === 'Anulado';
                       let status: 'pending' | 'agreement' | 'agreement_cancelled' | 'paid_cash' | 'paid_mbway' | 'processed' = 'pending';
                       if (payment) {
