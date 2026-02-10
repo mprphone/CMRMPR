@@ -176,7 +176,7 @@ export const clientService = {
       responsavel_action: ((c as any).responsibleStaffAction as string) || 'keep'
     }));
 
-    const { error } = await storeClient.rpc('bulk_upsert_clients', { clients_data: clientsToUpsert });
+    const { error } = await storeClient.rpc('bulk_upsert_clients_jsonb', { clients_data: clientsToUpsert });
     if (error) throw error;
   },
   async upsert(client: Client): Promise<Client> {
