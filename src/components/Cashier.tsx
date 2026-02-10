@@ -35,6 +35,7 @@ interface PlanFormState {
   monthlyAmount: string;
   debtAmount: string;
   payUntilMonth: number;
+  payUntilYear: number;
   notes: string;
   called: boolean;
   letterSent: boolean;
@@ -66,6 +67,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     monthlyAmount: '',
     debtAmount: '',
     payUntilMonth: 12,
+    payUntilYear: new Date().getFullYear(),
     notes: '',
     called: false,
     letterSent: false,
@@ -185,7 +187,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
       let paidTotal = 0;
 
-      for (let month = 1; month <= 12; month++) {
+      for (let month = 1; month <= agreement.paidUntilMonth; month++) {
         const payment = consolidatedPayments.get(`${client.id}-${currentYear}-${month}`);
         if (payment && payment.amountPaid !== -1) {
           paidTotal += payment.amountPaid || 0;
@@ -218,90 +220,14 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     });
   }, [plansForCurrentYear, agreementDebtByClient, getDisplayedPlanStatus]);
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    const carryOpenAgreementsToCurrentYear = async () => {
-      const previousYear = currentYear - 1;
-      const currentYearClientIds = new Set(
-        cashAgreements
-          .filter(agreement => agreement.agreementYear === currentYear)
-          .map(agreement => agreement.clientId)
-      );
-
-      const previousYearAgreements = cashAgreements.filter(
-        agreement =>
-          agreement.agreementYear === previousYear &&
-          agreement.status !== 'Anulado'
-      );
-
-      const agreementsToCreate = previousYearAgreements
-        .filter(agreement => !currentYearClientIds.has(agreement.clientId))
-        .map(agreement => {
-          const paidInPreviousYear = cashPayments
-            .filter(payment => payment.clientId === agreement.clientId && payment.paymentYear === previousYear)
-            .reduce((sum, payment) => sum + payment.amountPaid, 0);
-
-          const remainingDebt = Math.max(0, agreement.debtAmount - paidInPreviousYear);
-          if (remainingDebt <= 0) return null;
-
-          return {
-            clientId: agreement.clientId,
-            agreementYear: currentYear,
-            paidUntilMonth: 12,
-            monthlyAmount: agreement.monthlyAmount,
-            debtAmount: remainingDebt,
-            status: 'Ativo' as const,
-            notes: agreement.notes || '',
-            called: false,
-            letterSent: false,
-          };
-        })
-        .filter((agreement): agreement is NonNullable<typeof agreement> => Boolean(agreement));
-
-      if (agreementsToCreate.length === 0) return;
-
-      try {
-        const savedAgreements = await Promise.all(
-          agreementsToCreate.map(agreement => cashAgreementService.upsert(agreement))
-        );
-
-        if (isCancelled || savedAgreements.length === 0) return;
-
-        setCashAgreements(prev => {
-          const merged = [...prev];
-          savedAgreements.forEach(savedAgreement => {
-            const index = merged.findIndex(
-              agreement =>
-                agreement.clientId === savedAgreement.clientId &&
-                agreement.agreementYear === savedAgreement.agreementYear
-            );
-            if (index >= 0) {
-              merged[index] = savedAgreement;
-            } else {
-              merged.push(savedAgreement);
-            }
-          });
-          return merged;
-        });
-      } catch (error) {
-        console.error('Erro ao transitar acordos para o novo ano:', error);
-      }
-    };
-
-    carryOpenAgreementsToCurrentYear();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [cashAgreements, cashPayments, currentYear, setCashAgreements]);
-
   const handleOpenPlanModal = (client: Client) => {
     const existingPlan = getClientPlan(client.id);
     const defaultMonthlyAmount = client.monthlyFee * vatMultiplier;
     const defaultPaidUntilMonth = 12;
+    const defaultPaidUntilYear = currentYear;
     const monthlyAmount = existingPlan ? existingPlan.monthlyAmount : defaultMonthlyAmount;
     const paidUntilMonth = existingPlan?.paidUntilMonth || defaultPaidUntilMonth;
+    const paidUntilYear = existingPlan?.year || defaultPaidUntilYear;
     const debtAmount = existingPlan ? existingPlan.debtAmount : monthlyAmount * paidUntilMonth;
 
     setSelectedPlanClient(client);
@@ -309,6 +235,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       monthlyAmount: monthlyAmount.toFixed(2),
       debtAmount: debtAmount.toFixed(2),
       payUntilMonth: paidUntilMonth,
+      payUntilYear: paidUntilYear,
       notes: existingPlan?.notes || '',
       called: existingPlan?.called || false,
       letterSent: existingPlan?.letterSent || false,
@@ -331,6 +258,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     }
 
     const paidUntilMonth = Math.min(12, Math.max(1, Number(planForm.payUntilMonth) || 12));
+    const paidUntilYear = Math.min(3000, Math.max(2000, Number(planForm.payUntilYear) || currentYear));
     const existingPlan = getClientPlan(selectedPlanClient.id);
     const nextStatus =
       existingPlan?.status === 'Anulado'
@@ -344,7 +272,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       const savedAgreement = await cashAgreementService.upsert({
         id: existingPlan?.id,
         clientId: selectedPlanClient.id,
-        agreementYear: currentYear,
+        agreementYear: paidUntilYear,
         paidUntilMonth,
         monthlyAmount,
         debtAmount,
@@ -355,7 +283,10 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       });
 
       setCashAgreements(prev => {
-        const next = prev.filter(a => !(a.clientId === savedAgreement.clientId && a.agreementYear === savedAgreement.agreementYear));
+        const next = prev.filter(a =>
+          a.id !== savedAgreement.id &&
+          !(a.clientId === savedAgreement.clientId && a.agreementYear === savedAgreement.agreementYear)
+        );
         return [...next, savedAgreement];
       });
 
@@ -416,12 +347,13 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   };
 
   const handlePaymentToggle = (client: Client, month: number) => {
-    if (getClientPlan(client.id)) {
-      alert('Este cliente tem acordo. Use os botões "Pagar Numerário" ou "Pagar MB Way" na tabela de acordos.');
+    const monthNumber = month + 1;
+    const plan = getClientPlan(client.id);
+    if (plan && monthNumber <= plan.paidUntilMonth) {
+      alert('Este mes esta dentro do acordo. Use os botoes "Pagar Numerario" ou "Pagar MB Way" na tabela de acordos.');
       return;
     }
 
-    const monthNumber = month + 1;
     const changeKey = `${client.id}-${currentYear}-${monthNumber}`;
     const currentPaymentState = paymentsMap.get(client.id)?.get(monthNumber);
 
@@ -487,7 +419,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     }
 
     let targetMonth: number | null = null;
-    for (let month = 1; month <= 12; month++) {
+    for (let month = 1; month <= agreement.paidUntilMonth; month++) {
       const payment = paymentsMap.get(client.id)?.get(month);
       if (!payment || payment.amountPaid === -1) {
         targetMonth = month;
@@ -496,7 +428,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     }
 
     if (!targetMonth) {
-      alert('Não existem meses disponíveis para registar esta prestação no ano atual.');
+      alert('Nao existem meses disponiveis dentro do periodo do acordo. Altere o mes/ano do acordo para continuar.');
       return;
     }
 
@@ -793,7 +725,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                           <p className="font-bold text-slate-700">{client.name}</p>
                           {clientPlan ? (
                             <p className="text-[11px] text-slate-500">
-                              Acordo ate {months[clientPlan.paidUntilMonth - 1]} | Mensal {clientPlan.monthlyAmount.toFixed(2)} EUR | Divida {(debtInfo?.debt || 0).toFixed(2)} EUR
+                              Acordo ate {months[clientPlan.paidUntilMonth - 1]}/{clientPlan.year} | Mensal {clientPlan.monthlyAmount.toFixed(2)} EUR | Divida {(debtInfo?.debt || 0).toFixed(2)} EUR
                             </p>
                           ) : (
                             <p className="text-[11px] text-slate-400">Sem acordo definido</p>
@@ -811,12 +743,12 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                     {months.map((_, index) => {
                       const monthNumber = index + 1;
                       const payment = paymentsMap.get(client.id)?.get(monthNumber);
-                      const hasAgreement = Boolean(clientPlan);
+                      const hasAgreementForMonth = Boolean(clientPlan && monthNumber <= clientPlan.paidUntilMonth);
                       const agreementCancelled = clientPlan?.status === 'Anulado';
                       let status: 'pending' | 'agreement' | 'agreement_cancelled' | 'paid_cash' | 'paid_mbway' | 'processed' = 'pending';
                       if (payment) {
                         if (payment.amountPaid === -1) {
-                          status = hasAgreement ? (agreementCancelled ? 'agreement_cancelled' : 'agreement') : 'pending';
+                          status = hasAgreementForMonth ? (agreementCancelled ? 'agreement_cancelled' : 'agreement') : 'pending';
                         } else if (payment.cashOperationId) {
                           status = 'processed';
                         } else if (payment.paymentMethod === 'MB Way') {
@@ -824,12 +756,12 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                         } else {
                           status = 'paid_cash';
                         }
-                      } else if (hasAgreement) {
+                      } else if (hasAgreementForMonth) {
                         status = agreementCancelled ? 'agreement_cancelled' : 'agreement';
                       }
 
                       const isPendingChange = pendingChanges.has(`${client.id}-${currentYear}-${monthNumber}`);
-                      const disableMonthToggle = status === 'processed' || hasAgreement;
+                      const disableMonthToggle = status === 'processed' || hasAgreementForMonth;
 
                       return (
                         <td key={index} className="p-1 text-center">
@@ -881,7 +813,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                 <tr>
                   <th className="px-3 py-2 text-left">Cliente</th>
                   <th className="px-3 py-2 text-right">Valor mensal</th>
-                  <th className="px-3 py-2 text-left">Ate mes</th>
+                  <th className="px-3 py-2 text-left">Ate mes/ano</th>
                   <th className="px-3 py-2 text-right">Divida</th>
                   <th className="px-3 py-2 text-left">Estado</th>
                   <th className="px-3 py-2 text-left">Acompanhamento</th>
@@ -899,7 +831,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                     <tr key={buildPlanKey(client.id, currentYear)} className="hover:bg-slate-50">
                       <td className="px-3 py-2 font-medium text-slate-700">{client.name}</td>
                       <td className="px-3 py-2 text-right font-bold text-slate-800">{plan.monthlyAmount.toFixed(2)} EUR</td>
-                      <td className="px-3 py-2">{months[plan.paidUntilMonth - 1]}</td>
+                      <td className="px-3 py-2">{months[plan.paidUntilMonth - 1]}/{plan.year}</td>
                       <td className="px-3 py-2 text-right font-bold text-orange-600">{debt.toFixed(2)} EUR</td>
                       <td className="px-3 py-2">
                         <span className={`inline-flex items-center px-2 py-1 rounded-md text-[11px] font-bold
@@ -1044,7 +976,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
             <div className="flex justify-between items-center mb-4">
               <div>
                 <h3 className="text-xl font-bold">Acordo de Pagamento e Notas</h3>
-                <p className="text-xs text-slate-500">{selectedPlanClient.name} | Ano {currentYear}</p>
+                <p className="text-xs text-slate-500">{selectedPlanClient.name}</p>
                 {selectedClientPlan && (
                   <p className="text-xs text-slate-500">
                     Estado: {getDisplayedPlanStatus(selectedClientPlan, agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0)} | Divida em aberto: {(agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0).toFixed(2)} EUR
@@ -1062,7 +994,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Valor mensal do acordo (EUR)</label>
                 <input
@@ -1100,6 +1032,18 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Acordo ate ao ano</label>
+                <input
+                  type="number"
+                  min="2000"
+                  max="3000"
+                  step="1"
+                  value={planForm.payUntilYear}
+                  onChange={e => setPlanForm(prev => ({ ...prev, payUntilYear: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                />
               </div>
             </div>
 
@@ -1217,5 +1161,3 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 };
 
 export default Cashier;
-
-
