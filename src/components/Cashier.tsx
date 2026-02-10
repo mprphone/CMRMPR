@@ -95,7 +95,8 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       .filter(agreement =>
         agreement.clientId === clientId &&
         agreement.agreementYear < currentYear &&
-        agreement.status !== 'Anulado'
+        agreement.status === 'Ativo' &&
+        agreement.debtAmount > 0
       )
       .sort((a, b) => {
         if (a.agreementYear !== b.agreementYear) return b.agreementYear - a.agreementYear;
