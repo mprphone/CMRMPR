@@ -260,6 +260,8 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     const paidUntilMonth = Math.min(12, Math.max(1, Number(planForm.payUntilMonth) || 12));
     const paidUntilYear = Math.min(3000, Math.max(2000, Number(planForm.payUntilYear) || currentYear));
     const existingPlan = getClientPlan(selectedPlanClient.id);
+    const isChangingYear = Boolean(existingPlan && existingPlan.year !== paidUntilYear);
+    const previousPlanId = existingPlan?.id;
     const nextStatus =
       existingPlan?.status === 'Anulado'
         ? 'Anulado'
@@ -270,7 +272,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     try {
       setIsSavingPlan(true);
       const savedAgreement = await cashAgreementService.upsert({
-        id: existingPlan?.id,
+        id: isChangingYear ? undefined : existingPlan?.id,
         clientId: selectedPlanClient.id,
         agreementYear: paidUntilYear,
         paidUntilMonth,
@@ -282,9 +284,19 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         letterSent: planForm.letterSent,
       });
 
+      // If the agreement moved to another year, remove the previous row to avoid duplicates.
+      if (isChangingYear && previousPlanId && previousPlanId !== savedAgreement.id) {
+        try {
+          await cashAgreementService.delete(previousPlanId);
+        } catch (cleanupError) {
+          console.error('Erro ao remover acordo antigo apos alterar o ano:', cleanupError);
+        }
+      }
+
       setCashAgreements(prev => {
         const next = prev.filter(a =>
           a.id !== savedAgreement.id &&
+          a.id !== previousPlanId &&
           !(a.clientId === savedAgreement.clientId && a.agreementYear === savedAgreement.agreementYear)
         );
         return [...next, savedAgreement];

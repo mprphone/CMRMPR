@@ -400,8 +400,7 @@ export const cashAgreementService = {
   async upsert(agreement: Partial<CashAgreement>): Promise<CashAgreement> {
     const storeClient = ensureStoreClient();
 
-    const payload = {
-      id: agreement.id,
+    const payload: any = {
       client_id: agreement.clientId,
       agreement_year: agreement.agreementYear,
       paid_until_month: agreement.paidUntilMonth,
@@ -412,6 +411,7 @@ export const cashAgreementService = {
       called: agreement.called || false,
       letter_sent: agreement.letterSent || false,
     };
+    if (agreement.id) payload.id = agreement.id;
 
     const { data, error } = await storeClient
       .from('cash_payment_agreements')
