@@ -93,8 +93,9 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
       .replace(/\r\n/g, '\n')
       .replace(/\t/g, ' ')
       .replace(/[ \u00A0]+/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+      .replace(/\n{4,}/g, '\n\n\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/[ \t]+$/g, '');
   };
 
   const formatInlineText = (text: string) => {
@@ -108,39 +109,54 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     const plainBody = stripHtmlToText(rawBody);
     if (!plainBody) return '';
 
-    const lines = plainBody.split('\n').map(line => line.trim());
+    const lines = plainBody.split('\n');
     const blocks: string[] = [];
     let listItems: string[] = [];
+    let pendingEmptyLines = 0;
+
+    const pushSpacerLines = (count: number) => {
+      const safeCount = Math.min(Math.max(count, 1), 3);
+      for (let i = 0; i < safeCount; i += 1) {
+        blocks.push('<div style="height:16px;line-height:16px;font-size:16px;">&nbsp;</div>');
+      }
+    };
 
     const flushList = () => {
       if (listItems.length === 0) return;
-      blocks.push(`<ul style="margin:0 0 16px 22px;padding:0;">${listItems.join('')}</ul>`);
+      blocks.push(`<ul style="margin:0 0 22px 22px;padding:0;">${listItems.join('')}</ul>`);
       listItems = [];
     };
 
-    for (const line of lines) {
-      if (!line) {
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/[ \t]+$/g, '');
+      if (!line.trim()) {
         flushList();
+        pendingEmptyLines += 1;
         continue;
       }
 
-      if (/^[-*]\s+/.test(line)) {
-        const listText = line.replace(/^[-*]\s+/, '');
-        listItems.push(`<li style="margin:0 0 10px 0;">${formatInlineText(listText)}</li>`);
+      if (pendingEmptyLines > 0) {
+        pushSpacerLines(pendingEmptyLines);
+        pendingEmptyLines = 0;
+      }
+
+      if (/^\s*[-*]\s+/.test(line)) {
+        const listText = line.replace(/^\s*[-*]\s+/, '');
+        listItems.push(`<li style="margin:0 0 14px 0;">${formatInlineText(listText)}</li>`);
         continue;
       }
 
       flushList();
 
-      const keyValueMatch = line.match(/^([A-Za-z0-9()./%\s-]{2,40}:)\s*(.+)$/);
+      const keyValueMatch = line.trim().match(/^([A-Za-z0-9()./%\s-]{2,40}:)\s*(.+)$/);
       if (keyValueMatch) {
         const label = escapeHtml(keyValueMatch[1]);
         const value = formatInlineText(keyValueMatch[2]);
-        blocks.push(`<p style="margin:0 0 14px 0;"><strong>${label}</strong> ${value}</p>`);
+        blocks.push(`<p style="margin:0 0 20px 0;"><strong>${label}</strong> ${value}</p>`);
         continue;
       }
 
-      blocks.push(`<p style="margin:0 0 16px 0;">${formatInlineText(line)}</p>`);
+      blocks.push(`<p style="margin:0 0 22px 0;">${formatInlineText(line)}</p>`);
     }
 
     flushList();

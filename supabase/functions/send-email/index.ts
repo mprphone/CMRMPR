@@ -60,34 +60,47 @@ function normalizeInnerHtml(inner: string) {
 
   // If caller sent plain text, convert to paragraphs.
   if (!looksLikeHtml(sanitizedInner)) {
-    const lines = sanitizedInner.split(/\r?\n/).map(l => l.trim());
+    const lines = sanitizedInner.split(/\r?\n/);
     const blocks: string[] = [];
-    let buf: string[] = [];
+    let pendingEmptyLines = 0;
+
+    const pushSpacerLines = (count: number) => {
+      const safeCount = Math.min(Math.max(count, 1), 3);
+      for (let i = 0; i < safeCount; i += 1) {
+        blocks.push('<div style="height:16px;line-height:16px;font-size:16px;">&nbsp;</div>');
+      }
+    };
     const formatText = (s: string) => {
       const escaped = escHtml(s);
       return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     };
-    const flush = () => {
-      if (buf.length) {
-        blocks.push(`<p style="margin:0 0 14px 0;">${formatText(buf.join(" "))}</p>`);
-        buf = [];
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/[ \t]+$/g, "");
+
+      if (!line.trim()) {
+        pendingEmptyLines += 1;
+        continue;
       }
-    };
-    for (const line of lines) {
-      if (!line) { flush(); continue; }
-      buf.push(line);
+
+      if (pendingEmptyLines > 0) {
+        pushSpacerLines(pendingEmptyLines);
+        pendingEmptyLines = 0;
+      }
+
+      blocks.push(`<p style="margin:0 0 22px 0;">${formatText(line)}</p>`);
     }
-    flush();
+
     return blocks.join("");
   }
 
   // If it's HTML, enforce sensible spacing on common tags
   // (Outlook ignores many CSS rules; inline styles win)
   return sanitizedInner
-    .replaceAll("<p>", '<p style="margin:0 0 16px 0;">')
-    .replaceAll("<ul>", '<ul style="margin:0 0 16px 22px;padding:0;">')
-    .replaceAll("<ol>", '<ol style="margin:0 0 16px 22px;padding:0;">')
-    .replaceAll("<li>", '<li style="margin:0 0 10px 0;">');
+    .replaceAll("<p>", '<p style="margin:0 0 22px 0;">')
+    .replaceAll("<ul>", '<ul style="margin:0 0 22px 22px;padding:0;">')
+    .replaceAll("<ol>", '<ol style="margin:0 0 22px 22px;padding:0;">')
+    .replaceAll("<li>", '<li style="margin:0 0 14px 0;">');
 }
 
 function wrapEmailHtml(innerHtml: string) {
@@ -104,7 +117,7 @@ function wrapEmailHtml(innerHtml: string) {
   <meta name="x-apple-disable-message-reformatting" />
   <title>Email</title>
 </head>
-<body style="margin:0;padding:24px 22px;background:#FFFFFF;">
+<body style="margin:0;padding:100px 22px 24px 22px;background:#FFFFFF;">
   ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;visibility:hidden;mso-hide:all;">${escHtml(preheader)}</div>` : ""}
   <div style="font-family:'Segoe UI',Calibri,Arial,Helvetica,sans-serif;font-size:18px;line-height:1.65;color:#111827;">
     ${bodyHtml}
