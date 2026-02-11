@@ -73,7 +73,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
       .replace(/&gt;/gi, '>')
       .replace(/&quot;/gi, '"')
       .replace(/&#39;/gi, "'")
-      .replace(/&euro;/gi, ' EUR');
+      .replace(/&euro;/gi, ' €');
   };
 
   const stripHtmlToText = (input: string) => {
@@ -152,9 +152,17 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     return input.replace(/Para deixar de receber[\s\S]*?assunto\s*["“”]?Remover["“”]?\s*\.?/gi, '').trim();
   };
 
+  const normalizeEuroCurrency = (input: string) => {
+    if (!input) return '';
+    return input
+      .replace(/(\d[\d.,\s]*)\s*EUR\b/gi, (_m, amount) => `${String(amount).trim()} €`)
+      .replace(/€\s*EUR\b/gi, '€')
+      .replace(/\bEUR\b/gi, '€');
+  };
+
   const buildCampaignEmailHtml = (messageBody: string, signatureHtml: string) => {
-    const bodyHtml = renderBodyAsCleanHtml(removeLegacyOptOutText(messageBody));
-    const sanitizedSignature = removeLegacyOptOutText(signatureHtml);
+    const bodyHtml = renderBodyAsCleanHtml(normalizeEuroCurrency(removeLegacyOptOutText(messageBody)));
+    const sanitizedSignature = normalizeEuroCurrency(removeLegacyOptOutText(signatureHtml));
     const signatureBlock = sanitizedSignature ? `<div style="margin-top:16px;">${sanitizedSignature}</div>` : '';
     return `${bodyHtml}${signatureBlock}`;
   };

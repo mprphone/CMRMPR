@@ -47,8 +47,16 @@ function removeLegacyOptOutText(input: string) {
     );
 }
 
+function normalizeEuroCurrency(input: string) {
+  if (!input) return "";
+  return input
+    .replace(/(\d[\d.,\s]*)\s*EUR\b/gi, (_m, amount) => `${String(amount).trim()} €`)
+    .replace(/€\s*EUR\b/gi, "€")
+    .replace(/\bEUR\b/gi, "€");
+}
+
 function normalizeInnerHtml(inner: string) {
-  const sanitizedInner = removeLegacyOptOutText(inner);
+  const sanitizedInner = normalizeEuroCurrency(removeLegacyOptOutText(inner));
 
   // If caller sent plain text, convert to paragraphs.
   if (!looksLikeHtml(sanitizedInner)) {
