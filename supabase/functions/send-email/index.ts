@@ -33,10 +33,26 @@ function looksLikeHtml(input: string) {
   return /<\w+[\s>]/.test(input);
 }
 
+function removeLegacyOptOutText(input: string) {
+  if (!input) return "";
+
+  return input
+    .replace(
+      /<p[^>]*>\s*Para deixar de receber[\s\S]*?assunto\s*["“”]?Remover["“”]?\s*\.?\s*<\/p>/gi,
+      ""
+    )
+    .replace(
+      /Para deixar de receber[\s\S]*?assunto\s*["“”]?Remover["“”]?\s*\.?/gi,
+      ""
+    );
+}
+
 function normalizeInnerHtml(inner: string) {
+  const sanitizedInner = removeLegacyOptOutText(inner);
+
   // If caller sent plain text, convert to paragraphs.
-  if (!looksLikeHtml(inner)) {
-    const lines = inner.split(/\r?\n/).map(l => l.trim());
+  if (!looksLikeHtml(sanitizedInner)) {
+    const lines = sanitizedInner.split(/\r?\n/).map(l => l.trim());
     const blocks: string[] = [];
     let buf: string[] = [];
     const formatText = (s: string) => {
@@ -59,38 +75,31 @@ function normalizeInnerHtml(inner: string) {
 
   // If it's HTML, enforce sensible spacing on common tags
   // (Outlook ignores many CSS rules; inline styles win)
-  return inner
-    .replaceAll("<p>", '<p style="margin:0 0 14px 0;">')
-    .replaceAll("<ul>", '<ul style="margin:0 0 14px 18px;padding:0;">')
-    .replaceAll("<ol>", '<ol style="margin:0 0 14px 18px;padding:0;">')
-    .replaceAll("<li>", '<li style="margin:0 0 8px 0;">');
+  return sanitizedInner
+    .replaceAll("<p>", '<p style="margin:0 0 16px 0;">')
+    .replaceAll("<ul>", '<ul style="margin:0 0 16px 22px;padding:0;">')
+    .replaceAll("<ol>", '<ol style="margin:0 0 16px 22px;padding:0;">')
+    .replaceAll("<li>", '<li style="margin:0 0 10px 0;">');
 }
 
 function wrapEmailHtml(innerHtml: string) {
-  const logoUrl = Deno.env.get("EMAIL_LOGO_URL") || "";
-  const brandName = Deno.env.get("EMAIL_BRAND_NAME") || "MPR Negocios";
-  const footerHtml = Deno.env.get("EMAIL_FOOTER_HTML") || "";
   const preheader = Deno.env.get("EMAIL_PREHEADER") || "";
 
   const bodyHtml = normalizeInnerHtml(innerHtml);
 
-  // Minimal, left-aligned layout (no centered container/card).
+  // Minimal, left-aligned layout without automatic signature/header.
   return `<!doctype html>
 <html lang="pt">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="x-apple-disable-message-reformatting" />
-  <title>${escHtml(brandName)}</title>
+  <title>Email</title>
 </head>
-<body style="margin:0;padding:20px 18px;background:#FFFFFF;">
+<body style="margin:0;padding:24px 22px;background:#FFFFFF;">
   ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;visibility:hidden;mso-hide:all;">${escHtml(preheader)}</div>` : ""}
-  <div style="font-family:Calibri,Segoe UI,Arial,Helvetica,sans-serif;font-size:15px;line-height:1.65;color:#111827;">
-    ${logoUrl
-      ? `<div style="margin:0 0 12px 0;"><img src="${logoUrl}" alt="${escHtml(brandName)}" width="140" style="display:block;border:0;outline:none;text-decoration:none;height:auto;max-width:140px;" /></div>`
-      : `<div style="margin:0 0 12px 0;font-size:16px;font-weight:700;color:#0F172A;">${escHtml(brandName)}</div>`}
+  <div style="font-family:'Segoe UI',Calibri,Arial,Helvetica,sans-serif;font-size:18px;line-height:1.65;color:#111827;">
     ${bodyHtml}
-    ${footerHtml ? `<div style="margin-top:16px;font-size:12px;line-height:1.6;color:#6B7280;">${footerHtml}</div>` : ""}
   </div>
 </body>
 </html>`;

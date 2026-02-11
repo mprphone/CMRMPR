@@ -53,7 +53,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
   const formatMoney = (value: any) => {
     const n = Number(value);
     if (Number.isNaN(n)) return String(value ?? '');
-    return `${n.toFixed(2).replace('.', ',')} EUR`;
+    return `${n.toFixed(2).replace('.', ',')} €`;
   };
 
   const escapeHtml = (input: string) => {
@@ -114,7 +114,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
 
     const flushList = () => {
       if (listItems.length === 0) return;
-      blocks.push(`<ul style="margin:0 0 14px 20px;padding:0;">${listItems.join('')}</ul>`);
+      blocks.push(`<ul style="margin:0 0 16px 22px;padding:0;">${listItems.join('')}</ul>`);
       listItems = [];
     };
 
@@ -126,7 +126,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
 
       if (/^[-*]\s+/.test(line)) {
         const listText = line.replace(/^[-*]\s+/, '');
-        listItems.push(`<li style="margin:0 0 8px 0;">${formatInlineText(listText)}</li>`);
+        listItems.push(`<li style="margin:0 0 10px 0;">${formatInlineText(listText)}</li>`);
         continue;
       }
 
@@ -136,22 +136,27 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
       if (keyValueMatch) {
         const label = escapeHtml(keyValueMatch[1]);
         const value = formatInlineText(keyValueMatch[2]);
-        blocks.push(`<p style="margin:0 0 12px 0;"><strong>${label}</strong> ${value}</p>`);
+        blocks.push(`<p style="margin:0 0 14px 0;"><strong>${label}</strong> ${value}</p>`);
         continue;
       }
 
-      blocks.push(`<p style="margin:0 0 14px 0;">${formatInlineText(line)}</p>`);
+      blocks.push(`<p style="margin:0 0 16px 0;">${formatInlineText(line)}</p>`);
     }
 
     flushList();
     return blocks.join('');
   };
 
+  const removeLegacyOptOutText = (input: string) => {
+    if (!input) return '';
+    return input.replace(/Para deixar de receber[\s\S]*?assunto\s*["“”]?Remover["“”]?\s*\.?/gi, '').trim();
+  };
+
   const buildCampaignEmailHtml = (messageBody: string, signatureHtml: string) => {
-    const bodyHtml = renderBodyAsCleanHtml(messageBody);
-    const signatureBlock = signatureHtml ? `<div style="margin-top:16px;">${signatureHtml}</div>` : '';
-    const optOutFooter = `<p style="margin:18px 0 0 0;font-size:11px;line-height:1.5;color:#6B7280;">Para deixar de receber comunicacoes de marketing, por favor responda a este email com o assunto "Remover".</p>`;
-    return `${bodyHtml}${signatureBlock}${optOutFooter}`;
+    const bodyHtml = renderBodyAsCleanHtml(removeLegacyOptOutText(messageBody));
+    const sanitizedSignature = removeLegacyOptOutText(signatureHtml);
+    const signatureBlock = sanitizedSignature ? `<div style="margin-top:16px;">${sanitizedSignature}</div>` : '';
+    return `${bodyHtml}${signatureBlock}`;
   };
 
   const getCleanBaseTemplate = () => ({
