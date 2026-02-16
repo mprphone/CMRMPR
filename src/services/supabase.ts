@@ -1054,7 +1054,7 @@ export const quoteHistoryService = {
 const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
   id: p.id,
   clientId: p.client_id,
-  clientName: p.clients?.name || 'Cliente Desconhecido',
+  clientName: p.clients?.name || p.policy_holder || 'Cliente Desconhecido',
   policyHolder: p.policy_holder || p.clients?.name || '',
   agent: (p.agent || undefined) as InsurancePolicy['agent'],
   policyDate: p.policy_date,
@@ -1078,7 +1078,7 @@ const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
 
 const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
   id: p.id,
-  client_id: p.clientId,
+  client_id: p.clientId ?? null,
   policy_holder: p.policyHolder || null,
   agent: p.agent || null,
   policy_date: p.policyDate,
