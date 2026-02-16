@@ -11,10 +11,9 @@ interface SettingsProps {
   globalSettings: GlobalSettings;
   setGlobalSettings: (settings: GlobalSettings) => void;
   logo: string;
-  setLogo: (logo: string) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ globalSettings, setGlobalSettings, areaCosts, setAreaCosts, logo, turnoverBrackets, setTurnoverBrackets, setLogo }) => {
+const Settings: React.FC<SettingsProps> = ({ globalSettings, setGlobalSettings, areaCosts, setAreaCosts, logo, turnoverBrackets, setTurnoverBrackets }) => {
   const [isSavingBrackets, setIsSavingBrackets] = useState(false);
   const handleGlobalChange = (field: keyof GlobalSettings, value: string | number) => {
     setGlobalSettings({ ...globalSettings, [field]: value });

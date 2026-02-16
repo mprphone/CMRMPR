@@ -17,7 +17,7 @@ import {
   Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation
 } from './types';
 import { 
-  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService
+  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService
 } from './services/supabase';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Insurance from './components/Insurance';
@@ -64,9 +64,15 @@ export default function App() {
   const [cashOperations, setCashOperations] = useState<CashOperation[]>([]);
   const [logo, setLogo] = useState(() => localStorage.getItem('appLogo') || '');
 
-  const handleLogoUpload = (newLogo: string) => {
-    setLogo(newLogo);
-    localStorage.setItem('appLogo', newLogo);
+  const handleLogoUpload = async (file: File) => {
+    try {
+      const remoteLogoUrl = await brandingService.uploadLogo(file);
+      setLogo(remoteLogoUrl);
+      localStorage.setItem('appLogo', remoteLogoUrl);
+    } catch (err: any) {
+      console.error('Erro ao enviar logotipo para o servidor:', err);
+      alert('Falha ao guardar logotipo no servidor: ' + (err?.message || 'erro desconhecido'));
+    }
   };
 
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>(() => {
@@ -120,6 +126,28 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('appTasks', JSON.stringify(tasks));
   }, [tasks]);
+
+  useEffect(() => {
+    if (!session) return;
+    let isMounted = true;
+
+    const loadRemoteLogo = async () => {
+      try {
+        const remoteLogoUrl = await brandingService.getLogoUrl();
+        if (!isMounted || !remoteLogoUrl) return;
+        setLogo(remoteLogoUrl);
+        localStorage.setItem('appLogo', remoteLogoUrl);
+      } catch (err) {
+        console.error('Erro ao carregar logotipo remoto:', err);
+      }
+    };
+
+    loadRemoteLogo();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [session]);
 
   const fetchData = async () => {
     setIsLoadingData(true);
@@ -434,7 +462,7 @@ export default function App() {
                   areaCosts={areaCosts} setAreaCosts={setAreaCosts}
                   turnoverBrackets={turnoverBrackets} setTurnoverBrackets={setTurnoverBrackets}
                   globalSettings={globalSettings} setGlobalSettings={setGlobalSettings}
-                  logo={logo} setLogo={handleLogoUpload}
+                  logo={logo}
                 />
               )}
             </>

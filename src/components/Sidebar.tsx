@@ -7,7 +7,7 @@ interface SidebarProps {
   currentView: string;
   onChangeView: (view: string) => void;
   logo: string;
-  onLogoUpload: (logo: string) => void;
+  onLogoUpload: (file: File) => void | Promise<void>;
   userRole: 'admin' | 'user' | null;
 }
 
@@ -35,10 +35,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLo
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => { if (reader.result) onLogoUpload(reader.result as string); };
-      reader.readAsDataURL(file);
+      onLogoUpload(file);
     }
+    e.target.value = '';
   };
 
   return (
