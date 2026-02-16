@@ -12,7 +12,7 @@ returns public.cash_operations
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $close_cash$
 declare
   v_operation public.cash_operations;
 begin
@@ -37,7 +37,7 @@ begin
 
   return v_operation;
 end;
-$$;
+$close_cash$;
 
 create or replace function public.save_global_settings_if_match(
   p_value jsonb,
@@ -51,7 +51,7 @@ returns table (
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $save_settings$
 declare
   v_current_value jsonb;
   v_current_updated_at timestamptz;
@@ -89,7 +89,7 @@ begin
   return query
   select false, v_current_value, v_current_updated_at;
 end;
-$$;
+$save_settings$;
 
 create or replace function public.replace_app_tasks_if_version(
   p_tasks jsonb,
@@ -102,7 +102,7 @@ returns table (
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $replace_tasks$
 declare
   v_current_version timestamptz;
   v_new_version timestamptz;
@@ -201,7 +201,7 @@ begin
   return query
   select false, v_new_version;
 end;
-$$;
+$replace_tasks$;
 
 grant execute on function public.close_cash_register_atomic(
   numeric,
