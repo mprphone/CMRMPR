@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, SupabaseClientOptions } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation, CashSessionExpense } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -91,6 +91,87 @@ export const brandingService = {
     if (!logoFile) return null;
     const version = logoFile.updated_at || logoFile.created_at || '';
     return buildLogoPublicUrl(version);
+  },
+};
+
+const APP_CONFIG_GLOBAL_SETTINGS_KEY = 'global_settings';
+
+export const appConfigService = {
+  async getGlobalSettings(): Promise<Partial<GlobalSettings> | null> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('app_config')
+      .select('value')
+      .eq('key', APP_CONFIG_GLOBAL_SETTINGS_KEY)
+      .maybeSingle();
+
+    if (error) throw error;
+    return (data?.value as Partial<GlobalSettings>) || null;
+  },
+  async upsertGlobalSettings(settings: GlobalSettings): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient
+      .from('app_config')
+      .upsert(
+        {
+          key: APP_CONFIG_GLOBAL_SETTINGS_KEY,
+          value: settings,
+        },
+        { onConflict: 'key' }
+      );
+
+    if (error) throw error;
+  },
+};
+
+const mapDbTaskToTask = (db: any): Task => ({
+  id: db.id,
+  name: db.name,
+  area: db.area as TaskArea,
+  type: db.type as TaskType,
+  defaultTimeMinutes: db.default_time_minutes,
+  defaultFrequencyPerYear: db.default_frequency_per_year,
+  multiplierLogic: (db.multiplier_logic || undefined) as MultiplierLogic | undefined,
+});
+
+const mapTaskToDb = (task: Task) => ({
+  id: task.id,
+  name: task.name,
+  area: task.area,
+  type: task.type,
+  default_time_minutes: task.defaultTimeMinutes,
+  default_frequency_per_year: task.defaultFrequencyPerYear,
+  multiplier_logic: task.multiplierLogic || null,
+});
+
+export const taskCatalogService = {
+  async getAll(): Promise<Task[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient.from('app_tasks').select('*').order('name');
+    if (error) throw error;
+    return (data || []).map(mapDbTaskToTask);
+  },
+  async replaceAll(tasks: Task[]): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const payload = tasks.map(mapTaskToDb);
+
+    if (payload.length > 0) {
+      const { error: upsertError } = await storeClient.from('app_tasks').upsert(payload, { onConflict: 'id' });
+      if (upsertError) throw upsertError;
+    }
+
+    const { data: existingRows, error: existingError } = await storeClient.from('app_tasks').select('id');
+    if (existingError) throw existingError;
+
+    const incomingIds = new Set(tasks.map(task => task.id));
+    const idsToDelete = (existingRows || [])
+      .map((row: any) => row.id as string)
+      .filter((id: string) => !incomingIds.has(id));
+
+    if (idsToDelete.length > 0) {
+      const { error: deleteError } = await storeClient.from('app_tasks').delete().in('id', idsToDelete);
+      if (deleteError) throw deleteError;
+    }
   },
 };
 

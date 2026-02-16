@@ -17,7 +17,7 @@ import {
   Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation
 } from './types';
 import { 
-  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService
+  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService, appConfigService, taskCatalogService
 } from './services/supabase';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Insurance from './components/Insurance';
@@ -35,6 +35,8 @@ const generateUUID = () => {
     return v.toString(16);
   });
 };
+
+const areSettingsEqual = (a: GlobalSettings, b: GlobalSettings) => JSON.stringify(a) === JSON.stringify(b);
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -90,6 +92,10 @@ export default function App() {
       emailSignature: ''
     };
   });
+  const [isGlobalSettingsHydrated, setIsGlobalSettingsHydrated] = useState(false);
+  const [isGlobalSettingsDbAvailable, setIsGlobalSettingsDbAvailable] = useState(true);
+  const [isTaskCatalogHydrated, setIsTaskCatalogHydrated] = useState(false);
+  const [isTaskCatalogDbAvailable, setIsTaskCatalogDbAvailable] = useState(true);
 
   useEffect(() => {
     initSupabase(globalSettings);
@@ -124,8 +130,98 @@ export default function App() {
   }, [storeClient]);
 
   useEffect(() => {
+    if (!session) return;
+    let isMounted = true;
+
+    const hydrateSharedSettings = async () => {
+      try {
+        const remoteSettings = await appConfigService.getGlobalSettings();
+        if (!isMounted) return;
+        setIsGlobalSettingsDbAvailable(true);
+
+        if (remoteSettings) {
+          const mergedSettings: GlobalSettings = {
+            ...globalSettings,
+            ...remoteSettings,
+            supabaseImportUrl: globalSettings.supabaseImportUrl,
+            supabaseImportKey: globalSettings.supabaseImportKey,
+            supabaseStoreUrl: globalSettings.supabaseStoreUrl,
+            supabaseStoreKey: globalSettings.supabaseStoreKey,
+          };
+
+          setGlobalSettings(prev => (areSettingsEqual(prev, mergedSettings) ? prev : mergedSettings));
+        } else {
+          await appConfigService.upsertGlobalSettings(globalSettings);
+        }
+      } catch (err) {
+        console.error('Erro ao sincronizar configurações globais:', err);
+        if (isMounted) setIsGlobalSettingsDbAvailable(false);
+      } finally {
+        if (isMounted) setIsGlobalSettingsHydrated(true);
+      }
+    };
+
+    const hydrateTaskCatalog = async () => {
+      try {
+        const remoteTasks = await taskCatalogService.getAll();
+        if (!isMounted) return;
+        setIsTaskCatalogDbAvailable(true);
+
+        if (remoteTasks.length > 0) {
+          setTasks(remoteTasks);
+          localStorage.setItem('appTasks', JSON.stringify(remoteTasks));
+        } else {
+          await taskCatalogService.replaceAll(tasks);
+        }
+      } catch (err) {
+        console.error('Erro ao sincronizar catálogo de tarefas:', err);
+        if (isMounted) setIsTaskCatalogDbAvailable(false);
+      } finally {
+        if (isMounted) setIsTaskCatalogHydrated(true);
+      }
+    };
+
+    hydrateSharedSettings();
+    hydrateTaskCatalog();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [session]);
+
+  useEffect(() => {
     localStorage.setItem('appTasks', JSON.stringify(tasks));
   }, [tasks]);
+
+  useEffect(() => {
+    if (!session || !isGlobalSettingsHydrated || !isGlobalSettingsDbAvailable) return;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        await appConfigService.upsertGlobalSettings(globalSettings);
+      } catch (err) {
+        console.error('Erro ao gravar configurações globais na cloud:', err);
+        setIsGlobalSettingsDbAvailable(false);
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [session, globalSettings, isGlobalSettingsHydrated, isGlobalSettingsDbAvailable]);
+
+  useEffect(() => {
+    if (!session || !isTaskCatalogHydrated || !isTaskCatalogDbAvailable) return;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        await taskCatalogService.replaceAll(tasks);
+      } catch (err) {
+        console.error('Erro ao gravar catálogo de tarefas na cloud:', err);
+        setIsTaskCatalogDbAvailable(false);
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [session, tasks, isTaskCatalogHydrated, isTaskCatalogDbAvailable]);
 
   useEffect(() => {
     if (!session) return;
