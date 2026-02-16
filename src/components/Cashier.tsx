@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Client, FeeGroup, CashPayment, CashAgreement, CashOperation } from '../types';
 import { cashPaymentService, cashAgreementService, cashOperationService } from '../services/supabase';
 import { Landmark, Check, X, Save, RefreshCcw, Printer, ArrowLeft, DollarSign, Banknote, Download, History, CreditCard, Plus } from 'lucide-react';
@@ -43,6 +43,40 @@ interface PlanFormState {
 
 const buildPlanKey = (clientId: string, year: number) => `${clientId}-${year}`;
 
+interface SessionExpense {
+  id: string;
+  amount: number;
+  description: string;
+}
+
+const SESSION_EXPENSES_STORAGE_KEY = 'cashier-session-expenses-open-register';
+const LEGACY_SESSION_EXPENSES_STORAGE_PREFIX = 'cashier-session-expenses-';
+
+const parseStoredSessionExpenses = (rawValue: string | null): SessionExpense[] => {
+  if (!rawValue) return [];
+  try {
+    const parsedValue = JSON.parse(rawValue);
+    if (!Array.isArray(parsedValue)) return [];
+
+    return parsedValue.reduce<SessionExpense[]>((acc, item: any) => {
+      const amount = typeof item?.amount === 'number' ? item.amount : Number(item?.amount);
+      const description = typeof item?.description === 'string' ? item.description.trim() : '';
+      if (!Number.isFinite(amount) || amount <= 0 || description.length === 0) {
+        return acc;
+      }
+
+      acc.push({
+        id: typeof item?.id === 'string' && item.id ? item.id : crypto.randomUUID(),
+        amount,
+        description,
+      });
+      return acc;
+    }, []);
+  } catch {
+    return [];
+  }
+};
+
 const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCashPayments, cashAgreements, setCashAgreements, cashOperations, setCashOperations }) => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [pendingChanges, setPendingChanges] = useState<Map<string, Partial<CashPayment>>>(new Map());
@@ -54,7 +88,36 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   // New state for session expenses
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [newExpense, setNewExpense] = useState<{ amount: string; description: string }>({ amount: '', description: '' });
-  const [sessionExpenses, setSessionExpenses] = useState<{ id: string; amount: number; description: string }[]>([]);
+  const [sessionExpensesStorageKey] = useState(SESSION_EXPENSES_STORAGE_KEY);
+  const [sessionExpenses, setSessionExpenses] = useState<SessionExpense[]>(() => {
+    if (typeof window === 'undefined') return [];
+
+    const currentSessionExpenses = parseStoredSessionExpenses(localStorage.getItem(SESSION_EXPENSES_STORAGE_KEY));
+    if (currentSessionExpenses.length > 0) return currentSessionExpenses;
+
+    const legacyKeys: string[] = [];
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (key && key.startsWith(LEGACY_SESSION_EXPENSES_STORAGE_PREFIX)) {
+        legacyKeys.push(key);
+      }
+    }
+    if (legacyKeys.length === 0) return [];
+
+    legacyKeys.sort();
+    const migratedExpenses = legacyKeys.flatMap((key) => parseStoredSessionExpenses(localStorage.getItem(key)));
+    if (migratedExpenses.length === 0) return [];
+
+    try {
+      localStorage.setItem(SESSION_EXPENSES_STORAGE_KEY, JSON.stringify(migratedExpenses));
+      legacyKeys.forEach((key) => localStorage.removeItem(key));
+    } catch (err) {
+      console.error('Erro ao migrar saidas de caixa do navegador:', err);
+    }
+
+    return migratedExpenses;
+  });
+  const sessionExpensesRef = useRef<SessionExpense[]>(sessionExpenses);
 
   // Form state for closing the register
   const [depositAmount, setDepositAmount] = useState('');
@@ -190,6 +253,33 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const totalSessionExpenses = useMemo(() => {
     return sessionExpenses.reduce((sum, exp) => sum + exp.amount, 0);
   }, [sessionExpenses]);
+
+  const persistSessionExpenses = useCallback((expenses: SessionExpense[]) => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (expenses.length === 0) {
+        localStorage.removeItem(sessionExpensesStorageKey);
+      } else {
+        localStorage.setItem(sessionExpensesStorageKey, JSON.stringify(expenses));
+      }
+    } catch (err) {
+      console.error('Erro ao gravar saidas de caixa no navegador:', err);
+    }
+  }, [sessionExpensesStorageKey]);
+
+  useEffect(() => {
+    sessionExpensesRef.current = sessionExpenses;
+  }, [sessionExpenses]);
+
+  useEffect(() => {
+    persistSessionExpenses(sessionExpenses);
+  }, [sessionExpenses, persistSessionExpenses]);
+
+  useEffect(() => {
+    return () => {
+      persistSessionExpenses(sessionExpensesRef.current);
+    };
+  }, [persistSessionExpenses]);
 
   const agreementDebtByClient = useMemo(() => {
     const debtMap = new Map<string, { debtConfigured: number; paidTotal: number; debt: number }>();
@@ -555,17 +645,22 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
   const handleAddExpense = () => {
     const amount = parseFloat(newExpense.amount);
-    if (!amount || amount <= 0 || !newExpense.description) {
+    const description = newExpense.description.trim();
+    if (!amount || amount <= 0 || !description) {
       alert("Por favor, preencha um valor e uma descrição válidos para a saída de caixa.");
       return;
     }
-    setSessionExpenses(prev => [...prev, { id: crypto.randomUUID(), amount, description: newExpense.description }]);
+    const nextExpenses = [...sessionExpenses, { id: crypto.randomUUID(), amount, description }];
+    persistSessionExpenses(nextExpenses);
+    setSessionExpenses(nextExpenses);
     setIsExpenseModalOpen(false);
     setNewExpense({ amount: '', description: '' });
   };
 
   const handleRemoveExpense = (id: string) => {
-    setSessionExpenses(prev => prev.filter(exp => exp.id !== id));
+    const nextExpenses = sessionExpenses.filter(exp => exp.id !== id);
+    persistSessionExpenses(nextExpenses);
+    setSessionExpenses(nextExpenses);
   };
 
   const handleCloseRegister = async () => {

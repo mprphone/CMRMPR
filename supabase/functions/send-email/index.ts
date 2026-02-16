@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import nodemailer from "npm:nodemailer@6.9.15";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,7 +10,8 @@ const corsHeaders = {
 
 type SendEmailBody = {
   to: string;
-  from: string;
+  from?: string;
+  replyTo?: string;
   subject: string;
   html: string; // inner content (can be plain text or HTML)
 };
@@ -18,6 +20,44 @@ function mustEnv(name: string): string {
   const v = Deno.env.get(name);
   if (!v) throw new Error(`${name} is not set in Supabase secrets.`);
   return v;
+}
+
+function parseBool(value: string | undefined, fallback: boolean): boolean {
+  if (value == null) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function parseMailbox(input: string | undefined): { name: string; email: string } {
+  if (!input) return { name: "", email: "" };
+
+  const raw = input.trim();
+  const match = raw.match(/^(.*)<([^>]+)>$/);
+  if (match) {
+    const name = match[1].trim().replace(/^"(.*)"$/, "$1");
+    const email = match[2].trim();
+    return { name, email };
+  }
+
+  if (raw.includes("@")) {
+    return { name: "", email: raw };
+  }
+
+  return { name: raw, email: "" };
+}
+
+function stripHtmlToText(input: string): string {
+  return input
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanHeaderValue(input: string): string {
+  return (input || "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function escHtml(s: string) {
@@ -164,38 +204,81 @@ serve(async (req) => {
       });
     }
 
-    const { to, from, subject, html } = (await req.json()) as SendEmailBody;
-    if (!to || !from || !subject || !html) {
-      return new Response(JSON.stringify({ error: "Missing required fields: to, from, subject, html" }), {
+    const { to, from, replyTo, subject, html } = (await req.json()) as SendEmailBody;
+    if (!to || !subject || !html) {
+      return new Response(JSON.stringify({ error: "Missing required fields: to, subject, html" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const RESEND_API_KEY = mustEnv("RESEND_API_KEY");
-    const finalHtml = wrapEmailHtml(html);
-
-    const resendResp = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ to, from, subject, html: finalHtml }),
-    });
-
-    const resendJson = await resendResp.json().catch(() => ({}));
-    if (!resendResp.ok) {
-      const msg =
-        (resendJson && (resendJson.error?.message || resendJson.message || resendJson.error)) ||
-        `Resend error (${resendResp.status})`;
-      return new Response(JSON.stringify({ error: msg, details: resendJson }), {
-        status: 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    const smtpHost = mustEnv("SMTP_HOST");
+    const smtpUsername = mustEnv("SMTP_USERNAME");
+    const smtpPassword = mustEnv("SMTP_PASSWORD");
+    const smtpPortRaw = Deno.env.get("SMTP_PORT") ?? "465";
+    const smtpPort = Number.parseInt(smtpPortRaw, 10);
+    if (!Number.isInteger(smtpPort) || smtpPort <= 0) {
+      throw new Error("SMTP_PORT is invalid. Use a numeric value (example: 465).");
     }
 
-    return new Response(JSON.stringify({ ok: true, data: resendJson }), {
+    const smtpTls = parseBool(Deno.env.get("SMTP_TLS"), true);
+
+    // On hosted Supabase Edge Functions, 25/587 are blocked. Use 465.
+    if ([25, 587].includes(smtpPort)) {
+      throw new Error("SMTP port 25/587 is blocked in hosted Edge Functions. Configure SMTP_PORT=465 and SMTP_TLS=true.");
+    }
+
+    const smtpFromEmail = (Deno.env.get("SMTP_FROM_EMAIL") || smtpUsername).trim();
+    if (!smtpFromEmail.includes("@")) {
+      throw new Error("SMTP_FROM_EMAIL (or SMTP_USERNAME) must be a valid email.");
+    }
+    const smtpFromName = (Deno.env.get("SMTP_FROM_NAME") || "").trim();
+
+    const fromParsed = parseMailbox(from);
+    const replyToParsed = parseMailbox(replyTo);
+
+    const effectiveFromName =
+      fromParsed.name ||
+      smtpFromName ||
+      smtpFromEmail.split("@")[0];
+    const effectiveFrom = {
+      name: cleanHeaderValue(effectiveFromName),
+      address: smtpFromEmail,
+    };
+
+    let effectiveReplyTo = replyToParsed.email;
+    if (!effectiveReplyTo && fromParsed.email && fromParsed.email.toLowerCase() !== smtpFromEmail.toLowerCase()) {
+      effectiveReplyTo = fromParsed.email;
+    }
+
+    const finalHtml = wrapEmailHtml(html).trim();
+    const textVersion = stripHtmlToText(finalHtml) || "Mensagem";
+    const cleanSubject = cleanHeaderValue(subject);
+
+    const transport = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpTls,
+      auth: {
+        user: smtpUsername,
+        pass: smtpPassword,
+      },
+    });
+
+    try {
+      await transport.sendMail({
+        to: cleanHeaderValue(to),
+        from: effectiveFrom,
+        replyTo: effectiveReplyTo || undefined,
+        subject: cleanSubject,
+        html: finalHtml,
+        text: textVersion,
+      });
+    } finally {
+      transport.close();
+    }
+
+    return new Response(JSON.stringify({ ok: true, data: { provider: "smtp", to } }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

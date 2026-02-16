@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { GoogleGenerativeAI } from "npm:@google/generative-ai";
+import nodemailer from "npm:nodemailer@6.9.15";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -55,6 +56,26 @@ function mustEnv(name: string): string {
   return v;
 }
 
+function parseBool(value: string | undefined, fallback: boolean): boolean {
+  if (value == null) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function stripHtmlToText(input: string): string {
+  return input
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanHeaderValue(input: string): string {
+  return (input || "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function extractFirstJsonObject(text: string): any {
   const cleaned = text.replace(/```(?:json)?/gi, "").trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
@@ -93,7 +114,7 @@ function renderTemplate(template: string, client: Client, responsibleName?: stri
     .replaceAll("{{contractRenewalDate}}", escapeHtml(client.contractRenewalDate ?? ""));
 }
 
-async function sendResendEmail(params: {
+async function sendSmtpEmail(params: {
   to: string;
   subject: string;
   html: string;
@@ -101,26 +122,61 @@ async function sendResendEmail(params: {
   fromEmail: string;
   replyTo?: string | null;
 }): Promise<void> {
-  const RESEND_API_KEY = mustEnv("RESEND_API_KEY");
+  const smtpHost = mustEnv("SMTP_HOST");
+  const smtpUsername = mustEnv("SMTP_USERNAME");
+  const smtpPassword = mustEnv("SMTP_PASSWORD");
+  const smtpPortRaw = Deno.env.get("SMTP_PORT") ?? "465";
+  const smtpPort = Number.parseInt(smtpPortRaw, 10);
+  if (!Number.isInteger(smtpPort) || smtpPort <= 0) {
+    throw new Error("SMTP_PORT is invalid. Use a numeric value (example: 465).");
+  }
 
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
+  const smtpTls = parseBool(Deno.env.get("SMTP_TLS"), true);
+  if ([25, 587].includes(smtpPort)) {
+    throw new Error("SMTP port 25/587 is blocked in hosted Edge Functions. Configure SMTP_PORT=465 and SMTP_TLS=true.");
+  }
+
+  const envFromEmail = (Deno.env.get("SMTP_FROM_EMAIL") || smtpUsername).trim();
+  if (!envFromEmail.includes("@")) {
+    throw new Error("SMTP_FROM_EMAIL (or SMTP_USERNAME) must be a valid email.");
+  }
+
+  const envFromName = (Deno.env.get("SMTP_FROM_NAME") || "").trim();
+  const fromName =
+    params.fromName?.trim() ||
+    envFromName ||
+    envFromEmail.split("@")[0];
+  const from = {
+    name: cleanHeaderValue(fromName),
+    address: envFromEmail,
+  };
+
+  let effectiveReplyTo = params.replyTo?.trim() || "";
+  if (!effectiveReplyTo && params.fromEmail?.trim() && params.fromEmail.trim().toLowerCase() !== envFromEmail.toLowerCase()) {
+    effectiveReplyTo = params.fromEmail.trim();
+  }
+
+  const transport = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpTls,
+    auth: {
+      user: smtpUsername,
+      pass: smtpPassword,
     },
-    body: JSON.stringify({
-      from: `${params.fromName} <${params.fromEmail}>`,
-      to: [params.to],
-      subject: params.subject,
-      html: params.html,
-      reply_to: params.replyTo ?? undefined,
-    }),
   });
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Resend failed (${res.status}): ${txt}`);
+  try {
+    await transport.sendMail({
+      from,
+      to: cleanHeaderValue(params.to),
+      subject: cleanHeaderValue(params.subject),
+      html: params.html,
+      text: stripHtmlToText(params.html) || "Mensagem",
+      replyTo: effectiveReplyTo || undefined,
+    });
+  } finally {
+    transport.close();
   }
 }
 
@@ -285,7 +341,7 @@ Regras:
       const subject = renderTemplate(subjectTemplate, client, responsibleName);
       const html = renderTemplate(htmlTemplate, client, responsibleName);
 
-      await sendResendEmail({
+      await sendSmtpEmail({
         to: client.email,
         subject,
         html,
@@ -335,7 +391,7 @@ Regras:
         <p>— Sistema</p>
       `;
 
-      await sendResendEmail({ to: admin, subject, html, fromName, fromEmail });
+      await sendSmtpEmail({ to: admin, subject, html, fromName, fromEmail });
     } catch (notifyErr) {
       console.error("Failed to notify admin:", notifyErr);
     }
