@@ -191,6 +191,7 @@ export interface InsurancePolicy {
   id: string;
   clientId?: string;
   clientName?: string; // For display
+  policyHolder?: string;
   agent?: 'MPR' | 'Paula';
   policyDate: string;
   renewalDate?: string;

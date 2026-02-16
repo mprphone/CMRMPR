@@ -1055,6 +1055,7 @@ const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
   id: p.id,
   clientId: p.client_id,
   clientName: p.clients?.name || 'Cliente Desconhecido',
+  policyHolder: p.policy_holder || p.clients?.name || '',
   agent: (p.agent || undefined) as InsurancePolicy['agent'],
   policyDate: p.policy_date,
   renewalDate: p.renewal_date || p.policy_date,
@@ -1064,7 +1065,7 @@ const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
   insuranceProvider: p.company || p.insurance_provider,
   paymentFrequency: p.payment_frequency,
   policyType: p.branch || p.policy_type,
-  premiumValue: Number(p.net_premium_value ?? p.premium_value ?? 0),
+  premiumValue: Number(p.premium_value ?? p.net_premium_value ?? 0),
   netPremiumValue: Number(p.net_premium_value ?? p.premium_value ?? 0),
   commissionRate: p.commission_rate,
   commissionPaid: p.commission_paid,
@@ -1078,6 +1079,7 @@ const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
 const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
   id: p.id,
   client_id: p.clientId,
+  policy_holder: p.policyHolder || null,
   agent: p.agent || null,
   policy_date: p.policyDate,
   renewal_date: p.renewalDate || p.policyDate || null,
@@ -1087,7 +1089,7 @@ const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
   insurance_provider: p.company || p.insuranceProvider || null,
   payment_frequency: p.paymentFrequency,
   policy_type: p.branch || p.policyType || null,
-  premium_value: p.netPremiumValue ?? p.premiumValue ?? 0,
+  premium_value: p.premiumValue ?? p.netPremiumValue ?? 0,
   net_premium_value: p.netPremiumValue ?? p.premiumValue ?? 0,
   commission_rate: p.commissionRate,
   commission_paid: p.commissionPaid,
@@ -1118,10 +1120,11 @@ export const insuranceService = {
       .single();
 
     if (error) {
-      const schemaError = /column .*document_checklist.* does not exist|column .*agent.* does not exist|column .*renewal_date.* does not exist|column .*company.* does not exist|column .*branch.* does not exist|column .*net_premium_value.* does not exist|schema cache/i;
+      const schemaError = /column .*document_checklist.* does not exist|column .*policy_holder.* does not exist|column .*agent.* does not exist|column .*renewal_date.* does not exist|column .*company.* does not exist|column .*branch.* does not exist|column .*net_premium_value.* does not exist|schema cache/i;
       if (schemaError.test(error.message || '')) {
         const fallbackPayload = { ...payload } as any;
         delete fallbackPayload.document_checklist;
+        delete fallbackPayload.policy_holder;
         delete fallbackPayload.agent;
         delete fallbackPayload.renewal_date;
         delete fallbackPayload.company;
