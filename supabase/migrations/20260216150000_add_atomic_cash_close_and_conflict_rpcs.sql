@@ -1,3 +1,6 @@
+do $migration$
+begin
+  execute $close_cash_sql$
 create or replace function public.close_cash_register_atomic(
   p_deposited_amount numeric,
   p_spent_amount numeric,
@@ -38,7 +41,9 @@ begin
   return v_operation;
 end;
 $close_cash$;
+$close_cash_sql$;
 
+  execute $save_settings_sql$
 create or replace function public.save_global_settings_if_match(
   p_value jsonb,
   p_expected_updated_at timestamptz default null
@@ -90,7 +95,9 @@ begin
   select false, v_current_value, v_current_updated_at;
 end;
 $save_settings$;
+$save_settings_sql$;
 
+  execute $replace_tasks_sql$
 create or replace function public.replace_app_tasks_if_version(
   p_tasks jsonb,
   p_expected_version timestamptz default null
@@ -202,7 +209,9 @@ begin
   select false, v_new_version;
 end;
 $replace_tasks$;
+$replace_tasks_sql$;
 
+  execute $grant_close_cash$
 grant execute on function public.close_cash_register_atomic(
   numeric,
   numeric,
@@ -213,13 +222,20 @@ grant execute on function public.close_cash_register_atomic(
   numeric,
   uuid[]
 ) to anon, authenticated, service_role;
+$grant_close_cash$;
 
+  execute $grant_settings$
 grant execute on function public.save_global_settings_if_match(
   jsonb,
   timestamptz
 ) to anon, authenticated, service_role;
+$grant_settings$;
 
+  execute $grant_tasks$
 grant execute on function public.replace_app_tasks_if_version(
   jsonb,
   timestamptz
 ) to anon, authenticated, service_role;
+$grant_tasks$;
+end;
+$migration$;
