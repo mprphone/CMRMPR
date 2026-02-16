@@ -122,6 +122,8 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   // Form state for closing the register
   const [depositAmount, setDepositAmount] = useState('');
   const [mbWayDepositAmount, setMbWayDepositAmount] = useState('');
+  const [isDepositAmountEdited, setIsDepositAmountEdited] = useState(false);
+  const [isMbWayDepositAmountEdited, setIsMbWayDepositAmountEdited] = useState(false);
   const [adjustmentAmount, setAdjustmentAmount] = useState('');
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
@@ -249,6 +251,18 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
     return { cashInHand: cashTotal, mbWayInHand: mbWayTotal };
   }, [consolidatedPayments]);
+
+  useEffect(() => {
+    if (!isDepositAmountEdited) {
+      setDepositAmount(cashInHand.toFixed(2));
+    }
+  }, [cashInHand, isDepositAmountEdited]);
+
+  useEffect(() => {
+    if (!isMbWayDepositAmountEdited) {
+      setMbWayDepositAmount(mbWayInHand.toFixed(2));
+    }
+  }, [mbWayInHand, isMbWayDepositAmountEdited]);
 
   const totalSessionExpenses = useMemo(() => {
     return sessionExpenses.reduce((sum, exp) => sum + exp.amount, 0);
@@ -734,6 +748,8 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       // Reset form
       setDepositAmount('');
       setMbWayDepositAmount('');
+      setIsDepositAmountEdited(false);
+      setIsMbWayDepositAmountEdited(false);
       setAdjustmentAmount('');
       setSessionExpenses([]); // Clear session expenses
     } catch (err: any) {
@@ -848,7 +864,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
           <div className="flex items-center gap-2">
             <label className="text-sm font-bold">Modo de Pagamento:</label>
             <select value={paymentMode} onChange={e => setPaymentMode(e.target.value as any)} className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm">
-                <option>Numer??rio</option>
+                <option>Numerário</option>
                 <option>MB Way</option>
             </select>
             <span className="text-xs font-bold text-amber-700">A = Acordo</span>
@@ -1107,11 +1123,11 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><Banknote size={14}/> Depósito (Numerário)</label>
-            <input type="number" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
+            <input type="number" value={depositAmount} onChange={e => { setIsDepositAmountEdited(true); setDepositAmount(e.target.value); }} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><CreditCard size={14}/> Depósito (MB Way)</label>
-            <input type="number" value={mbWayDepositAmount} onChange={e => setMbWayDepositAmount(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
+            <input type="number" value={mbWayDepositAmount} onChange={e => { setIsMbWayDepositAmountEdited(true); setMbWayDepositAmount(e.target.value); }} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><DollarSign size={14} /> Gastos de Caixa (€)</label>
