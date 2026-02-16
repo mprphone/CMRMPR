@@ -7,6 +7,7 @@ interface InsuranceProps {
   policies: InsurancePolicy[];
   setPolicies: (policies: InsurancePolicy[]) => void;
   clients: Client[];
+  forcedAgent?: InsurancePolicy['agent'];
 }
 
 type SortableKeys = 'clientName' | 'policyHolder' | 'agent' | 'renewalDate' | 'company' | 'branch' | 'netPremiumValue';
@@ -38,7 +39,7 @@ const getSortValue = (policy: InsurancePolicy, sortKey: SortableKeys): string | 
   }
 };
 
-const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients }) => {
+const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, forcedAgent }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<Partial<InsurancePolicy> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -52,17 +53,22 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
   const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'renewalDate', direction: 'ascending' });
   const [isQuarterlyModalOpen, setIsQuarterlyModalOpen] = useState(false);
 
+  const visiblePolicies = useMemo(() => {
+    if (!forcedAgent) return policies;
+    return policies.filter(policy => policy.agent === forcedAgent);
+  }, [policies, forcedAgent]);
+
   const uniqueCompanies = useMemo(() => {
-    const companies = new Set(policies.map(policy => getCompany(policy)).filter(Boolean));
+    const companies = new Set(visiblePolicies.map(policy => getCompany(policy)).filter(Boolean));
     return Array.from(companies) as string[];
-  }, [policies]);
+  }, [visiblePolicies]);
 
   const sortedClients = useMemo(() => {
     return [...clients].sort((a, b) => a.name.localeCompare(b.name));
   }, [clients]);
 
   const sortedPolicies = useMemo(() => {
-    let filtered = policies.filter(p => {
+    let filtered = visiblePolicies.filter(p => {
       const search = searchTerm.toLowerCase();
       const searchMatch = searchTerm === '' ||
         p.clientName?.toLowerCase().includes(search) ||
@@ -97,7 +103,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       });
     }
     return filtered;
-  }, [policies, searchTerm, companyFilter, statusFilter, policyStatusFilter, sortConfig]);
+  }, [visiblePolicies, searchTerm, companyFilter, statusFilter, policyStatusFilter, sortConfig]);
 
   const totals = useMemo(() => {
     let pending = 0;
@@ -105,7 +111,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
     let totalPremiumGross = 0;
     let totalPremiumNet = 0;
     // Only calculate totals for accepted policies
-    const acceptedPolicies = policies.filter(p => p.status === 'Aceite');
+    const acceptedPolicies = visiblePolicies.filter(p => p.status === 'Aceite');
     acceptedPolicies.forEach(p => {
       const totalPremium = getTotalPremium(p);
       const netPremium = getNetPremium(p);
@@ -119,11 +125,11 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       totalPremiumNet += netPremium;
     });
     return { pending, paid, totalPremiumGross, totalPremiumNet };
-  }, [policies]);
+  }, [visiblePolicies]);
 
   const quarterlyPremiums = useMemo(() => {
     const quarters: Record<string, number> = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
-    const acceptedPolicies = policies.filter(p => p.status === 'Aceite');
+    const acceptedPolicies = visiblePolicies.filter(p => p.status === 'Aceite');
     acceptedPolicies.forEach(p => {
       const month = new Date(p.policyDate).getMonth();
       const totalPremium = getTotalPremium(p);
@@ -133,13 +139,13 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       else quarters.Q4 += totalPremium;
     });
     return quarters;
-  }, [policies]);
+  }, [visiblePolicies]);
 
   const handleOpenModal = (policy?: InsurancePolicy) => {
     setEditingPolicy(policy ? {
       ...policy,
       policyHolder: getPolicyHolder(policy),
-      agent: policy.agent || 'MPR',
+      agent: forcedAgent || policy.agent || 'MPR',
       renewalDate: policy.renewalDate || policy.policyDate,
       company: getCompany(policy),
       branch: getBranch(policy),
@@ -157,7 +163,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       commissionRate: 10,
       premiumValue: 0,
       netPremiumValue: 0,
-      agent: 'MPR',
+      agent: forcedAgent || 'MPR',
       policyHolder: '',
       company: '',
       branch: '',
@@ -175,7 +181,8 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       return;
     }
 
-    const isPaulaAgent = editingPolicy.agent === 'Paula';
+    const resolvedAgent = forcedAgent || editingPolicy.agent || 'MPR';
+    const isPaulaAgent = resolvedAgent === 'Paula';
     if (!isPaulaAgent && !editingPolicy.clientId) {
       alert("Cliente, Companhia e Ramo são obrigatórios.");
       return;
@@ -202,6 +209,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       const policyToSave = {
         ...editingPolicy,
         id: policyId,
+        agent: resolvedAgent,
         attachment_url: attachmentUrl,
         policyHolder: (editingPolicy.policyHolder || '').trim() || selectedClientName,
         renewalDate: editingPolicy.renewalDate || editingPolicy.policyDate,
@@ -379,7 +387,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">
-                  {editingPolicy.agent === 'Paula' ? 'Cliente' : 'Cliente*'}
+                  {(forcedAgent || editingPolicy.agent) === 'Paula' ? 'Cliente' : 'Cliente*'}
                 </label>
                 <select value={editingPolicy.clientId || ''} onChange={e => {
                   const clientId = e.target.value || undefined;
@@ -394,7 +402,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                   setEditingPolicy(nextPolicy);
                 }} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                   <option value="">
-                    {editingPolicy.agent === 'Paula' ? 'Sem cliente (tomador manual)' : 'Selecione um cliente'}
+                    {(forcedAgent || editingPolicy.agent) === 'Paula' ? 'Sem cliente (tomador manual)' : 'Selecione um cliente'}
                   </option>
                   {sortedClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
@@ -411,10 +419,14 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Agente*</label>
-                <select value={editingPolicy.agent || 'MPR'} onChange={e => setEditingPolicy({...editingPolicy, agent: e.target.value as InsurancePolicy['agent']})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option value="MPR">MPR</option>
-                  <option value="Paula">Paula</option>
-                </select>
+                {forcedAgent ? (
+                  <input type="text" value={forcedAgent} readOnly className="w-full px-3 py-2 border rounded-lg text-sm bg-slate-100 text-slate-600" />
+                ) : (
+                  <select value={editingPolicy.agent || 'MPR'} onChange={e => setEditingPolicy({...editingPolicy, agent: e.target.value as InsurancePolicy['agent']})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option value="MPR">MPR</option>
+                    <option value="Paula">Paula</option>
+                  </select>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Data da Apólice*</label>

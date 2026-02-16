@@ -48,6 +48,8 @@ const mergeRemoteGlobalSettings = (localSettings: GlobalSettings, remoteSettings
   supabaseStoreKey: localSettings.supabaseStoreKey,
 });
 
+const PAULA_INSURANCE_ONLY_EMAIL = 'paula.ernestina@hotmail.com';
+
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [session, setSession] = useState<Session | null>(null);
@@ -122,6 +124,10 @@ export default function App() {
   const [isGlobalSettingsDbAvailable, setIsGlobalSettingsDbAvailable] = useState(true);
   const [isTaskCatalogHydrated, setIsTaskCatalogHydrated] = useState(false);
   const [isTaskCatalogDbAvailable, setIsTaskCatalogDbAvailable] = useState(true);
+  const currentUserEmail = (session?.user?.email || '').trim().toLowerCase();
+  const isPaulaInsuranceOnlyUser = currentUserEmail === PAULA_INSURANCE_ONLY_EMAIL;
+  const allowedViews = isPaulaInsuranceOnlyUser ? ['insurance'] : undefined;
+  const activeView = isPaulaInsuranceOnlyUser ? 'insurance' : currentView;
 
   useEffect(() => {
     initSupabase(globalSettings);
@@ -430,6 +436,19 @@ export default function App() {
     };
   }, [session, storeClient, isGlobalSettingsHydrated, isTaskCatalogHydrated]);
 
+  useEffect(() => {
+    if (!isPaulaInsuranceOnlyUser) return;
+    if (currentView !== 'insurance') {
+      setCurrentView('insurance');
+    }
+    if (selectedClient) {
+      setSelectedClient(null);
+    }
+    if (selectedStaff) {
+      setSelectedStaff(null);
+    }
+  }, [isPaulaInsuranceOnlyUser, currentView, selectedClient, selectedStaff]);
+
   const fetchData = async () => {
     setIsLoadingData(true);
 
@@ -596,27 +615,35 @@ export default function App() {
   return (
     <div className="flex min-h-screen bg-slate-50">
       <Sidebar 
-        currentView={currentView} 
-        onChangeView={(view) => { setCurrentView(view); setSelectedClient(null); setSelectedStaff(null); }}
+        currentView={activeView} 
+        onChangeView={(view) => {
+          if (allowedViews && !allowedViews.includes(view)) return;
+          setCurrentView(view);
+          setSelectedClient(null);
+          setSelectedStaff(null);
+        }}
         logo={logo} onLogoUpload={handleLogoUpload}
         userRole={userRole}
+        allowedViews={allowedViews}
       />
 
       <main className="flex-1 ml-64 p-8">
         <div className="max-w-7xl mx-auto">
-          <div className="flex justify-end mb-6 gap-2">
-            <button 
-              onClick={handleFullSync}
-              disabled={isSyncing}
-              className="flex items-center gap-2 text-[10px] font-black text-blue-600 bg-blue-50 px-4 py-2 rounded-xl border border-blue-100 hover:bg-blue-100 uppercase shadow-sm"
-            >
-              {isSyncing ? <RefreshCcw size={14} className="animate-spin"/> : <DownloadCloud size={14}/>}
-              Sincronizar Agora
-            </button>
-            <button onClick={fetchData} className="p-2 bg-white border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-colors">
-              <RefreshCcw size={14} />
-            </button>
-          </div>
+          {!isPaulaInsuranceOnlyUser && (
+            <div className="flex justify-end mb-6 gap-2">
+              <button 
+                onClick={handleFullSync}
+                disabled={isSyncing}
+                className="flex items-center gap-2 text-[10px] font-black text-blue-600 bg-blue-50 px-4 py-2 rounded-xl border border-blue-100 hover:bg-blue-100 uppercase shadow-sm"
+              >
+                {isSyncing ? <RefreshCcw size={14} className="animate-spin"/> : <DownloadCloud size={14}/>}
+                Sincronizar Agora
+              </button>
+              <button onClick={fetchData} className="p-2 bg-white border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-colors">
+                <RefreshCcw size={14} />
+              </button>
+            </div>
+          )}
 
           {syncSuccess && (
             <div className="mb-4 p-4 bg-green-50 border border-green-100 text-green-700 rounded-xl text-xs font-bold flex items-center gap-2 animate-bounce">
@@ -639,7 +666,7 @@ export default function App() {
                 A ligar ao servidor de gestÃ£o para obter a informaÃ§Ã£o mais recente.
               </p>
             </div>
-          ) : clients.length === 0 && !isSyncing && (
+          ) : clients.length === 0 && !isSyncing && !isPaulaInsuranceOnlyUser && (
             <div className="bg-white border-2 border-dashed border-slate-200 p-12 rounded-3xl text-center">
               <AlertTriangle className="mx-auto text-amber-500 mb-4" size={40} />
               <h3 className="text-lg font-bold text-slate-800">Ainda nÃ£o hÃ¡ clientes visÃ­veis</h3>
@@ -652,7 +679,7 @@ export default function App() {
             </div>
           )}
 
-          {selectedClient ? (
+          {!isPaulaInsuranceOnlyUser && selectedClient ? (
             <ClientDetail 
               client={selectedClient} 
               onBack={() => setSelectedClient(null)} 
@@ -662,7 +689,7 @@ export default function App() {
               userRole={userRole}
               insurancePolicies={insurancePolicies}
             />
-          ) : selectedStaff ? (
+          ) : !isPaulaInsuranceOnlyUser && selectedStaff ? (
             <StaffDetail
               staffMember={selectedStaff}
               onBack={() => setSelectedStaff(null)}
@@ -674,8 +701,8 @@ export default function App() {
             />
           ) : (
             <>
-              {currentView === 'dashboard' && <Dashboard clients={clients} tasks={tasks} areaCosts={areaCosts} staff={staff} />}
-              {currentView === 'clients' && (
+              {activeView === 'dashboard' && <Dashboard clients={clients} tasks={tasks} areaCosts={areaCosts} staff={staff} />}
+              {activeView === 'clients' && (
                 <ClientList 
                   clients={clients} setClients={setClients}
                   staff={staff} groups={groups} tasks={tasks} areaCosts={areaCosts}
@@ -683,7 +710,7 @@ export default function App() {
                   onSyncClientsRequest={handleFullSync}
                 />
               )}
-              {currentView === 'emails' && (
+              {activeView === 'emails' && (
                 <EmailCampaigns 
                   clients={clients} groups={groups} staff={staff} 
                   templates={templates} setTemplates={setTemplates}
@@ -691,19 +718,20 @@ export default function App() {
                   history={campaignHistory} setHistory={setCampaignHistory}
                 />
               )}
-              {currentView === 'insurance' && (
+              {activeView === 'insurance' && (
                 <Insurance
                   policies={insurancePolicies} setPolicies={setInsurancePolicies}
                   clients={clients}
+                  forcedAgent={isPaulaInsuranceOnlyUser ? 'Paula' : undefined}
                 />
               )}
-              {currentView === 'sht' && (
+              {activeView === 'sht' && (
                 <WorkSafety
                   services={workSafetyServices} setServices={setWorkSafetyServices}
                   clients={clients}
                 />
               )}
-              {currentView === 'cashier' && (
+              {activeView === 'cashier' && (
                 <Cashier
                   clients={clients}
                   groups={groups}
@@ -715,7 +743,7 @@ export default function App() {
                   setCashOperations={setCashOperations}
                 />
               )}
-              {currentView === 'groups' && (
+              {activeView === 'groups' && (
                 <FeeGroups 
                   groups={groups} setGroups={setGroups} 
                   clients={clients} setClients={setClients} 
@@ -724,7 +752,7 @@ export default function App() {
                   turnoverBrackets={turnoverBrackets}
                 />
               )}
-              {currentView === 'team' && (
+              {activeView === 'team' && (
                 <StaffTeam 
                   staff={staff} setStaff={setStaff} 
                   clients={clients} tasks={tasks} 
@@ -733,8 +761,8 @@ export default function App() {
                   areaCosts={areaCosts}
                 />
               )}
-              {currentView === 'tasks' && <Tasks tasks={tasks} setTasks={setTasks} />}
-              {currentView === 'calculator' && (
+              {activeView === 'tasks' && <Tasks tasks={tasks} setTasks={setTasks} />}
+              {activeView === 'calculator' && (
                 <Calculator 
                   tasks={tasks} logo={logo} 
                   turnoverBrackets={turnoverBrackets} 
@@ -744,7 +772,7 @@ export default function App() {
                   setQuoteHistory={setQuoteHistory}
                 />
               )}
-              {currentView === 'settings' && (
+              {activeView === 'settings' && (
                 <Settings 
                   areaCosts={areaCosts} setAreaCosts={setAreaCosts}
                   turnoverBrackets={turnoverBrackets} setTurnoverBrackets={setTurnoverBrackets}

@@ -9,9 +9,10 @@ interface SidebarProps {
   logo: string;
   onLogoUpload: (file: File) => void | Promise<void>;
   userRole: 'admin' | 'user' | null;
+  allowedViews?: string[];
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLogoUpload, userRole }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLogoUpload, userRole, allowedViews }) => {
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin'] },
     { id: 'clients', label: 'Clientes', icon: Users, roles: ['admin', 'user'] },
@@ -25,7 +26,11 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLo
     { id: 'calculator', label: 'Orçamentador', icon: Calculator, roles: ['admin'] },
   ];
 
-  const menuItems = allMenuItems.filter(item => userRole && item.roles.includes(userRole));
+  const menuItems = allMenuItems.filter(item => {
+    if (!userRole || !item.roles.includes(userRole)) return false;
+    if (allowedViews && !allowedViews.includes(item.id)) return false;
+    return true;
+  });
 
   const handleLogout = async () => {
     const supabase = ensureStoreClient();
