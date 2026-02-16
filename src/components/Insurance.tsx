@@ -381,7 +381,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                 <label className="block text-xs font-bold text-slate-500 mb-1">
                   {editingPolicy.agent === 'Paula' ? 'Cliente' : 'Cliente*'}
                 </label>
-                <select required={editingPolicy.agent !== 'Paula'} value={editingPolicy.clientId || ''} onChange={e => {
+                <select value={editingPolicy.clientId || ''} onChange={e => {
                   const clientId = e.target.value || undefined;
                   const selectedClientName = sortedClients.find(client => client.id === clientId)?.name || '';
                   const nextPolicy: Partial<InsurancePolicy> = {
