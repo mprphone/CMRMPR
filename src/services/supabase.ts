@@ -393,6 +393,86 @@ export const clientService = {
     if (error) throw error;
     return (data || []).map(mapDbToClient);
   },
+  async getPaged(options: {
+    page: number;
+    pageSize: number;
+    searchTerm?: string;
+    status?: 'all' | Client['status'];
+    entityType?: 'all' | string;
+    responsibleStaffId?: 'all' | string;
+    groupClientIds?: string[];
+    sortKey?: 'name' | 'nif' | 'email' | 'phone' | 'entityType' | 'employeeCount' | 'documentCount' | 'monthlyFee' | 'status';
+    sortDirection?: 'ascending' | 'descending';
+  }): Promise<{ clients: Client[]; total: number; page: number; pageSize: number }> {
+    const storeClient = ensureStoreClient();
+    const page = Math.max(1, options.page || 1);
+    const pageSize = Math.min(200, Math.max(5, options.pageSize || 25));
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    if (Array.isArray(options.groupClientIds) && options.groupClientIds.length === 0) {
+      return { clients: [], total: 0, page, pageSize };
+    }
+
+    let query = storeClient
+      .from('clients')
+      .select('*', { count: 'exact' });
+
+    if (options.searchTerm && options.searchTerm.trim().length > 0) {
+      const search = options.searchTerm.trim().replace(/[%]/g, '');
+      query = query.or([
+        `name.ilike.%${search}%`,
+        `nif.ilike.%${search}%`,
+        `email.ilike.%${search}%`,
+        `phone.ilike.%${search}%`,
+      ].join(','));
+    }
+
+    if (options.status && options.status !== 'all') {
+      query = query.eq('status', options.status);
+    }
+
+    if (options.entityType && options.entityType !== 'all') {
+      query = query.eq('entity_type', options.entityType);
+    }
+
+    if (options.responsibleStaffId && options.responsibleStaffId !== 'all') {
+      query = query.eq('responsavel_interno_id', options.responsibleStaffId);
+    }
+
+    if (Array.isArray(options.groupClientIds) && options.groupClientIds.length > 0) {
+      query = query.in('id', options.groupClientIds);
+    }
+
+    const sortColumnByKey: Record<NonNullable<typeof options.sortKey>, string> = {
+      name: 'name',
+      nif: 'nif',
+      email: 'email',
+      phone: 'phone',
+      entityType: 'entity_type',
+      employeeCount: 'employee_count',
+      documentCount: 'document_count',
+      monthlyFee: 'monthly_fee',
+      status: 'status',
+    };
+
+    const sortKey = options.sortKey || 'name';
+    const sortColumn = sortColumnByKey[sortKey] || 'name';
+    const ascending = (options.sortDirection || 'ascending') === 'ascending';
+
+    const { data, error, count } = await query
+      .order(sortColumn, { ascending, nullsFirst: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    return {
+      clients: (data || []).map(mapDbToClient),
+      total: count || 0,
+      page,
+      pageSize,
+    };
+  },
   async importExternalClients(): Promise<Client[]> {
     if (!importClient) throw new Error("Origem não configurada.");
     const { data, error } = await importClient.from('clientes').select('*');
@@ -510,6 +590,7 @@ const mapDbToWorkSafetyService = (p: any): WorkSafetyService => ({
   isCommissionPaid: p.is_commission_paid,
   proposalStatus: p.proposal_status,
   attachment_url: p.attachment_url,
+  documentChecklist: p.document_checklist && typeof p.document_checklist === 'object' ? p.document_checklist : {},
 });
 
 const mapWorkSafetyServiceToDb = (p: Partial<WorkSafetyService>) => ({
@@ -523,6 +604,7 @@ const mapWorkSafetyServiceToDb = (p: Partial<WorkSafetyService>) => ({
   is_commission_paid: p.isCommissionPaid,
   proposal_status: p.proposalStatus,
   attachment_url: p.attachment_url,
+  document_checklist: p.documentChecklist || {},
 });
 
 export const workSafetyService = {
@@ -537,11 +619,30 @@ export const workSafetyService = {
   },
   async upsert(service: Partial<WorkSafetyService>): Promise<WorkSafetyService> {
     const storeClient = ensureStoreClient();
-    const { data, error } = await storeClient
+    const payload = mapWorkSafetyServiceToDb(service);
+    let { data, error } = await storeClient
       .from('work_safety_services')
-      .upsert(mapWorkSafetyServiceToDb(service))
+      .upsert(payload)
       .select('*, clients (id, name)')
       .single();
+
+    if (error) {
+      const schemaError = /column .*document_checklist.* does not exist|schema cache/i;
+      if (schemaError.test(error.message || '')) {
+        const fallbackPayload = { ...payload } as any;
+        delete fallbackPayload.document_checklist;
+
+        const retry = await storeClient
+          .from('work_safety_services')
+          .upsert(fallbackPayload)
+          .select('*, clients (id, name)')
+          .single();
+
+        data = retry.data;
+        error = retry.error;
+      }
+    }
+
     if (error) throw error;
     return mapDbToWorkSafetyService(data);
   },
@@ -954,35 +1055,47 @@ const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
   id: p.id,
   clientId: p.client_id,
   clientName: p.clients?.name || 'Cliente Desconhecido',
+  agent: (p.agent || undefined) as InsurancePolicy['agent'],
   policyDate: p.policy_date,
+  renewalDate: p.renewal_date || p.policy_date,
   policyNumber: p.policy_number,
-  insuranceProvider: p.insurance_provider,
+  company: p.company || p.insurance_provider,
+  branch: p.branch || p.policy_type,
+  insuranceProvider: p.company || p.insurance_provider,
   paymentFrequency: p.payment_frequency,
-  policyType: p.policy_type,
-  premiumValue: p.premium_value,
+  policyType: p.branch || p.policy_type,
+  premiumValue: Number(p.net_premium_value ?? p.premium_value ?? 0),
+  netPremiumValue: Number(p.net_premium_value ?? p.premium_value ?? 0),
   commissionRate: p.commission_rate,
   commissionPaid: p.commission_paid,
   status: p.status || 'Proposta',
   attachment_url: p.attachment_url,
   communicationType: p.communication_type,
   policyTier: p.policy_tier,
+  documentChecklist: p.document_checklist && typeof p.document_checklist === 'object' ? p.document_checklist : {},
 });
 
 const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
   id: p.id,
   client_id: p.clientId,
+  agent: p.agent || null,
   policy_date: p.policyDate,
+  renewal_date: p.renewalDate || p.policyDate || null,
   policy_number: p.policyNumber,
-  insurance_provider: p.insuranceProvider,
+  company: p.company || p.insuranceProvider || null,
+  branch: p.branch || p.policyType || null,
+  insurance_provider: p.company || p.insuranceProvider || null,
   payment_frequency: p.paymentFrequency,
-  policy_type: p.policyType,
-  premium_value: p.premiumValue,
+  policy_type: p.branch || p.policyType || null,
+  premium_value: p.netPremiumValue ?? p.premiumValue ?? 0,
+  net_premium_value: p.netPremiumValue ?? p.premiumValue ?? 0,
   commission_rate: p.commissionRate,
   commission_paid: p.commissionPaid,
   status: p.status,
   attachment_url: p.attachment_url,
   communication_type: p.communicationType,
   policy_tier: p.policyTier,
+  document_checklist: p.documentChecklist || {},
 });
 
 export const insuranceService = {
@@ -997,7 +1110,35 @@ export const insuranceService = {
   },
   async upsert(policy: Partial<InsurancePolicy>): Promise<InsurancePolicy> {
     const storeClient = ensureStoreClient();
-    const { data, error } = await storeClient.from('insurance_policies').upsert(mapInsurancePolicyToDb(policy)).select('*, clients (id, name)').single();
+    const payload = mapInsurancePolicyToDb(policy);
+    let { data, error } = await storeClient
+      .from('insurance_policies')
+      .upsert(payload)
+      .select('*, clients (id, name)')
+      .single();
+
+    if (error) {
+      const schemaError = /column .*document_checklist.* does not exist|column .*agent.* does not exist|column .*renewal_date.* does not exist|column .*company.* does not exist|column .*branch.* does not exist|column .*net_premium_value.* does not exist|schema cache/i;
+      if (schemaError.test(error.message || '')) {
+        const fallbackPayload = { ...payload } as any;
+        delete fallbackPayload.document_checklist;
+        delete fallbackPayload.agent;
+        delete fallbackPayload.renewal_date;
+        delete fallbackPayload.company;
+        delete fallbackPayload.branch;
+        delete fallbackPayload.net_premium_value;
+
+        const retry = await storeClient
+          .from('insurance_policies')
+          .upsert(fallbackPayload)
+          .select('*, clients (id, name)')
+          .single();
+
+        data = retry.data;
+        error = retry.error;
+      }
+    }
+
     if (error) throw error;
     return mapDbToInsurancePolicy(data);
   },

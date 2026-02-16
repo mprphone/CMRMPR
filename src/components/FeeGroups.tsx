@@ -36,6 +36,7 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
   const [addClientStaffFilter, setAddClientStaffFilter] = useState('all');
   const [addClientEntityTypeFilter, setAddClientEntityTypeFilter] = useState('all');
   const [showChangeMapPreview, setShowChangeMapPreview] = useState(false);
+  const [isImpactSimulationOpen, setIsImpactSimulationOpen] = useState(false);
 
   type MapSortableKeys = 'name' | 'monthlyFee' | 'newFee' | 'difference';
   const [mapClients, setMapClients] = useState<(Client & { newFee: number; difference: number; })[]>([]);
@@ -53,6 +54,24 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
         difference: newFees[c.id] - c.monthlyFee,
       }));
   }, [groupClients, newFees]);
+
+  const impactPreviewRows = useMemo(() => {
+    return [...clientsWithNewFees].sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
+  }, [clientsWithNewFees]);
+
+  const impactSummary = useMemo(() => {
+    return clientsWithNewFees.reduce(
+      (acc, client) => {
+        acc.currentTotal += client.monthlyFee;
+        acc.newTotal += client.newFee;
+        acc.diffTotal += client.difference;
+        if (client.difference > 0) acc.increases += 1;
+        if (client.difference < 0) acc.decreases += 1;
+        return acc;
+      },
+      { currentTotal: 0, newTotal: 0, diffTotal: 0, increases: 0, decreases: 0 }
+    );
+  }, [clientsWithNewFees]);
 
   const uniqueEntityTypes = useMemo(() => {
     const types = new Set(clients.map(c => c.entityType).filter(Boolean));
@@ -264,10 +283,15 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
     }
   };
 
-  const handleApplyFees = async () => {
+  const handleApplyFees = () => {
+    if (clientsWithNewFees.length === 0) return;
+    setIsImpactSimulationOpen(true);
+  };
+
+  const handleConfirmApplyFees = async () => {
     setIsSaving(true);
     const clientsToUpdate = groupClients.filter(c => newFees[c.id] !== undefined && newFees[c.id] > 0);
-    
+
     try {
       for (const client of clientsToUpdate) {
         await clientService.upsert({ ...client, monthlyFee: newFees[c.id] });
@@ -275,9 +299,10 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
       const updatedClients = clients.map(c => newFees[c.id] ? { ...c, monthlyFee: newFees[c.id] } : c);
       setClients(updatedClients);
       setNewFees({});
-      alert(`${clientsToUpdate.length} avenças foram atualizadas com sucesso!`);
+      setIsImpactSimulationOpen(false);
+      alert(`${clientsToUpdate.length} avencas foram atualizadas com sucesso!`);
     } catch (err: any) {
-      alert("Falha ao gravar as alterações: " + err.message);
+      alert("Falha ao gravar as alteracoes: " + err.message);
     } finally {
       setIsSaving(false);
     }
@@ -560,8 +585,7 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
               <Printer size={18}/> Gerar Mapa
             </button>
             <button onClick={handleApplyFees} disabled={isSaving || clientsWithNewFees.length === 0} className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
-              {isSaving ? <RefreshCcw size={18} className="animate-spin"/> : <CheckCircle size={18}/>} Aplicar Avenças
-            </button>
+              {isSaving ? <RefreshCcw size={18} className="animate-spin"/> : <CheckCircle size={18}/>} Simular Impacto e Aplicar</button>
           </div>
         </>
       ) : (
@@ -614,6 +638,95 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {isImpactSimulationOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
+            <div className="p-6 border-b flex justify-between items-center">
+              <div>
+                <h3 className="text-xl font-bold">Simulacao de Impacto</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Revise o impacto antes de aplicar alteracoes em massa.
+                </p>
+              </div>
+              <button onClick={() => setIsImpactSimulationOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 grid grid-cols-1 md:grid-cols-5 gap-3 border-b bg-slate-50/70">
+              <div className="bg-white border border-slate-200 rounded-lg p-3">
+                <p className="text-[11px] font-bold text-slate-500 uppercase">Clientes</p>
+                <p className="text-xl font-bold text-slate-800">{clientsWithNewFees.length}</p>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-lg p-3">
+                <p className="text-[11px] font-bold text-slate-500 uppercase">Atual</p>
+                <p className="text-xl font-bold text-slate-800">{impactSummary.currentTotal.toFixed(2)}EUR</p>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-lg p-3">
+                <p className="text-[11px] font-bold text-blue-600 uppercase">Proposto</p>
+                <p className="text-xl font-bold text-blue-700">{impactSummary.newTotal.toFixed(2)}EUR</p>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-lg p-3">
+                <p className="text-[11px] font-bold text-slate-500 uppercase">Aumentos</p>
+                <p className="text-xl font-bold text-green-600">{impactSummary.increases}</p>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-lg p-3">
+                <p className="text-[11px] font-bold text-slate-500 uppercase">Reducoes</p>
+                <p className="text-xl font-bold text-red-600">{impactSummary.decreases}</p>
+              </div>
+            </div>
+
+            <div className="px-6 py-3 border-b">
+              <p className={`text-sm font-bold ${impactSummary.diffTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                Impacto total: {impactSummary.diffTotal >= 0 ? '+' : ''}{impactSummary.diffTotal.toFixed(2)}EUR
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-3">Cliente</th>
+                    <th className="px-4 py-3 text-right">Atual</th>
+                    <th className="px-4 py-3 text-right">Nova</th>
+                    <th className="px-4 py-3 text-right">Diferenca</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {impactPreviewRows.map(client => (
+                    <tr key={client.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <div className="font-bold text-slate-800">{client.name}</div>
+                        <div className="text-xs text-slate-400 font-mono">{client.nif}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right">{client.monthlyFee.toFixed(2)}EUR</td>
+                      <td className="px-4 py-3 text-right font-bold text-blue-700">{client.newFee.toFixed(2)}EUR</td>
+                      <td className={`px-4 py-3 text-right font-bold ${client.difference >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {client.difference >= 0 ? '+' : ''}{client.difference.toFixed(2)}EUR
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="p-4 border-t flex justify-end gap-3">
+              <button onClick={() => setIsImpactSimulationOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmApplyFees}
+                disabled={isSaving || clientsWithNewFees.length === 0}
+                className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSaving ? <RefreshCcw size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+                Confirmar e Aplicar
+              </button>
+            </div>
           </div>
         </div>
       )}

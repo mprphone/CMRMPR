@@ -191,18 +191,24 @@ export interface InsurancePolicy {
   id: string;
   clientId?: string;
   clientName?: string; // For display
+  agent?: 'MPR' | 'Paula';
   policyDate: string;
+  renewalDate?: string;
   policyNumber?: string;
+  company?: string;
+  branch?: string;
   insuranceProvider?: string;
   paymentFrequency: 'Mensal' | 'Trimestral' | 'Semestral' | 'Anual';
   policyType: string;
   premiumValue: number;
+  netPremiumValue?: number;
   commissionRate: number;
   commissionPaid: boolean;
   status: 'Proposta' | 'Aceite';
   communicationType?: string;
   policyTier?: 'Base' | 'Flexível';
   attachment_url?: string;
+  documentChecklist?: Record<string, boolean>;
 }
 
 export interface AppNotification {
@@ -227,6 +233,7 @@ export interface WorkSafetyService {
   isCommissionPaid: boolean;
   proposalStatus: 'Não enviada' | 'Enviada' | 'Aceite' | 'Recusada';
   attachment_url?: string;
+  documentChecklist?: Record<string, boolean>;
 }
 
 export interface CashPayment {

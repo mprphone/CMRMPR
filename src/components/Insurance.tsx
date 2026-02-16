@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import { InsurancePolicy, Client } from '../types';
 import { insuranceService } from '../services/supabase';
 import { Shield, Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, Filter, CheckCircle, Circle, FileCheck, FileClock, Paperclip, ChevronUp, ChevronDown, PieChart } from 'lucide-react';
@@ -9,7 +9,30 @@ interface InsuranceProps {
   clients: Client[];
 }
 
-type SortableKeys = 'clientName' | 'policyDate' | 'premiumValue' | 'insuranceProvider';
+type SortableKeys = 'clientName' | 'agent' | 'renewalDate' | 'company' | 'branch' | 'netPremiumValue';
+
+const getCompany = (policy: Partial<InsurancePolicy>) => policy.company || policy.insuranceProvider || '';
+const getBranch = (policy: Partial<InsurancePolicy>) => policy.branch || policy.policyType || '';
+const getNetPremium = (policy: Partial<InsurancePolicy>) => Number(policy.netPremiumValue ?? policy.premiumValue ?? 0);
+
+const getSortValue = (policy: InsurancePolicy, sortKey: SortableKeys): string | number => {
+  switch (sortKey) {
+    case 'clientName':
+      return policy.clientName || '';
+    case 'agent':
+      return policy.agent || '';
+    case 'renewalDate':
+      return policy.renewalDate || '';
+    case 'company':
+      return getCompany(policy);
+    case 'branch':
+      return getBranch(policy);
+    case 'netPremiumValue':
+      return getNetPremium(policy);
+    default:
+      return '';
+  }
+};
 
 const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -19,15 +42,15 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
-  const [providerFilter, setProviderFilter] = useState('all');
+  const [companyFilter, setCompanyFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [policyStatusFilter, setPolicyStatusFilter] = useState('all');
-  const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'policyDate', direction: 'descending' });
+  const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'renewalDate', direction: 'ascending' });
   const [isQuarterlyModalOpen, setIsQuarterlyModalOpen] = useState(false);
 
-  const uniqueProviders = useMemo(() => {
-    const providers = new Set(policies.map(p => p.insuranceProvider).filter(Boolean));
-    return Array.from(providers) as string[];
+  const uniqueCompanies = useMemo(() => {
+    const companies = new Set(policies.map(policy => getCompany(policy)).filter(Boolean));
+    return Array.from(companies) as string[];
   }, [policies]);
 
   const sortedClients = useMemo(() => {
@@ -36,11 +59,15 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
 
   const sortedPolicies = useMemo(() => {
     let filtered = policies.filter(p => {
+      const search = searchTerm.toLowerCase();
       const searchMatch = searchTerm === '' ||
-        p.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.policyNumber?.toLowerCase().includes(searchTerm.toLowerCase());
+        p.clientName?.toLowerCase().includes(search) ||
+        p.policyNumber?.toLowerCase().includes(search) ||
+        getCompany(p).toLowerCase().includes(search) ||
+        getBranch(p).toLowerCase().includes(search) ||
+        (p.agent || '').toLowerCase().includes(search);
       
-      const providerMatch = providerFilter === 'all' || p.insuranceProvider === providerFilter;
+      const companyMatch = companyFilter === 'all' || getCompany(p) === companyFilter;
       
       const statusMatch = statusFilter === 'all' ||
         (statusFilter === 'paid' && p.commissionPaid) ||
@@ -48,13 +75,13 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       
       const policyStatusMatch = policyStatusFilter === 'all' || p.status === policyStatusFilter;
 
-      return searchMatch && providerMatch && statusMatch && policyStatusMatch;
+      return searchMatch && companyMatch && statusMatch && policyStatusMatch;
     });
 
     if (sortConfig !== null) {
       filtered.sort((a, b) => {
-        const aValue = a[sortConfig.key as keyof InsurancePolicy] || '';
-        const bValue = b[sortConfig.key as keyof InsurancePolicy] || '';
+        const aValue = getSortValue(a, sortConfig.key);
+        const bValue = getSortValue(b, sortConfig.key);
         if (aValue < bValue) {
           return sortConfig.direction === 'ascending' ? -1 : 1;
         }
@@ -65,7 +92,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       });
     }
     return filtered;
-  }, [policies, searchTerm, providerFilter, statusFilter, policyStatusFilter, sortConfig]);
+  }, [policies, searchTerm, companyFilter, statusFilter, policyStatusFilter, sortConfig]);
 
   const totals = useMemo(() => {
     let pending = 0;
@@ -74,13 +101,14 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
     // Only calculate totals for accepted policies
     const acceptedPolicies = policies.filter(p => p.status === 'Aceite');
     acceptedPolicies.forEach(p => {
-      const commissionValue = (p.premiumValue * p.commissionRate) / 100;
+      const netPremium = getNetPremium(p);
+      const commissionValue = (netPremium * p.commissionRate) / 100;
       if (p.commissionPaid) {
         paid += commissionValue;
       } else {
         pending += commissionValue;
       }
-      totalPremium += p.premiumValue;
+      totalPremium += netPremium;
     });
     return { pending, paid, totalPremium };
   }, [policies]);
@@ -90,23 +118,41 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
     const acceptedPolicies = policies.filter(p => p.status === 'Aceite');
     acceptedPolicies.forEach(p => {
       const month = new Date(p.policyDate).getMonth();
-      if (month < 3) quarters.Q1 += p.premiumValue;
-      else if (month < 6) quarters.Q2 += p.premiumValue;
-      else if (month < 9) quarters.Q3 += p.premiumValue;
-      else quarters.Q4 += p.premiumValue;
+      const netPremium = getNetPremium(p);
+      if (month < 3) quarters.Q1 += netPremium;
+      else if (month < 6) quarters.Q2 += netPremium;
+      else if (month < 9) quarters.Q3 += netPremium;
+      else quarters.Q4 += netPremium;
     });
     return quarters;
   }, [policies]);
 
   const handleOpenModal = (policy?: InsurancePolicy) => {
-    setEditingPolicy(policy || {
+    setEditingPolicy(policy ? {
+      ...policy,
+      agent: policy.agent || 'MPR',
+      renewalDate: policy.renewalDate || policy.policyDate,
+      company: getCompany(policy),
+      branch: getBranch(policy),
+      netPremiumValue: getNetPremium(policy),
+      premiumValue: getNetPremium(policy),
+      insuranceProvider: getCompany(policy),
+      policyType: getBranch(policy),
+    } : {
       policyDate: new Date().toISOString().split('T')[0],
+      renewalDate: new Date().toISOString().split('T')[0],
       paymentFrequency: 'Anual',
       status: 'Proposta',
       policyTier: 'Base',
       commissionPaid: false,
       commissionRate: 10,
       premiumValue: 0,
+      netPremiumValue: 0,
+      agent: 'MPR',
+      company: '',
+      branch: '',
+      insuranceProvider: '',
+      policyType: '',
     });
     setSelectedFile(null);
     setIsModalOpen(true);
@@ -114,8 +160,8 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingPolicy || !editingPolicy.clientId || !editingPolicy.policyType) {
-      alert("Cliente e Tipo de Seguro são obrigatórios.");
+    if (!editingPolicy || !editingPolicy.clientId || !editingPolicy.company || !editingPolicy.branch) {
+      alert("Cliente, Companhia e Ramo são obrigatórios.");
       return;
     }
     setIsSaving(true);
@@ -127,7 +173,20 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
         attachmentUrl = await insuranceService.uploadAttachment(selectedFile, policyId);
       }
 
-      const policyToSave = { ...editingPolicy, id: policyId, attachment_url: attachmentUrl };
+      const netPremium = getNetPremium(editingPolicy);
+
+      const policyToSave = {
+        ...editingPolicy,
+        id: policyId,
+        attachment_url: attachmentUrl,
+        renewalDate: editingPolicy.renewalDate || editingPolicy.policyDate,
+        company: editingPolicy.company,
+        branch: editingPolicy.branch,
+        insuranceProvider: editingPolicy.company,
+        policyType: editingPolicy.branch,
+        netPremiumValue: netPremium,
+        premiumValue: netPremium,
+      };
 
       const savedPolicy = await insuranceService.upsert(policyToSave);
       
@@ -177,7 +236,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Gestão de Seguros</h2>
-          <p className="text-sm text-slate-500">Controle as apólices e comissões dos seus clientes.</p>
+          <p className="text-sm text-slate-500">Com colunas de agente, renovação, companhia, ramo e prémio líquido.</p>
         </div>
         <button onClick={() => handleOpenModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
           <Plus size={18}/> Adicionar Seguro
@@ -194,7 +253,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
           <h3 className="text-2xl font-bold text-slate-800 mt-1">{totals.paid.toFixed(2)}€</h3>
         </div>
         <div onClick={() => setIsQuarterlyModalOpen(true)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:bg-slate-50">
-          <p className="text-sm font-medium text-blue-600 flex items-center gap-1">Total Prémios (Aceites) <PieChart size={14}/></p>
+          <p className="text-sm font-medium text-blue-600 flex items-center gap-1">Total Prémios Líquidos (Aceites) <PieChart size={14}/></p>
           <h3 className="text-2xl font-bold text-slate-800 mt-1">{totals.totalPremium.toFixed(2)}€</h3>
         </div>
       </div>
@@ -203,11 +262,11 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
         <div className="p-4 border-b grid grid-cols-1 md:grid-cols-4 gap-3">
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
-                <input type="text" placeholder="Pesquisar cliente ou apólice..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm" />
+                <input type="text" placeholder="Pesquisar cliente, companhia, ramo ou apólice..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm" />
             </div>
-            <select value={providerFilter} onChange={e => setProviderFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-                <option value="all">Todas as Seguradoras</option>
-                {uniqueProviders.map(p => <option key={p} value={p}>{p}</option>)}
+            <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+                <option value="all">Todas as Companhias</option>
+                {uniqueCompanies.map(company => <option key={company} value={company}>{company}</option>)}
             </select>
             <select value={policyStatusFilter} onChange={e => setPolicyStatusFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
                 <option value="all">Todos os Estados da Apólice</option>
@@ -215,7 +274,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                 <option value="Aceite">Aceite</option>
             </select>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-                <option value="all">Todos os Estados</option>
+                <option value="all">Todos os Estados de Comissão</option>
                 <option value="paid">Paga</option>
                 <option value="pending">Pendente</option>
             </select>
@@ -225,34 +284,39 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
             <thead className="text-xs text-slate-500 uppercase bg-slate-50">
               <tr>
                 <SortableHeader sortKey="clientName">Cliente / Apólice</SortableHeader>
-                <SortableHeader sortKey="policyDate">Data</SortableHeader>
+                <SortableHeader sortKey="agent">Agente</SortableHeader>
+                <SortableHeader sortKey="renewalDate">Data Renovação</SortableHeader>
+                <SortableHeader sortKey="company">Companhia</SortableHeader>
+                <SortableHeader sortKey="branch">Ramo</SortableHeader>
+                <SortableHeader sortKey="netPremiumValue">Prémio Líquido</SortableHeader>
+                <th className="px-4 py-3 text-center">Comissão</th>
                 <th className="px-4 py-3 text-center">Estado</th>
-                <th className="px-4 py-3">Tipo de Seguro</th>
-                <SortableHeader sortKey="insuranceProvider">Seguradora</SortableHeader>
-                <th className="px-4 py-3">Nível</th>
-                <SortableHeader sortKey="premiumValue">Prémio</SortableHeader>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {sortedPolicies.map(p => {
+                const company = getCompany(p);
+                const branch = getBranch(p);
+                const netPremium = getNetPremium(p);
                 return (
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3">
                       <div className="font-bold text-slate-800">{p.clientName}</div>
                       <div className="text-xs text-slate-400 font-mono">{p.policyNumber}</div>
                     </td>
-                    <td className="px-4 py-3 text-xs">{new Date(p.policyDate).toLocaleDateString('pt-PT')}</td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-700">{p.agent || '-'}</td>
+                    <td className="px-4 py-3 text-xs">{p.renewalDate ? new Date(p.renewalDate).toLocaleDateString('pt-PT') : '-'}</td>
+                    <td className="px-4 py-3 text-xs">{company || '-'}</td>
+                    <td className="px-4 py-3 text-xs">{branch || '-'}</td>
+                    <td className="px-4 py-3 text-right font-bold text-slate-800">{netPremium.toFixed(2)}€</td>
+                    <td className="px-4 py-3 text-center text-xs font-bold">{Number(p.commissionRate || 0).toFixed(1)}%</td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${p.status === 'Aceite' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                         {p.status === 'Aceite' ? <FileCheck size={14}/> : <FileClock size={14}/>}
                         {p.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-medium">{p.policyType}</td>
-                    <td className="px-4 py-3 text-xs">{p.insuranceProvider}</td>
-                    <td className="px-4 py-3 text-xs">{p.policyTier}</td>
-                    <td className="px-4 py-3 text-right font-medium">{p.premiumValue.toFixed(2)}€</td>
                     <td className="px-4 py-3 text-right">
                       {p.attachment_url && (
                         <a href={p.attachment_url} target="_blank" rel="noopener noreferrer" title="Ver Anexo" className="p-2 text-slate-400 hover:text-blue-600 inline-block">
@@ -265,7 +329,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                   </tr>
                 );
               })}
-              {sortedPolicies.length === 0 && (<tr><td colSpan={8} className="text-center italic text-slate-400 py-10">Nenhuma apólice encontrada.</td></tr>)}
+              {sortedPolicies.length === 0 && (<tr><td colSpan={9} className="text-center italic text-slate-400 py-10">Nenhuma apólice encontrada.</td></tr>)}
             </tbody>
           </table>
         </div>
@@ -289,40 +353,34 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                 </select>
               </div>
               <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Agente*</label>
+                <select value={editingPolicy.agent || 'MPR'} onChange={e => setEditingPolicy({...editingPolicy, agent: e.target.value as InsurancePolicy['agent']})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                  <option value="MPR">MPR</option>
+                  <option value="Paula">Paula</option>
+                </select>
+              </div>
+              <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Data da Apólice*</label>
                 <input type="date" required value={editingPolicy.policyDate} onChange={e => setEditingPolicy({...editingPolicy, policyDate: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Data de Renovação*</label>
+                <input type="date" required value={editingPolicy.renewalDate || ''} onChange={e => setEditingPolicy({...editingPolicy, renewalDate: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Nº da Apólice</label>
                 <input type="text" value={editingPolicy.policyNumber || ''} onChange={e => setEditingPolicy({...editingPolicy, policyNumber: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Seguradora</label>
-                <input type="text" list="providers" value={editingPolicy.insuranceProvider || ''} onChange={e => setEditingPolicy({...editingPolicy, insuranceProvider: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
-                <datalist id="providers">
-                  <option value="Finiconde" />
-                  <option value="Neo Seguros" />
-                  <option value="Outras" />
-                  {uniqueProviders.map(p => <option key={p} value={p} />)}
+                <label className="block text-xs font-bold text-slate-500 mb-1">Companhia*</label>
+                <input type="text" list="companies" required value={editingPolicy.company || ''} onChange={e => setEditingPolicy({...editingPolicy, company: e.target.value, insuranceProvider: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                <datalist id="companies">
+                  {uniqueCompanies.map(company => <option key={company} value={company} />)}
                 </datalist>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Estado da Apólice*</label>
-                <select required value={editingPolicy.status || 'Proposta'} onChange={e => setEditingPolicy({...editingPolicy, status: e.target.value as any})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option value="Proposta">Proposta</option>
-                  <option value="Aceite">Aceite</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Nível do Seguro</label>
-                <select value={editingPolicy.policyTier || 'Base'} onChange={e => setEditingPolicy({...editingPolicy, policyTier: e.target.value as any})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option value="Base">Base</option>
-                  <option value="Flexível">Flexível</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Tipo de Seguro*</label>
-                <input type="text" required value={editingPolicy.policyType || ''} onChange={e => setEditingPolicy({...editingPolicy, policyType: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Ex: Acidentes de Trabalho"/>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Ramo*</label>
+                <input type="text" required value={editingPolicy.branch || ''} onChange={e => setEditingPolicy({...editingPolicy, branch: e.target.value, policyType: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Ex: Acidentes de Trabalho"/>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Pagamento</label>
@@ -333,10 +391,17 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
                   <option>Mensal</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Estado da Apólice*</label>
+                <select required value={editingPolicy.status || 'Proposta'} onChange={e => setEditingPolicy({...editingPolicy, status: e.target.value as any})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                  <option value="Proposta">Proposta</option>
+                  <option value="Aceite">Aceite</option>
+                </select>
+              </div>
               <div className="md:col-span-2 grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Valor do Prémio (€)</label>
-                  <input type="number" step="0.01" value={editingPolicy.premiumValue} onChange={e => setEditingPolicy({...editingPolicy, premiumValue: parseFloat(e.target.value) || 0})} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Prémio Líquido (€)</label>
+                  <input type="number" step="0.01" value={getNetPremium(editingPolicy)} onChange={e => { const value = parseFloat(e.target.value) || 0; setEditingPolicy({...editingPolicy, netPremiumValue: value, premiumValue: value}); }} className="w-full px-3 py-2 border rounded-lg text-sm" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">Taxa de Comissão (%)</label>
@@ -377,7 +442,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients })
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setIsQuarterlyModalOpen(false)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Prémios por Trimestre</h3>
+              <h3 className="text-xl font-bold">Prémios Líquidos por Trimestre</h3>
               <button type="button" onClick={() => setIsQuarterlyModalOpen(false)}><X size={20} /></button>
             </div>
             <div className="space-y-3">

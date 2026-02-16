@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Client, FeeGroup, Staff, EmailTemplate, CampaignHistory, GlobalSettings, CampaignRecipientResult } from '../types';
-import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2, Search, CheckCircle, AlertCircle, Clock, Bold, FileText } from 'lucide-react';
+import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2, Search, CheckCircle, AlertCircle, Clock, Bold, FileText, Eye, RotateCcw } from 'lucide-react';
 import { generateTemplateWithAI } from '../services/geminiService';
 import { templateService, campaignHistoryService, storeClient } from '../services/supabase';
 
@@ -19,6 +19,18 @@ interface EmailCampaignsProps {
   history: CampaignHistory[];
   setHistory: (history: CampaignHistory[]) => void;
   globalSettings: GlobalSettings;
+}
+
+type QueueStatus = 'pending' | 'sent' | 'error';
+
+interface DeliveryQueueItem {
+  id: string;
+  campaignLabel: string;
+  name: string;
+  email: string;
+  status: QueueStatus;
+  error?: string;
+  updatedAt: string;
 }
 
 const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff, templates, setTemplates, history, setHistory, globalSettings }) => {
@@ -47,6 +59,9 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
   const [campaignResult, setCampaignResult] = useState<{ successCount: number; errorCount: number; details: { name: string; email: string; status: 'success' | 'error'; error?: string }[] } | null>(null);
   const [validationIssues, setValidationIssues] = useState<string[]>([]);
   const [selectedHistoryCampaign, setSelectedHistoryCampaign] = useState<CampaignHistory | null>(null);
+  const [deliveryQueue, setDeliveryQueue] = useState<DeliveryQueueItem[]>([]);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [isResendingFailuresId, setIsResendingFailuresId] = useState<string | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const templateBodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -309,6 +324,85 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
     return clients.filter(c => group.clientIds.includes(c.id)).map(c => c.id);
   };
 
+  const updateQueueStatus = (itemId: string, status: QueueStatus, error?: string) => {
+    setDeliveryQueue(prev =>
+      prev.map(item =>
+        item.id === itemId
+          ? {
+              ...item,
+              status,
+              error,
+              updatedAt: new Date().toISOString(),
+            }
+          : item
+      )
+    );
+  };
+
+  const buildResponsibleName = (client: Client) => {
+    if (!client.responsibleStaff) return 'N/A';
+    if (client.responsibleStaff.includes('-')) {
+      const member = staff.find(s => s.id === client.responsibleStaff);
+      return member ? member.name : 'Desconhecido';
+    }
+    return client.responsibleStaff;
+  };
+
+  const getRecipientsFromSelection = () => clients.filter(c => selectedRecipients.includes(c.id));
+
+  const validateSendConfiguration = (recipients: Client[]) => {
+    if (recipients.length === 0) return 'Selecione pelo menos um destinatário.';
+    if (!globalSettings.fromEmail || !globalSettings.fromName) {
+      return 'Configure o Nome e Email de Remetente nas Configurações.';
+    }
+
+    if (isScheduled) {
+      if (!scheduleDateTime) return 'Selecione uma data e hora para o agendamento.';
+      const scheduleDate = new Date(scheduleDateTime);
+      if (scheduleDate < new Date()) return 'A data de agendamento não pode ser no passado.';
+      return null;
+    }
+
+    const invalidEmails = recipients.filter(c => !c.email || !c.email.includes('@'));
+    if (invalidEmails.length > 0) {
+      return `Existem ${invalidEmails.length} destinatário(s) sem email válido. Corrija antes de enviar.`;
+    }
+
+    const selectedGroup = groups.find(g => g.id === selectedGroupId);
+    const proposedFees = selectedGroup?.proposed_fees || {};
+    const needsNovaAvenca = subject.includes('{{nova_avenca}}') || body.includes('{{nova_avenca}}');
+    if (needsNovaAvenca) {
+      const missing = recipients.filter(c => proposedFees[c.id] === undefined || proposedFees[c.id] === null);
+      if (missing.length > 0) {
+        return `Existem ${missing.length} destinatário(s) sem nova avença definida neste grupo.`;
+      }
+    }
+
+    return null;
+  };
+
+  const previewRecipients = useMemo(
+    () => clients.filter(client => selectedRecipients.includes(client.id)),
+    [clients, selectedRecipients]
+  );
+
+  const previewSample = useMemo(() => {
+    const firstRecipient = previewRecipients[0];
+    if (!firstRecipient) return null;
+
+    const selectedGroup = groups.find(g => g.id === selectedGroupId);
+    const proposedFees = selectedGroup?.proposed_fees || {};
+    const responsibleName = buildResponsibleName(firstRecipient);
+    const novaAvenca = proposedFees[firstRecipient.id];
+
+    return {
+      recipientName: firstRecipient.name,
+      recipientEmail: firstRecipient.email,
+      subject: applyTemplateVars(subject, firstRecipient, responsibleName, novaAvenca),
+      body: applyTemplateVars(body, firstRecipient, responsibleName, novaAvenca),
+    };
+  }, [previewRecipients, groups, selectedGroupId, subject, body]);
+
 const handleTemplateChange = (templateId: string) => {
     const template = templates.find(t => t.id === templateId);
     if (template) {
@@ -348,178 +442,231 @@ const handleTemplateChange = (templateId: string) => {
     }
   };
 
-  const handleSendCampaign = async () => {
-    if (selectedRecipients.length === 0) {
-      alert("Selecione pelo menos um destinatário.");
-      return;
-    }
-    if (!globalSettings.fromEmail || !globalSettings.fromName) {
-      alert("Por favor, configure o seu Nome e Email de Remetente nas Configurações.");
-      return;
-    }
+  const runScheduledCampaign = async (recipients: Client[]) => {
+    const scheduleDate = new Date(scheduleDateTime);
+    const group = groups.find(g => g.id === selectedGroupId);
+    const groupName = selectedGroupId === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
 
-    // --- New Scheduling Logic ---
-    if (isScheduled) {
-      if (!scheduleDateTime) {
-        alert("Por favor, selecione uma data e hora para o agendamento.");
-        return;
-      }
-      const scheduleDate = new Date(scheduleDateTime);
-      if (scheduleDate < new Date()) {
-        alert("A data de agendamento não pode ser no passado.");
-        return;
-      }
-      if (!confirm(`Tem a certeza que deseja agendar esta campanha para ${scheduleDate.toLocaleString('pt-PT')} para ${selectedRecipients.length} cliente(s)?`)) {
-        return;
-      }
+    const queueItems: DeliveryQueueItem[] = recipients.map(client => ({
+      id: crypto.randomUUID(),
+      campaignLabel: `Agendada: ${scheduleDate.toLocaleString('pt-PT')}`,
+      name: client.name,
+      email: client.email,
+      status: 'pending',
+      updatedAt: new Date().toISOString(),
+    }));
+    setDeliveryQueue(prev => [...queueItems, ...prev].slice(0, 300));
 
-      setIsSending(true); // Use isSending for loading state
+    const scheduledCampaign: Partial<CampaignHistory> = {
+      subject,
+      body,
+      recipient_ids: selectedRecipients,
+      group_name: groupName,
+      status: 'Agendada',
+      scheduled_at: scheduleDate.toISOString(),
+      send_delay: sendDelay,
+      template_id: selectedTemplateId || null,
+      recipient_count: selectedRecipients.length,
+    };
 
-      const group = groups.find(g => g.id === selectedGroupId);
-      const groupName = selectedGroupId === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
+    const savedRecord = await campaignHistoryService.create(scheduledCampaign);
+    setHistory([savedRecord, ...history]);
 
-      // NOTE: The CampaignHistory type and 'campaign_history' table in Supabase
-      // must be updated to include: recipient_ids (text[]), scheduled_at (timestamptz), send_delay (int4), template_id (uuid), recipient_results (jsonb)
-      const scheduledCampaign: Partial<CampaignHistory> = {
-        subject,
-        body,
-        recipient_ids: selectedRecipients,
-        group_name: groupName,
-        status: 'Agendada',
-        scheduled_at: scheduleDate.toISOString(),
-        send_delay: sendDelay,
-        template_id: selectedTemplateId || null,
-        recipient_count: selectedRecipients.length,
-      };
+    alert(`Campanha agendada com sucesso para ${scheduleDate.toLocaleString('pt-PT')}.\n\nNOTA: E necessario um processo no servidor (cron) para executar campanhas agendadas.`);
+    setSelectedRecipients([]);
+    setIsScheduled(false);
+    setScheduleDateTime('');
+  };
 
-      try {
-        const savedRecord = await campaignHistoryService.create(scheduledCampaign);
-        setHistory([savedRecord, ...history]);
-        alert(`Campanha agendada com sucesso para ${scheduleDate.toLocaleString('pt-PT')}.\n\nNOTA: E necessario um processo no servidor (cron job) para processar e enviar campanhas agendadas.`);
-        setSelectedRecipients([]);
-        setIsScheduled(false);
-        setScheduleDateTime('');
-      } catch (err: any) {
-        alert("Falha ao agendar a campanha: " + err.message);
-      } finally {
-        setIsSending(false);
-      }
-      return; // End execution here for scheduled campaigns
-    }
-    
-    // --- Existing Immediate Send Logic ---
-    if (!confirm(`Tem a certeza que deseja enviar esta campanha para ${selectedRecipients.length} cliente(s)?`)) {
-      return;
-    }
+  const runImmediateCampaign = async (
+    recipients: Client[],
+    campaignLabel = `Envio: ${new Date().toLocaleString('pt-PT')}`,
+    subjectTemplate = subject,
+    bodyTemplate = body,
+    groupIdForContext = selectedGroupId
+  ) => {
+    setValidationIssues([]);
+    if (!storeClient) throw new Error('Cliente Supabase nao inicializado.');
 
-    setIsSending(true);
-    setValidationIssues([]); // Clear issues on send
-    // (Opcional) Se existir sessão autenticada, envia o JWT para a Edge Function.
-    // Se não houver sessão (app sem Auth), a função deve estar com verify_jwt=false.
     try {
-      if (storeClient) {
-        const { data: { session } } = await storeClient.auth.getSession();
-        if (session?.access_token) storeClient.functions.setAuth(session.access_token);
-      }
-    } catch (_) { /* ignore */ }
+      const { data: { session } } = await storeClient.auth.getSession();
+      if (session?.access_token) storeClient.functions.setAuth(session.access_token);
+    } catch (_) {
+      // ignore
+    }
 
-    const recipients = clients.filter(c => selectedRecipients.includes(c.id));
-    const selectedGroup = groups.find(g => g.id === selectedGroupId);
+    const selectedGroup = groups.find(g => g.id === groupIdForContext);
     const proposedFees = selectedGroup?.proposed_fees || {};
-    const invalidEmails = recipients.filter(c => !c.email || !c.email.includes('@'));
-    if (invalidEmails.length) {
-      alert(`Existem ${invalidEmails.length} destinatário(s) sem email válido. Corrija antes de enviar.`);
-      setIsSending(false);
-      return;
-    }
-    const needsNovaAvenca = subject.includes('{{nova_avenca}}') || body.includes('{{nova_avenca}}');
-    if (needsNovaAvenca) {
-      const missing = recipients.filter(c => proposedFees[c.id] === undefined || proposedFees[c.id] === null);
-      if (missing.length) {
-        alert(`Existem ${missing.length} destinatário(s) sem valor de nova avença definido neste grupo. Atualize as novas avenças antes de enviar.`);
-        setIsSending(false);
-        return;
-      }
-    }
+
+    const queueItems = recipients.map(client => ({
+      id: crypto.randomUUID(),
+      campaignLabel,
+      name: client.name,
+      email: client.email,
+      status: 'pending' as QueueStatus,
+      updatedAt: new Date().toISOString(),
+    }));
+    setDeliveryQueue(prev => [...queueItems, ...prev].slice(0, 300));
+    const queueByEmail = new Map(queueItems.map(item => [item.email.toLowerCase(), item.id]));
+
     let successCount = 0;
     let errorCount = 0;
     const campaignLogs: CampaignRecipientResult[] = [];
     let jwtError = false;
 
     for (const client of recipients) {
-      // Personalize email for each client
-      let responsibleName = 'N/A';
-      if (client.responsibleStaff) {
-        if (client.responsibleStaff.includes('-')) { const s = staff.find(s => s.id === client.responsibleStaff); responsibleName = s ? s.name : 'Desconhecido'; }
-        else { responsibleName = client.responsibleStaff; }
-      }
-      
+      const responsibleName = buildResponsibleName(client);
       const novaAvenca = proposedFees[client.id];
-      let finalSubject = applyTemplateVars(subject, client, responsibleName, novaAvenca);
-      let finalBody = applyTemplateVars(body, client, responsibleName, novaAvenca);
+      const finalSubject = applyTemplateVars(subjectTemplate, client, responsibleName, novaAvenca);
+      const finalBody = applyTemplateVars(bodyTemplate, client, responsibleName, novaAvenca);
+      const queueItemId = queueByEmail.get(client.email.toLowerCase());
 
       try {
-        if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
-        
         const finalHtml = buildCampaignEmailHtml(finalBody, globalSettings.emailSignature || '');
-
         const { error } = await storeClient.functions.invoke('send-email', {
-          body: { to: client.email, from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: finalSubject, html: finalHtml },
+          body: {
+            to: client.email,
+            from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`,
+            subject: finalSubject,
+            html: finalHtml,
+          },
         });
-
         if (error) throw error;
 
-        successCount++;
+        successCount += 1;
         campaignLogs.push({ name: client.name, email: client.email, status: 'success' });
+        if (queueItemId) updateQueueStatus(queueItemId, 'sent');
       } catch (err: any) {
         let detailedError = err.message;
         if (err.context && typeof err.context.json === 'function') {
-          const funcError = await err.context.json().catch(() => null);
-          if (funcError && funcError.error) detailedError = funcError.error;
+          const functionError = await err.context.json().catch(() => null);
+          if (functionError && functionError.error) detailedError = functionError.error;
         }
 
-        if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
-          alert("A sua sessão expirou ou é inválida. A campanha foi interrompida. Por favor, recarregue a página e tente novamente.");
+        if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessao invalida')) {
           jwtError = true;
-          break; // Stop campaign on auth error
+          if (queueItemId) updateQueueStatus(queueItemId, 'error', 'Sessao invalida');
+          campaignLogs.push({ name: client.name, email: client.email, status: 'error', error: 'Sessao invalida' });
+          errorCount += 1;
+          break;
         }
 
-        errorCount++;
-        console.error(`Falha ao enviar para ${client.email}:`, detailedError, err);
+        errorCount += 1;
         campaignLogs.push({ name: client.name, email: client.email, status: 'error', error: detailedError });
+        if (queueItemId) updateQueueStatus(queueItemId, 'error', detailedError);
       }
-      await new Promise(resolve => setTimeout(resolve, sendDelay)); // Use configurable delay
-    }
-    
-    if (jwtError) {
-      // Alert was shown in the loop. Just stop the loading state.
-      setIsSending(false);
-      return;
+
+      await new Promise(resolve => setTimeout(resolve, sendDelay));
     }
 
-    const group = groups.find(g => g.id === selectedGroupId);
-    const groupName = selectedGroupId === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
+    if (jwtError) {
+      alert('A sessao expirou ou e invalida. O envio foi interrompido.');
+    }
+
+    const group = groups.find(g => g.id === groupIdForContext);
+    const groupName = groupIdForContext === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
     const newHistoryRecord: Partial<CampaignHistory> = {
-      subject,
-      body,
-      recipient_count: selectedRecipients.length,
-      recipient_ids: selectedRecipients,
+      subject: subjectTemplate,
+      body: bodyTemplate,
+      recipient_count: recipients.length,
+      recipient_ids: recipients.map(r => r.id),
       recipient_results: campaignLogs,
       group_name: groupName,
-      status: `Enviada (${successCount} sucesso, ${errorCount} falhas)`
+      status: `Enviada (${successCount} sucesso, ${errorCount} falhas)`,
     };
 
     try {
       const savedRecord = await campaignHistoryService.create(newHistoryRecord);
-      // TODO: For more detailed logging, create a `campaign_recipient_logs` table
-      // and save each entry from `campaignLogs` here, linked to `savedRecord.id`.
       setHistory([savedRecord, ...history]);
     } catch (err: any) {
-      alert("Falha ao gravar o histórico da campanha: " + err.message);
+      alert('Falha ao gravar o historico da campanha: ' + err.message);
     }
 
     setCampaignResult({ successCount, errorCount, details: campaignLogs });
-    setIsSending(false);
+  };
+
+  const handleSendCampaign = () => {
+    const recipients = getRecipientsFromSelection();
+    const validationError = validateSendConfiguration(recipients);
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+    setIsPreviewModalOpen(true);
+  };
+
+  const handleConfirmSendCampaign = async () => {
+    const recipients = getRecipientsFromSelection();
+    const validationError = validateSendConfiguration(recipients);
+    if (validationError) {
+      alert(validationError);
+      setIsPreviewModalOpen(false);
+      return;
+    }
+
+    setIsPreviewModalOpen(false);
+    setIsSending(true);
+
+    try {
+      if (isScheduled) {
+        await runScheduledCampaign(recipients);
+      } else {
+        await runImmediateCampaign(recipients);
+      }
+    } catch (err: any) {
+      alert('Erro ao processar campanha: ' + (err?.message || 'erro desconhecido'));
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleResendFailures = async (historyItem: CampaignHistory) => {
+    const failedResults = getRecipientResults(historyItem).filter(result => result.status === 'error');
+    if (failedResults.length === 0) {
+      alert('Esta campanha não tem falhas para reenviar.');
+      return;
+    }
+
+    const recipientMap = new Map<string, Client>();
+    failedResults.forEach(result => {
+      const found = clients.find(client => client.email.toLowerCase() === result.email.toLowerCase());
+      if (found) recipientMap.set(found.id, found);
+    });
+    const recipients = Array.from(recipientMap.values());
+
+    if (recipients.length === 0) {
+      alert('Nenhum destinatário falhado pôde ser associado aos clientes atuais.');
+      return;
+    }
+
+    if (!globalSettings.fromEmail || !globalSettings.fromName) {
+      alert('Configure o Nome e Email de Remetente nas Configurações.');
+      return;
+    }
+
+    const contextGroup = groups.find(group => group.name === historyItem.group_name);
+    const contextGroupId = contextGroup ? contextGroup.id : selectedGroupId;
+
+    if (!confirm(`Reenviar para ${recipients.length} destinatário(s) que falharam nesta campanha?`)) {
+      return;
+    }
+
+    setIsResendingFailuresId(historyItem.id);
+    setIsSending(true);
+    try {
+      await runImmediateCampaign(
+        recipients,
+        `Reenvio Falhados: ${new Date().toLocaleString('pt-PT')}`,
+        historyItem.subject,
+        historyItem.body,
+        contextGroupId
+      );
+    } catch (err: any) {
+      alert('Erro ao reenviar falhados: ' + (err?.message || 'erro desconhecido'));
+    } finally {
+      setIsSending(false);
+      setIsResendingFailuresId(null);
+    }
   };
 
   const handleSendTestEmail = async () => {
@@ -837,16 +984,74 @@ const handleTemplateChange = (templateId: string) => {
               >
                 <Mail size={16} /> Enviar Email de Teste
               </button>
-              <button 
+              <button
+                type="button"
+                onClick={handleSendCampaign}
+                disabled={isSending || selectedRecipients.length === 0}
+                className="w-full bg-blue-50 text-blue-700 border border-blue-100 py-2 rounded-xl font-bold hover:bg-blue-100 transition-all flex justify-center items-center gap-2 disabled:opacity-50"
+              >
+                <Eye size={16} /> Preview Final
+              </button>
+              <button
                 onClick={handleSendCampaign}
                 disabled={isSending || selectedRecipients.length === 0}
                 className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-black transition-all flex justify-center items-center gap-2 disabled:opacity-50"
               >
                 {isSending ? <RefreshCcw size={18} className="animate-spin" /> : <Send size={18} />}
-                {isSending ? 'A Enviar...' : `Enviar Campanha para ${selectedRecipients.length} Destinatários`}
+                {isSending ? 'A Processar...' : `Enviar Campanha para ${selectedRecipients.length} Destinatarios`}
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Queue Section */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+          <Clock size={18} /> Fila de Envio
+        </h3>
+        <div className="overflow-x-auto max-h-72 custom-scrollbar">
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
+              <tr>
+                <th className="px-4 py-3">Campanha</th>
+                <th className="px-4 py-3">Destinatário</th>
+                <th className="px-4 py-3 text-center">Estado</th>
+                <th className="px-4 py-3">Atualizado em</th>
+                <th className="px-4 py-3">Erro</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {deliveryQueue.map(item => (
+                <tr key={item.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 text-xs">{item.campaignLabel}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-slate-700">{item.name}</div>
+                    <div className="text-[11px] text-slate-400">{item.email}</div>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full ${
+                      item.status === 'pending'
+                        ? 'bg-yellow-100 text-yellow-700'
+                        : item.status === 'sent'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-red-100 text-red-700'
+                    }`}>
+                      {item.status === 'pending' ? <Clock size={12} /> : item.status === 'sent' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+                      {item.status === 'pending' ? 'Pendente' : item.status === 'sent' ? 'Enviado' : 'Erro'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{new Date(item.updatedAt).toLocaleString('pt-PT')}</td>
+                  <td className="px-4 py-3 text-xs text-red-600">{item.error || '-'}</td>
+                </tr>
+              ))}
+              {deliveryQueue.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="text-center italic text-slate-400 py-10">Fila vazia. Os envios e agendamentos aparecem aqui.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -864,6 +1069,7 @@ const handleTemplateChange = (templateId: string) => {
                 <th className="px-4 py-3">Grupo</th>
                 <th className="px-4 py-3 text-center">Destinatários</th>
                 <th className="px-4 py-3 text-center">Estado</th>
+              <th className="px-4 py-3 text-right">Acoes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -898,10 +1104,21 @@ const handleTemplateChange = (templateId: string) => {
                             {item.status}
                         </button>
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleResendFailures(item)}
+                        disabled={!hasFailures || isSending}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {isResendingFailuresId === item.id ? <RefreshCcw size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                        Reenviar Falhados
+                      </button>
+                    </td>
                   </tr>
                 )
               })}
-              {history.length === 0 && ( <tr><td colSpan={5} className="text-center italic text-slate-400 py-10">Nenhuma campanha enviada ainda.</td></tr> )}
+              {history.length === 0 && ( <tr><td colSpan={6} className="text-center italic text-slate-400 py-10">Nenhuma campanha enviada ainda.</td></tr> )}
             </tbody>
           </table>
         </div>
@@ -1010,6 +1227,76 @@ const handleTemplateChange = (templateId: string) => {
               <button onClick={() => setIsAiModalOpen(false)} className="px-4 py-2 text-slate-600">Cancelar</button>
               <button onClick={handleAiAssist} disabled={isGenerating} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50">
                 {isGenerating ? <RefreshCcw size={16} className="animate-spin" /> : <BrainCircuit size={16} />} Gerar Conteúdo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Final Preview Modal */}
+      {isPreviewModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Preview Final da Campanha</h3>
+              <button onClick={() => setIsPreviewModalOpen(false)}><X size={20} /></button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-[11px] font-bold text-slate-500 uppercase">Destinatarios</p>
+                <p className="text-xl font-bold text-slate-800">{previewRecipients.length}</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-[11px] font-bold text-slate-500 uppercase">Modo</p>
+                <p className="text-xl font-bold text-slate-800">{isScheduled ? 'Agendado' : 'Imediato'}</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-[11px] font-bold text-slate-500 uppercase">Ritmo</p>
+                <p className="text-xl font-bold text-slate-800">{sendDelay} ms</p>
+              </div>
+            </div>
+
+            {isScheduled && (
+              <div className="mb-4 p-3 rounded-lg bg-yellow-50 border border-yellow-200 text-sm text-yellow-800">
+                Agendado para: {scheduleDateTime ? new Date(scheduleDateTime).toLocaleString('pt-PT') : '-'}
+              </div>
+            )}
+
+            {previewSample ? (
+              <div className="border rounded-lg p-4">
+                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Exemplo de Personalizacao</p>
+                <p className="text-sm font-medium text-slate-700 mb-1">
+                  {previewSample.recipientName} ({previewSample.recipientEmail})
+                </p>
+                <div className="mb-2">
+                  <p className="text-[11px] font-bold text-slate-500 uppercase mb-1">Assunto</p>
+                  <div className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{previewSample.subject}</div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-bold text-slate-500 uppercase mb-1">Corpo</p>
+                  <div className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar">
+                    {previewSample.body}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="border rounded-lg p-8 text-center italic text-slate-400">
+                Sem destinatarios validos para preview.
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-5">
+              <button onClick={() => setIsPreviewModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmSendCampaign}
+                disabled={isSending || previewRecipients.length === 0}
+                className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50"
+              >
+                {isSending ? <RefreshCcw size={16} className="animate-spin" /> : <Send size={16} />}
+                Confirmar Envio
               </button>
             </div>
           </div>
