@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, SupabaseClientOptions } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation, CashSessionExpense } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -333,6 +333,73 @@ export const workSafetyService = {
 
     return data.publicUrl;
   }
+};
+
+const mapDbToCashSessionExpense = (db: any): CashSessionExpense => ({
+  id: db.id,
+  amount: db.amount,
+  description: db.description || '',
+  cashOperationId: db.cash_operation_id,
+  createdAt: db.created_at,
+});
+
+export const cashSessionExpenseService = {
+  async getOpen(): Promise<CashSessionExpense[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('cash_session_expenses')
+      .select('*')
+      .is('cash_operation_id', null)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return (data || []).map(mapDbToCashSessionExpense);
+  },
+  async create(expense: Pick<CashSessionExpense, 'amount' | 'description'>): Promise<CashSessionExpense> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('cash_session_expenses')
+      .insert({
+        amount: expense.amount,
+        description: expense.description,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return mapDbToCashSessionExpense(data);
+  },
+  async bulkCreate(expenses: Pick<CashSessionExpense, 'amount' | 'description'>[]): Promise<CashSessionExpense[]> {
+    if (expenses.length === 0) return [];
+    const storeClient = ensureStoreClient();
+    const payload = expenses.map(expense => ({
+      amount: expense.amount,
+      description: expense.description,
+    }));
+
+    const { data, error } = await storeClient
+      .from('cash_session_expenses')
+      .insert(payload)
+      .select('*');
+
+    if (error) throw error;
+    return (data || []).map(mapDbToCashSessionExpense);
+  },
+  async delete(id: string): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient.from('cash_session_expenses').delete().eq('id', id);
+    if (error) throw error;
+  },
+  async attachToOperation(expenseIds: string[], operationId: string): Promise<void> {
+    if (expenseIds.length === 0) return;
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient
+      .from('cash_session_expenses')
+      .update({ cash_operation_id: operationId })
+      .in('id', expenseIds);
+
+    if (error) throw error;
+  },
 };
 
 export const cashPaymentService = {

@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Client, FeeGroup, CashPayment, CashAgreement, CashOperation } from '../types';
-import { cashPaymentService, cashAgreementService, cashOperationService } from '../services/supabase';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Client, FeeGroup, CashPayment, CashAgreement, CashOperation, CashSessionExpense } from '../types';
+import { cashPaymentService, cashAgreementService, cashOperationService, cashSessionExpenseService } from '../services/supabase';
 import { Landmark, Check, X, Save, RefreshCcw, Printer, ArrowLeft, DollarSign, Banknote, Download, History, CreditCard, Plus } from 'lucide-react';
 
 interface CashierProps {
@@ -49,7 +49,7 @@ interface SessionExpense {
   description: string;
 }
 
-const SESSION_EXPENSES_STORAGE_KEY = 'cashier-session-expenses-open-register';
+const LEGACY_SESSION_EXPENSES_STORAGE_KEY = 'cashier-session-expenses-open-register';
 const LEGACY_SESSION_EXPENSES_STORAGE_PREFIX = 'cashier-session-expenses-';
 
 const parseStoredSessionExpenses = (rawValue: string | null): SessionExpense[] => {
@@ -77,6 +77,48 @@ const parseStoredSessionExpenses = (rawValue: string | null): SessionExpense[] =
   }
 };
 
+const getLegacySessionExpenseKeys = (): string[] => {
+  if (typeof window === 'undefined') return [];
+  const keys = new Set<string>([LEGACY_SESSION_EXPENSES_STORAGE_KEY]);
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (key && key.startsWith(LEGACY_SESSION_EXPENSES_STORAGE_PREFIX)) {
+      keys.add(key);
+    }
+  }
+  return Array.from(keys);
+};
+
+const loadLegacySessionExpenses = (): SessionExpense[] => {
+  const keys = getLegacySessionExpenseKeys();
+  if (keys.length === 0) return [];
+  return keys.flatMap((key) => parseStoredSessionExpenses(localStorage.getItem(key)));
+};
+
+const clearLegacySessionExpenses = () => {
+  if (typeof window === 'undefined') return;
+  getLegacySessionExpenseKeys().forEach((key) => localStorage.removeItem(key));
+};
+
+const persistLegacySessionExpenses = (expenses: SessionExpense[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (expenses.length === 0) {
+      localStorage.removeItem(LEGACY_SESSION_EXPENSES_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(LEGACY_SESSION_EXPENSES_STORAGE_KEY, JSON.stringify(expenses));
+  } catch (err) {
+    console.error('Erro ao guardar saídas de caixa localmente:', err);
+  }
+};
+
+const mapDbExpenseToSessionExpense = (expense: CashSessionExpense): SessionExpense => ({
+  id: expense.id,
+  amount: expense.amount,
+  description: expense.description,
+});
+
 const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCashPayments, cashAgreements, setCashAgreements, cashOperations, setCashOperations }) => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [pendingChanges, setPendingChanges] = useState<Map<string, Partial<CashPayment>>>(new Map());
@@ -88,36 +130,8 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   // New state for session expenses
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [newExpense, setNewExpense] = useState<{ amount: string; description: string }>({ amount: '', description: '' });
-  const [sessionExpensesStorageKey] = useState(SESSION_EXPENSES_STORAGE_KEY);
-  const [sessionExpenses, setSessionExpenses] = useState<SessionExpense[]>(() => {
-    if (typeof window === 'undefined') return [];
-
-    const currentSessionExpenses = parseStoredSessionExpenses(localStorage.getItem(SESSION_EXPENSES_STORAGE_KEY));
-    if (currentSessionExpenses.length > 0) return currentSessionExpenses;
-
-    const legacyKeys: string[] = [];
-    for (let index = 0; index < localStorage.length; index++) {
-      const key = localStorage.key(index);
-      if (key && key.startsWith(LEGACY_SESSION_EXPENSES_STORAGE_PREFIX)) {
-        legacyKeys.push(key);
-      }
-    }
-    if (legacyKeys.length === 0) return [];
-
-    legacyKeys.sort();
-    const migratedExpenses = legacyKeys.flatMap((key) => parseStoredSessionExpenses(localStorage.getItem(key)));
-    if (migratedExpenses.length === 0) return [];
-
-    try {
-      localStorage.setItem(SESSION_EXPENSES_STORAGE_KEY, JSON.stringify(migratedExpenses));
-      legacyKeys.forEach((key) => localStorage.removeItem(key));
-    } catch (err) {
-      console.error('Erro ao migrar saidas de caixa do navegador:', err);
-    }
-
-    return migratedExpenses;
-  });
-  const sessionExpensesRef = useRef<SessionExpense[]>(sessionExpenses);
+  const [sessionExpenses, setSessionExpenses] = useState<SessionExpense[]>([]);
+  const [isSessionExpensesDbAvailable, setIsSessionExpensesDbAvailable] = useState(true);
 
   // Form state for closing the register
   const [depositAmount, setDepositAmount] = useState('');
@@ -268,32 +282,58 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     return sessionExpenses.reduce((sum, exp) => sum + exp.amount, 0);
   }, [sessionExpenses]);
 
-  const persistSessionExpenses = useCallback((expenses: SessionExpense[]) => {
-    if (typeof window === 'undefined') return;
-    try {
-      if (expenses.length === 0) {
-        localStorage.removeItem(sessionExpensesStorageKey);
-      } else {
-        localStorage.setItem(sessionExpensesStorageKey, JSON.stringify(expenses));
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadOpenSessionExpenses = async () => {
+      try {
+        const openExpenses = await cashSessionExpenseService.getOpen();
+        if (!isMounted) return;
+        setIsSessionExpensesDbAvailable(true);
+
+        if (openExpenses.length > 0) {
+          setSessionExpenses(openExpenses.map(mapDbExpenseToSessionExpense));
+          return;
+        }
+
+        const legacyExpenses = loadLegacySessionExpenses();
+        if (legacyExpenses.length === 0) {
+          setSessionExpenses([]);
+          return;
+        }
+
+        try {
+          const migratedExpenses = await cashSessionExpenseService.bulkCreate(
+            legacyExpenses.map((expense) => ({
+              amount: expense.amount,
+              description: expense.description,
+            }))
+          );
+
+          if (!isMounted) return;
+          setSessionExpenses(migratedExpenses.map(mapDbExpenseToSessionExpense));
+          clearLegacySessionExpenses();
+        } catch (migrationError) {
+          console.error('Erro ao migrar saídas locais para SQL:', migrationError);
+          if (!isMounted) return;
+          setIsSessionExpensesDbAvailable(false);
+          setSessionExpenses(legacyExpenses);
+        }
+      } catch (err) {
+        console.error('Erro ao carregar saídas de caixa:', err);
+        if (isMounted) {
+          setIsSessionExpensesDbAvailable(false);
+          setSessionExpenses(loadLegacySessionExpenses());
+        }
       }
-    } catch (err) {
-      console.error('Erro ao gravar saidas de caixa no navegador:', err);
-    }
-  }, [sessionExpensesStorageKey]);
-
-  useEffect(() => {
-    sessionExpensesRef.current = sessionExpenses;
-  }, [sessionExpenses]);
-
-  useEffect(() => {
-    persistSessionExpenses(sessionExpenses);
-  }, [sessionExpenses, persistSessionExpenses]);
-
-  useEffect(() => {
-    return () => {
-      persistSessionExpenses(sessionExpensesRef.current);
     };
-  }, [persistSessionExpenses]);
+
+    loadOpenSessionExpenses();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const agreementDebtByClient = useMemo(() => {
     const debtMap = new Map<string, { debtConfigured: number; paidTotal: number; debt: number }>();
@@ -657,24 +697,62 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     };
   }, [pendingChanges, handleSaveChanges]);
 
-  const handleAddExpense = () => {
+  const handleAddExpense = async () => {
     const amount = parseFloat(newExpense.amount);
     const description = newExpense.description.trim();
     if (!amount || amount <= 0 || !description) {
       alert("Por favor, preencha um valor e uma descrição válidos para a saída de caixa.");
       return;
     }
-    const nextExpenses = [...sessionExpenses, { id: crypto.randomUUID(), amount, description }];
-    persistSessionExpenses(nextExpenses);
-    setSessionExpenses(nextExpenses);
-    setIsExpenseModalOpen(false);
-    setNewExpense({ amount: '', description: '' });
+    const fallbackExpense: SessionExpense = { id: crypto.randomUUID(), amount, description };
+    const saveFallbackExpense = () => {
+      const nextExpenses = [...sessionExpenses, fallbackExpense];
+      setSessionExpenses(nextExpenses);
+      persistLegacySessionExpenses(nextExpenses);
+    };
+
+    if (!isSessionExpensesDbAvailable) {
+      saveFallbackExpense();
+      setIsExpenseModalOpen(false);
+      setNewExpense({ amount: '', description: '' });
+      return;
+    }
+
+    try {
+      const createdExpense = await cashSessionExpenseService.create({ amount, description });
+      setSessionExpenses(prev => [...prev, mapDbExpenseToSessionExpense(createdExpense)]);
+      clearLegacySessionExpenses();
+      setIsExpenseModalOpen(false);
+      setNewExpense({ amount: '', description: '' });
+    } catch (err) {
+      console.error('Erro ao gravar saídas de caixa em SQL:', err);
+      setIsSessionExpensesDbAvailable(false);
+      saveFallbackExpense();
+      setIsExpenseModalOpen(false);
+      setNewExpense({ amount: '', description: '' });
+      alert('Saídas guardadas localmente porque a tabela SQL ainda não está disponível.');
+    }
   };
 
-  const handleRemoveExpense = (id: string) => {
-    const nextExpenses = sessionExpenses.filter(exp => exp.id !== id);
-    persistSessionExpenses(nextExpenses);
-    setSessionExpenses(nextExpenses);
+  const handleRemoveExpense = async (id: string) => {
+    if (!isSessionExpensesDbAvailable) {
+      const nextExpenses = sessionExpenses.filter(exp => exp.id !== id);
+      setSessionExpenses(nextExpenses);
+      persistLegacySessionExpenses(nextExpenses);
+      return;
+    }
+
+    try {
+      await cashSessionExpenseService.delete(id);
+      setSessionExpenses(prev => prev.filter(exp => exp.id !== id));
+    } catch (err) {
+      console.error('Erro ao remover saídas de caixa em SQL:', err);
+      setIsSessionExpensesDbAvailable(false);
+      const nextExpenses = sessionExpenses.filter(exp => exp.id !== id);
+      setSessionExpenses(nextExpenses);
+      persistLegacySessionExpenses(nextExpenses);
+      alert('Saídas removidas localmente porque a tabela SQL ainda não está disponível.');
+    }
   };
 
   const handleCloseRegister = async () => {
@@ -738,6 +816,17 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     try {
       // Pass ALL payment IDs to be marked as processed
       const createdOperation = await cashOperationService.create(newOperation, allPaymentsToProcess.map(p => p.id));
+
+      if (sessionExpenses.length > 0 && isSessionExpensesDbAvailable) {
+        try {
+          await cashSessionExpenseService.attachToOperation(sessionExpenses.map(exp => exp.id), createdOperation.id);
+        } catch (attachError) {
+          console.error('Erro ao associar saídas de caixa ao fecho:', attachError);
+          setIsSessionExpensesDbAvailable(false);
+          persistLegacySessionExpenses(sessionExpenses);
+        }
+      }
+
       setCashOperations([createdOperation, ...cashOperations]);
       
       const updatedPayments = await cashPaymentService.getAll();
@@ -752,6 +841,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setIsMbWayDepositAmountEdited(false);
       setAdjustmentAmount('');
       setSessionExpenses([]); // Clear session expenses
+      clearLegacySessionExpenses();
     } catch (err: any) {
       alert('Erro ao fechar a caixa: ' + err.message);
     } finally {

@@ -270,6 +270,14 @@ export interface CashOperation {
   }[];
 }
 
+export interface CashSessionExpense {
+  id: string;
+  amount: number;
+  description: string;
+  cashOperationId: string | null;
+  createdAt: string;
+}
+
 export interface StaffStats {
   staffName: string;
   clientCount: number;
