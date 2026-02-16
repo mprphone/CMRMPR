@@ -17,7 +17,7 @@ import {
   Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation
 } from './types';
 import { 
-  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService, appConfigService, taskCatalogService
+  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService, appConfigService, taskCatalogService, APP_CONFIG_GLOBAL_SETTINGS_KEY
 } from './services/supabase';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Insurance from './components/Insurance';
@@ -37,6 +37,16 @@ const generateUUID = () => {
 };
 
 const areSettingsEqual = (a: GlobalSettings, b: GlobalSettings) => JSON.stringify(a) === JSON.stringify(b);
+const areTasksEqual = (a: Task[], b: Task[]) => JSON.stringify(a) === JSON.stringify(b);
+
+const mergeRemoteGlobalSettings = (localSettings: GlobalSettings, remoteSettings: Partial<GlobalSettings>): GlobalSettings => ({
+  ...localSettings,
+  ...remoteSettings,
+  supabaseImportUrl: localSettings.supabaseImportUrl,
+  supabaseImportKey: localSettings.supabaseImportKey,
+  supabaseStoreUrl: localSettings.supabaseStoreUrl,
+  supabaseStoreKey: localSettings.supabaseStoreKey,
+});
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -55,6 +65,7 @@ export default function App() {
   const [turnoverBrackets, setTurnoverBrackets] = useState<TurnoverBracket[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [campaignHistory, setCampaignHistory] = useState<CampaignHistory[]>([]);
@@ -65,6 +76,13 @@ export default function App() {
   const [cashAgreements, setCashAgreements] = useState<CashAgreement[]>([]);
   const [cashOperations, setCashOperations] = useState<CashOperation[]>([]);
   const [logo, setLogo] = useState(() => localStorage.getItem('appLogo') || '');
+  const globalSettingsVersionRef = React.useRef<string | null>(null);
+  const taskCatalogVersionRef = React.useRef<string | null>(null);
+  const skipNextGlobalSettingsSaveRef = React.useRef(false);
+  const skipNextTaskCatalogSaveRef = React.useRef(false);
+  const warningTimeoutRef = React.useRef<number | null>(null);
+  const realtimeSettingsRefreshTimerRef = React.useRef<number | null>(null);
+  const realtimeTasksRefreshTimerRef = React.useRef<number | null>(null);
 
   const handleLogoUpload = async (file: File) => {
     try {
@@ -75,6 +93,14 @@ export default function App() {
       console.error('Erro ao enviar logotipo para o servidor:', err);
       alert('Falha ao guardar logotipo no servidor: ' + (err?.message || 'erro desconhecido'));
     }
+  };
+
+  const showSyncWarning = (message: string) => {
+    setSyncWarning(message);
+    if (warningTimeoutRef.current) {
+      window.clearTimeout(warningTimeoutRef.current);
+    }
+    warningTimeoutRef.current = window.setTimeout(() => setSyncWarning(null), 12000);
   };
 
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>(() => {
@@ -100,11 +126,30 @@ export default function App() {
   useEffect(() => {
     initSupabase(globalSettings);
     fetchData();
-  }, [globalSettings]);
+  }, [
+    globalSettings.supabaseImportUrl,
+    globalSettings.supabaseImportKey,
+    globalSettings.supabaseStoreUrl,
+    globalSettings.supabaseStoreKey,
+  ]);
 
   useEffect(() => {
     localStorage.setItem('globalSettings', JSON.stringify(globalSettings));
   }, [globalSettings]);
+
+  useEffect(() => {
+    return () => {
+      if (warningTimeoutRef.current) {
+        window.clearTimeout(warningTimeoutRef.current);
+      }
+      if (realtimeSettingsRefreshTimerRef.current) {
+        window.clearTimeout(realtimeSettingsRefreshTimerRef.current);
+      }
+      if (realtimeTasksRefreshTimerRef.current) {
+        window.clearTimeout(realtimeTasksRefreshTimerRef.current);
+      }
+    };
+  }, []);
 
   // Auth listener
   useEffect(() => {
@@ -135,23 +180,22 @@ export default function App() {
 
     const hydrateSharedSettings = async () => {
       try {
-        const remoteSettings = await appConfigService.getGlobalSettings();
+        const remoteSettings = await appConfigService.getGlobalSettingsWithMeta();
         if (!isMounted) return;
         setIsGlobalSettingsDbAvailable(true);
 
         if (remoteSettings) {
-          const mergedSettings: GlobalSettings = {
-            ...globalSettings,
-            ...remoteSettings,
-            supabaseImportUrl: globalSettings.supabaseImportUrl,
-            supabaseImportKey: globalSettings.supabaseImportKey,
-            supabaseStoreUrl: globalSettings.supabaseStoreUrl,
-            supabaseStoreKey: globalSettings.supabaseStoreKey,
-          };
-
-          setGlobalSettings(prev => (areSettingsEqual(prev, mergedSettings) ? prev : mergedSettings));
+          globalSettingsVersionRef.current = remoteSettings.updatedAt;
+          setGlobalSettings(prev => {
+            const mergedSettings = mergeRemoteGlobalSettings(prev, remoteSettings.value);
+            if (areSettingsEqual(prev, mergedSettings)) return prev;
+            skipNextGlobalSettingsSaveRef.current = true;
+            return mergedSettings;
+          });
         } else {
-          await appConfigService.upsertGlobalSettings(globalSettings);
+          const savedSettings = await appConfigService.upsertGlobalSettingsWithConflict(globalSettings, null);
+          if (!isMounted) return;
+          globalSettingsVersionRef.current = savedSettings.updatedAt;
         }
       } catch (err) {
         console.error('Erro ao sincronizar configurações globais:', err);
@@ -163,15 +207,21 @@ export default function App() {
 
     const hydrateTaskCatalog = async () => {
       try {
-        const remoteTasks = await taskCatalogService.getAll();
+        const remoteTasks = await taskCatalogService.getAllWithVersion();
         if (!isMounted) return;
         setIsTaskCatalogDbAvailable(true);
 
-        if (remoteTasks.length > 0) {
-          setTasks(remoteTasks);
-          localStorage.setItem('appTasks', JSON.stringify(remoteTasks));
+        if (remoteTasks.tasks.length > 0) {
+          taskCatalogVersionRef.current = remoteTasks.version;
+          setTasks(prev => {
+            if (areTasksEqual(prev, remoteTasks.tasks)) return prev;
+            skipNextTaskCatalogSaveRef.current = true;
+            return remoteTasks.tasks;
+          });
         } else {
-          await taskCatalogService.replaceAll(tasks);
+          const savedTasks = await taskCatalogService.replaceAllWithConflict(tasks, null);
+          if (!isMounted) return;
+          taskCatalogVersionRef.current = savedTasks.version;
         }
       } catch (err) {
         console.error('Erro ao sincronizar catálogo de tarefas:', err);
@@ -195,10 +245,28 @@ export default function App() {
 
   useEffect(() => {
     if (!session || !isGlobalSettingsHydrated || !isGlobalSettingsDbAvailable) return;
+    if (skipNextGlobalSettingsSaveRef.current) {
+      skipNextGlobalSettingsSaveRef.current = false;
+      return;
+    }
 
     const timer = window.setTimeout(async () => {
       try {
-        await appConfigService.upsertGlobalSettings(globalSettings);
+        const saveResult = await appConfigService.upsertGlobalSettingsWithConflict(
+          globalSettings,
+          globalSettingsVersionRef.current
+        );
+        globalSettingsVersionRef.current = saveResult.updatedAt;
+
+        if (saveResult.conflict) {
+          showSyncWarning('Conflito detetado nas configurações globais. Foram carregadas as alterações mais recentes.');
+          setGlobalSettings(prev => {
+            const merged = mergeRemoteGlobalSettings(prev, saveResult.value);
+            if (areSettingsEqual(prev, merged)) return prev;
+            skipNextGlobalSettingsSaveRef.current = true;
+            return merged;
+          });
+        }
       } catch (err) {
         console.error('Erro ao gravar configurações globais na cloud:', err);
         setIsGlobalSettingsDbAvailable(false);
@@ -210,10 +278,24 @@ export default function App() {
 
   useEffect(() => {
     if (!session || !isTaskCatalogHydrated || !isTaskCatalogDbAvailable) return;
+    if (skipNextTaskCatalogSaveRef.current) {
+      skipNextTaskCatalogSaveRef.current = false;
+      return;
+    }
 
     const timer = window.setTimeout(async () => {
       try {
-        await taskCatalogService.replaceAll(tasks);
+        const saveResult = await taskCatalogService.replaceAllWithConflict(tasks, taskCatalogVersionRef.current);
+        taskCatalogVersionRef.current = saveResult.version;
+
+        if (saveResult.conflict) {
+          showSyncWarning('Conflito detetado no catálogo de tarefas. Foi carregada a versão mais recente.');
+          setTasks(prev => {
+            if (areTasksEqual(prev, saveResult.tasks)) return prev;
+            skipNextTaskCatalogSaveRef.current = true;
+            return saveResult.tasks;
+          });
+        }
       } catch (err) {
         console.error('Erro ao gravar catálogo de tarefas na cloud:', err);
         setIsTaskCatalogDbAvailable(false);
@@ -244,6 +326,109 @@ export default function App() {
       isMounted = false;
     };
   }, [session]);
+
+  useEffect(() => {
+    if (!session || !storeClient || !isGlobalSettingsHydrated || !isTaskCatalogHydrated) return;
+
+    const settingsChannel = storeClient
+      .channel(`app-config-global-settings-${session.user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'app_config',
+          filter: `key=eq.${APP_CONFIG_GLOBAL_SETTINGS_KEY}`,
+        },
+        () => {
+          if (realtimeSettingsRefreshTimerRef.current) {
+            window.clearTimeout(realtimeSettingsRefreshTimerRef.current);
+          }
+
+          realtimeSettingsRefreshTimerRef.current = window.setTimeout(async () => {
+            try {
+              const remoteSettings = await appConfigService.getGlobalSettingsWithMeta();
+              if (!remoteSettings) return;
+
+              setIsGlobalSettingsDbAvailable(true);
+              globalSettingsVersionRef.current = remoteSettings.updatedAt;
+
+              let didChange = false;
+              setGlobalSettings(prev => {
+                const merged = mergeRemoteGlobalSettings(prev, remoteSettings.value);
+                if (areSettingsEqual(prev, merged)) return prev;
+                didChange = true;
+                skipNextGlobalSettingsSaveRef.current = true;
+                return merged;
+              });
+
+              if (didChange) {
+                showSyncWarning('Configurações globais atualizadas em tempo real.');
+              }
+            } catch (err) {
+              console.error('Erro ao processar atualização realtime de configurações:', err);
+            } finally {
+              realtimeSettingsRefreshTimerRef.current = null;
+            }
+          }, 250);
+        }
+      )
+      .subscribe();
+
+    const tasksChannel = storeClient
+      .channel(`app-tasks-${session.user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'app_tasks',
+        },
+        () => {
+          if (realtimeTasksRefreshTimerRef.current) {
+            window.clearTimeout(realtimeTasksRefreshTimerRef.current);
+          }
+
+          realtimeTasksRefreshTimerRef.current = window.setTimeout(async () => {
+            try {
+              const remoteTasks = await taskCatalogService.getAllWithVersion();
+              setIsTaskCatalogDbAvailable(true);
+              taskCatalogVersionRef.current = remoteTasks.version;
+
+              let didChange = false;
+              setTasks(prev => {
+                if (areTasksEqual(prev, remoteTasks.tasks)) return prev;
+                didChange = true;
+                skipNextTaskCatalogSaveRef.current = true;
+                return remoteTasks.tasks;
+              });
+
+              if (didChange) {
+                showSyncWarning('Catálogo de tarefas atualizado em tempo real.');
+              }
+            } catch (err) {
+              console.error('Erro ao processar atualização realtime de tarefas:', err);
+            } finally {
+              realtimeTasksRefreshTimerRef.current = null;
+            }
+          }, 250);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (realtimeSettingsRefreshTimerRef.current) {
+        window.clearTimeout(realtimeSettingsRefreshTimerRef.current);
+        realtimeSettingsRefreshTimerRef.current = null;
+      }
+      if (realtimeTasksRefreshTimerRef.current) {
+        window.clearTimeout(realtimeTasksRefreshTimerRef.current);
+        realtimeTasksRefreshTimerRef.current = null;
+      }
+      storeClient.removeChannel(settingsChannel);
+      storeClient.removeChannel(tasksChannel);
+    };
+  }, [session, storeClient, isGlobalSettingsHydrated, isTaskCatalogHydrated]);
 
   const fetchData = async () => {
     setIsLoadingData(true);
@@ -436,6 +621,12 @@ export default function App() {
           {syncSuccess && (
             <div className="mb-4 p-4 bg-green-50 border border-green-100 text-green-700 rounded-xl text-xs font-bold flex items-center gap-2 animate-bounce">
               <CheckCircle2 size={16} /> {syncSuccess}
+            </div>
+          )}
+
+          {syncWarning && (
+            <div className="mb-4 p-4 bg-amber-50 border border-amber-100 text-amber-700 rounded-xl text-xs font-bold flex items-center gap-2">
+              <AlertTriangle size={16} /> {syncWarning}
             </div>
           )}
 

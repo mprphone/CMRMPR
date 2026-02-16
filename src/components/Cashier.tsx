@@ -815,18 +815,11 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
     try {
       // Pass ALL payment IDs to be marked as processed
-      const createdOperation = await cashOperationService.create(newOperation, allPaymentsToProcess.map(p => p.id));
-
-      if (sessionExpenses.length > 0 && isSessionExpensesDbAvailable) {
-        try {
-          await cashSessionExpenseService.attachToOperation(sessionExpenses.map(exp => exp.id), createdOperation.id);
-        } catch (attachError) {
-          console.error('Erro ao associar saídas de caixa ao fecho:', attachError);
-          setIsSessionExpensesDbAvailable(false);
-          persistLegacySessionExpenses(sessionExpenses);
-        }
-      }
-
+      const createdOperation = await cashOperationService.create(
+        newOperation,
+        allPaymentsToProcess.map(p => p.id),
+        sessionExpenses.map(exp => exp.id)
+      );
       setCashOperations([createdOperation, ...cashOperations]);
       
       const updatedPayments = await cashPaymentService.getAll();

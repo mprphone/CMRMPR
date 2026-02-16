@@ -94,33 +94,93 @@ export const brandingService = {
   },
 };
 
-const APP_CONFIG_GLOBAL_SETTINGS_KEY = 'global_settings';
+export const APP_CONFIG_GLOBAL_SETTINGS_KEY = 'global_settings';
+
+export interface VersionedGlobalSettings {
+  value: Partial<GlobalSettings>;
+  updatedAt: string | null;
+}
+
+export interface GlobalSettingsSaveResult extends VersionedGlobalSettings {
+  conflict: boolean;
+}
+
+export interface VersionedTaskCatalog {
+  tasks: Task[];
+  version: string | null;
+}
+
+export interface TaskCatalogSaveResult extends VersionedTaskCatalog {
+  conflict: boolean;
+}
+
+const toIsoStringOrNull = (value: string | null | undefined): string | null => value || null;
 
 export const appConfigService = {
-  async getGlobalSettings(): Promise<Partial<GlobalSettings> | null> {
+  async getGlobalSettingsWithMeta(): Promise<VersionedGlobalSettings | null> {
     const storeClient = ensureStoreClient();
     const { data, error } = await storeClient
       .from('app_config')
-      .select('value')
+      .select('value, updated_at')
       .eq('key', APP_CONFIG_GLOBAL_SETTINGS_KEY)
       .maybeSingle();
 
     if (error) throw error;
-    return (data?.value as Partial<GlobalSettings>) || null;
+    if (!data) return null;
+    return {
+      value: (data.value as Partial<GlobalSettings>) || {},
+      updatedAt: toIsoStringOrNull(data.updated_at),
+    };
+  },
+  async getGlobalSettings(): Promise<Partial<GlobalSettings> | null> {
+    const data = await this.getGlobalSettingsWithMeta();
+    return data?.value || null;
+  },
+  async upsertGlobalSettingsWithConflict(
+    settings: GlobalSettings,
+    expectedUpdatedAt: string | null
+  ): Promise<GlobalSettingsSaveResult> {
+    const storeClient = ensureStoreClient();
+    try {
+      const { data, error } = await storeClient
+        .rpc('save_global_settings_if_match', {
+          p_value: settings,
+          p_expected_updated_at: expectedUpdatedAt,
+        })
+        .single();
+
+      if (error) throw error;
+      return {
+        conflict: Boolean(data.conflict),
+        value: (data.value as Partial<GlobalSettings>) || {},
+        updatedAt: toIsoStringOrNull(data.updated_at),
+      };
+    } catch (err: any) {
+      // Fallback for environments where the new RPC is not deployed yet.
+      const schemaError = /function .*save_global_settings_if_match.* does not exist|schema cache/i;
+      if (!schemaError.test(err?.message || '')) throw err;
+
+      const { error } = await storeClient
+        .from('app_config')
+        .upsert(
+          {
+            key: APP_CONFIG_GLOBAL_SETTINGS_KEY,
+            value: settings,
+          },
+          { onConflict: 'key' }
+        );
+      if (error) throw error;
+
+      const saved = await this.getGlobalSettingsWithMeta();
+      return {
+        conflict: false,
+        value: saved?.value || {},
+        updatedAt: saved?.updatedAt || null,
+      };
+    }
   },
   async upsertGlobalSettings(settings: GlobalSettings): Promise<void> {
-    const storeClient = ensureStoreClient();
-    const { error } = await storeClient
-      .from('app_config')
-      .upsert(
-        {
-          key: APP_CONFIG_GLOBAL_SETTINGS_KEY,
-          value: settings,
-        },
-        { onConflict: 'key' }
-      );
-
-    if (error) throw error;
+    await this.upsertGlobalSettingsWithConflict(settings, null);
   },
 };
 
@@ -145,33 +205,83 @@ const mapTaskToDb = (task: Task) => ({
 });
 
 export const taskCatalogService = {
-  async getAll(): Promise<Task[]> {
+  async getAllWithVersion(): Promise<VersionedTaskCatalog> {
     const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('app_tasks').select('*').order('name');
     if (error) throw error;
-    return (data || []).map(mapDbTaskToTask);
+    const rows = data || [];
+    const version =
+      rows.length === 0
+        ? null
+        : rows.reduce((latest, row: any) => {
+            const updatedAt = toIsoStringOrNull(row.updated_at);
+            if (!updatedAt) return latest;
+            if (!latest) return updatedAt;
+            return updatedAt > latest ? updatedAt : latest;
+          }, null as string | null);
+
+    return {
+      tasks: rows.map(mapDbTaskToTask),
+      version,
+    };
   },
-  async replaceAll(tasks: Task[]): Promise<void> {
+  async getAll(): Promise<Task[]> {
+    const { tasks } = await this.getAllWithVersion();
+    return tasks;
+  },
+  async replaceAllWithConflict(tasks: Task[], expectedVersion: string | null): Promise<TaskCatalogSaveResult> {
     const storeClient = ensureStoreClient();
     const payload = tasks.map(mapTaskToDb);
 
-    if (payload.length > 0) {
-      const { error: upsertError } = await storeClient.from('app_tasks').upsert(payload, { onConflict: 'id' });
-      if (upsertError) throw upsertError;
+    try {
+      const { data, error } = await storeClient
+        .rpc('replace_app_tasks_if_version', {
+          p_tasks: payload,
+          p_expected_version: expectedVersion,
+        })
+        .single();
+
+      if (error) throw error;
+
+      const latest = await this.getAllWithVersion();
+      return {
+        conflict: Boolean(data.conflict),
+        tasks: latest.tasks,
+        version: latest.version,
+      };
+    } catch (err: any) {
+      // Fallback for environments where the new RPC is not deployed yet.
+      const schemaError = /function .*replace_app_tasks_if_version.* does not exist|schema cache/i;
+      if (!schemaError.test(err?.message || '')) throw err;
+
+      if (payload.length > 0) {
+        const { error: upsertError } = await storeClient.from('app_tasks').upsert(payload, { onConflict: 'id' });
+        if (upsertError) throw upsertError;
+      }
+
+      const { data: existingRows, error: existingError } = await storeClient.from('app_tasks').select('id');
+      if (existingError) throw existingError;
+
+      const incomingIds = new Set(tasks.map(task => task.id));
+      const idsToDelete = (existingRows || [])
+        .map((row: any) => row.id as string)
+        .filter((id: string) => !incomingIds.has(id));
+
+      if (idsToDelete.length > 0) {
+        const { error: deleteError } = await storeClient.from('app_tasks').delete().in('id', idsToDelete);
+        if (deleteError) throw deleteError;
+      }
+
+      const latest = await this.getAllWithVersion();
+      return {
+        conflict: false,
+        tasks: latest.tasks,
+        version: latest.version,
+      };
     }
-
-    const { data: existingRows, error: existingError } = await storeClient.from('app_tasks').select('id');
-    if (existingError) throw existingError;
-
-    const incomingIds = new Set(tasks.map(task => task.id));
-    const idsToDelete = (existingRows || [])
-      .map((row: any) => row.id as string)
-      .filter((id: string) => !incomingIds.has(id));
-
-    if (idsToDelete.length > 0) {
-      const { error: deleteError } = await storeClient.from('app_tasks').delete().in('id', idsToDelete);
-      if (deleteError) throw deleteError;
-    }
+  },
+  async replaceAll(tasks: Task[]): Promise<void> {
+    await this.replaceAllWithConflict(tasks, null);
   },
 };
 
@@ -638,25 +748,27 @@ export const cashAgreementService = {
   }
 };
 
+const mapDbToCashOperation = (op: any): CashOperation => ({
+  id: op.id,
+  createdAt: op.created_at,
+  depositedAmount: op.deposited_amount,
+  spentAmount: op.spent_amount,
+  mbWayDepositedAmount: op.mbway_deposited_amount,
+  adjustmentAmount: op.adjustment_amount,
+  spentDescription: op.spent_description,
+  reportDetails: op.report_details,
+});
+
 export const cashOperationService = {
   async getAll(): Promise<CashOperation[]> {
     const storeClient = ensureStoreClient();
     const { data, error } = await storeClient.from('cash_operations').select('*').order('created_at', { ascending: false });
     if (error) throw error;
-    return data.map(op => ({
-      id: op.id,
-      createdAt: op.created_at,
-      depositedAmount: op.deposited_amount,
-      spentAmount: op.spent_amount,
-      mbWayDepositedAmount: op.mbway_deposited_amount,
-      adjustmentAmount: op.adjustment_amount,
-      spentDescription: op.spent_description,
-      reportDetails: op.report_details,
-    }));
+    return data.map(mapDbToCashOperation);
   },
-  async create(operation: Partial<CashOperation>, paymentIds: string[]): Promise<CashOperation> {
+  async create(operation: Partial<CashOperation>, paymentIds: string[], sessionExpenseIds: string[] = []): Promise<CashOperation> {
     const storeClient = ensureStoreClient();
-    const { data, error } = await storeClient.rpc('create_cash_operation', {
+    const payload = {
       p_deposited_amount: operation.depositedAmount,
       p_spent_amount: operation.spentAmount,
       p_spent_description: operation.spentDescription,
@@ -664,20 +776,38 @@ export const cashOperationService = {
       p_payment_ids: paymentIds,
       p_mbway_deposited_amount: operation.mbWayDepositedAmount,
       p_adjustment_amount: operation.adjustmentAmount,
-    }).single();
-
-    if (error) throw error;
-    
-    return {
-      id: data.id,
-      createdAt: data.created_at,
-      depositedAmount: data.deposited_amount,
-      spentAmount: data.spent_amount,
-      mbWayDepositedAmount: data.mbway_deposited_amount,
-      adjustmentAmount: data.adjustment_amount,
-      spentDescription: data.spent_description,
-      reportDetails: data.report_details,
     };
+
+    try {
+      const { data, error } = await storeClient
+        .rpc('close_cash_register_atomic', {
+          ...payload,
+          p_session_expense_ids: sessionExpenseIds,
+        })
+        .single();
+
+      if (error) throw error;
+      return mapDbToCashOperation(data);
+    } catch (err: any) {
+      // Fallback for environments where the atomic RPC is not deployed yet.
+      const schemaError = /function .*close_cash_register_atomic.* does not exist|schema cache/i;
+      if (!schemaError.test(err?.message || '')) throw err;
+
+      const { data, error } = await storeClient.rpc('create_cash_operation', payload).single();
+      if (error) throw error;
+
+      if (sessionExpenseIds.length > 0) {
+        const { error: attachError } = await storeClient
+          .from('cash_session_expenses')
+          .update({ cash_operation_id: data.id })
+          .in('id', sessionExpenseIds)
+          .is('cash_operation_id', null);
+
+        if (attachError) throw attachError;
+      }
+
+      return mapDbToCashOperation(data);
+    }
   }
 };
 
