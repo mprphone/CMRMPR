@@ -1,7 +1,7 @@
 ﻿import React, { useState, useMemo } from 'react';
 import { InsurancePolicy, Client } from '../types';
 import { insuranceService } from '../services/supabase';
-import { Shield, Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, Filter, CheckCircle, Circle, FileCheck, FileClock, Paperclip, ChevronUp, ChevronDown, PieChart } from 'lucide-react';
+import { Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, FileCheck, FileClock, Paperclip, ChevronUp, ChevronDown, PieChart } from 'lucide-react';
 
 interface InsuranceProps {
   policies: InsurancePolicy[];
@@ -12,11 +12,92 @@ interface InsuranceProps {
 
 type SortableKeys = 'clientName' | 'policyHolder' | 'agent' | 'renewalDate' | 'company' | 'branch' | 'netPremiumValue';
 
+interface CommissionPeriodRow {
+  key: string;
+  policyId: string;
+  dueDate: string;
+  clientName: string;
+  policyHolder: string;
+  policyNumber: string;
+  company: string;
+  paymentFrequency: InsurancePolicy['paymentFrequency'];
+  amount: number;
+  isPaid: boolean;
+}
+
 const getCompany = (policy: Partial<InsurancePolicy>) => policy.company || policy.insuranceProvider || '';
 const getBranch = (policy: Partial<InsurancePolicy>) => policy.branch || policy.policyType || '';
 const getPolicyHolder = (policy: Partial<InsurancePolicy>) => policy.policyHolder || policy.clientName || '';
 const getTotalPremium = (policy: Partial<InsurancePolicy>) => Number(policy.premiumValue ?? policy.netPremiumValue ?? 0);
 const getNetPremium = (policy: Partial<InsurancePolicy>) => Number(policy.netPremiumValue ?? policy.premiumValue ?? 0);
+
+const parseIsoDate = (value?: string): Date | null => {
+  if (!value) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  const parsed = new Date(year, month - 1, day);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const toIsoDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getFrequencyCadence = (paymentFrequency: InsurancePolicy['paymentFrequency']) => {
+  switch (paymentFrequency) {
+    case 'Mensal':
+      return { stepMonths: 1, installmentsPerYear: 12 };
+    case 'Trimestral':
+      return { stepMonths: 3, installmentsPerYear: 4 };
+    case 'Semestral':
+      return { stepMonths: 6, installmentsPerYear: 2 };
+    case 'Anual':
+    default:
+      return { stepMonths: 12, installmentsPerYear: 1 };
+  }
+};
+
+const addMonthsWithAnchor = (date: Date, months: number, anchorDay: number): Date => {
+  const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
+  const lastDayInTargetMonth = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  return new Date(target.getFullYear(), target.getMonth(), Math.min(anchorDay, lastDayInTargetMonth));
+};
+
+const buildDueDatesForPolicy = (
+  policy: InsurancePolicy,
+  periodStart: string,
+  periodEnd: string
+): string[] => {
+  const startDate = parseIsoDate(periodStart);
+  const endDate = parseIsoDate(periodEnd);
+  const anchorDate = parseIsoDate(policy.renewalDate || policy.policyDate);
+  if (!startDate || !endDate || !anchorDate || startDate > endDate) return [];
+
+  const { stepMonths } = getFrequencyCadence(policy.paymentFrequency);
+  const anchorDay = anchorDate.getDate();
+  let cursor = new Date(anchorDate.getTime());
+  let guard = 0;
+
+  while (cursor < startDate && guard < 1200) {
+    cursor = addMonthsWithAnchor(cursor, stepMonths, anchorDay);
+    guard += 1;
+  }
+
+  const dueDates: string[] = [];
+  while (cursor <= endDate && guard < 2400) {
+    if (cursor >= startDate) {
+      dueDates.push(toIsoDate(cursor));
+    }
+    cursor = addMonthsWithAnchor(cursor, stepMonths, anchorDay);
+    guard += 1;
+  }
+
+  return dueDates;
+};
 
 const getSortValue = (policy: InsurancePolicy, sortKey: SortableKeys): string | number => {
   switch (sortKey) {
@@ -52,6 +133,18 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
   const [policyStatusFilter, setPolicyStatusFilter] = useState('all');
   const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'renewalDate', direction: 'ascending' });
   const [isQuarterlyModalOpen, setIsQuarterlyModalOpen] = useState(false);
+  const [commissionPeriodStart, setCommissionPeriodStart] = useState(() => {
+    const now = new Date();
+    return toIsoDate(new Date(now.getFullYear(), now.getMonth(), 1));
+  });
+  const [commissionPeriodEnd, setCommissionPeriodEnd] = useState(() => {
+    const now = new Date();
+    return toIsoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+  });
+  const [commissionRows, setCommissionRows] = useState<CommissionPeriodRow[]>([]);
+  const [selectedCommissionRowKeys, setSelectedCommissionRowKeys] = useState<string[]>([]);
+  const [isGeneratingCommissions, setIsGeneratingCommissions] = useState(false);
+  const [isMarkingCommissionsPaid, setIsMarkingCommissionsPaid] = useState(false);
 
   const visiblePolicies = useMemo(() => {
     if (!forcedAgent) return policies;
@@ -140,6 +233,22 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     });
     return quarters;
   }, [visiblePolicies]);
+
+  const pendingCommissionRows = useMemo(
+    () => commissionRows.filter(row => !row.isPaid),
+    [commissionRows]
+  );
+  const selectedCommissionRows = useMemo(() => {
+    const selectedSet = new Set(selectedCommissionRowKeys);
+    return commissionRows.filter(row => selectedSet.has(row.key) && !row.isPaid);
+  }, [commissionRows, selectedCommissionRowKeys]);
+  const commissionTotals = useMemo(() => {
+    const pending = pendingCommissionRows.reduce((sum, row) => sum + row.amount, 0);
+    const paid = commissionRows.filter(row => row.isPaid).reduce((sum, row) => sum + row.amount, 0);
+    const selected = selectedCommissionRows.reduce((sum, row) => sum + row.amount, 0);
+    return { pending, paid, selected };
+  }, [pendingCommissionRows, commissionRows, selectedCommissionRows]);
+  const allPendingSelected = pendingCommissionRows.length > 0 && selectedCommissionRows.length === pendingCommissionRows.length;
 
   const handleOpenModal = (policy?: InsurancePolicy) => {
     setEditingPolicy(policy ? {
@@ -236,6 +345,106 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     }
   };
 
+  const handleGenerateCommissionMap = async () => {
+    if (!commissionPeriodStart || !commissionPeriodEnd) {
+      alert('Selecione o período inicial e final.');
+      return;
+    }
+    if (commissionPeriodStart > commissionPeriodEnd) {
+      alert('A data inicial não pode ser superior à data final.');
+      return;
+    }
+
+    setIsGeneratingCommissions(true);
+    try {
+      const settlements = await insuranceService.getCommissionSettlementsByPeriod(commissionPeriodStart, commissionPeriodEnd);
+      const paidKeys = new Set(settlements.map(item => `${item.policyId}__${item.dueDate}`));
+      const rows: CommissionPeriodRow[] = [];
+
+      visiblePolicies
+        .filter(policy => policy.status === 'Aceite')
+        .forEach(policy => {
+          const annualCommission = (getNetPremium(policy) * Number(policy.commissionRate || 0)) / 100;
+          if (annualCommission <= 0) return;
+
+          const { installmentsPerYear } = getFrequencyCadence(policy.paymentFrequency);
+          const installmentAmount = Number((annualCommission / installmentsPerYear).toFixed(2));
+          const dueDates = buildDueDatesForPolicy(policy, commissionPeriodStart, commissionPeriodEnd);
+
+          dueDates.forEach(dueDate => {
+            const key = `${policy.id}__${dueDate}`;
+            rows.push({
+              key,
+              policyId: policy.id,
+              dueDate,
+              clientName: policy.clientName || getPolicyHolder(policy) || 'Sem cliente',
+              policyHolder: getPolicyHolder(policy) || '-',
+              policyNumber: policy.policyNumber || '-',
+              company: getCompany(policy) || '-',
+              paymentFrequency: policy.paymentFrequency,
+              amount: installmentAmount,
+              isPaid: paidKeys.has(key),
+            });
+          });
+        });
+
+      rows.sort((a, b) => {
+        const dateCompare = a.dueDate.localeCompare(b.dueDate);
+        if (dateCompare !== 0) return dateCompare;
+        return a.clientName.localeCompare(b.clientName);
+      });
+
+      setCommissionRows(rows);
+      setSelectedCommissionRowKeys([]);
+    } catch (err: any) {
+      alert('Erro ao gerar mapa de comissões: ' + err.message);
+    } finally {
+      setIsGeneratingCommissions(false);
+    }
+  };
+
+  const toggleCommissionRowSelection = (rowKey: string) => {
+    setSelectedCommissionRowKeys(prev =>
+      prev.includes(rowKey) ? prev.filter(key => key !== rowKey) : [...prev, rowKey]
+    );
+  };
+
+  const toggleAllPendingCommissions = () => {
+    if (allPendingSelected) {
+      setSelectedCommissionRowKeys([]);
+      return;
+    }
+    setSelectedCommissionRowKeys(pendingCommissionRows.map(row => row.key));
+  };
+
+  const handleMarkSelectedCommissionsAsPaid = async () => {
+    if (selectedCommissionRows.length === 0) {
+      alert('Selecione pelo menos uma comissão pendente.');
+      return;
+    }
+
+    setIsMarkingCommissionsPaid(true);
+    try {
+      await insuranceService.markCommissionSettlementsPaid(
+        selectedCommissionRows.map(row => ({
+          policyId: row.policyId,
+          dueDate: row.dueDate,
+          amount: row.amount,
+        }))
+      );
+
+      const selectedSet = new Set(selectedCommissionRows.map(row => row.key));
+      setCommissionRows(prev => prev.map(row => (
+        selectedSet.has(row.key) ? { ...row, isPaid: true } : row
+      )));
+      setSelectedCommissionRowKeys([]);
+    } catch (err: any) {
+      alert('Erro ao marcar comissões como pagas: ' + err.message);
+    } finally {
+      setIsMarkingCommissionsPaid(false);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (confirm("Tem a certeza que deseja apagar esta apólice?")) {
       try {
@@ -274,6 +483,133 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
         <button onClick={() => handleOpenModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
           <Plus size={18}/> Adicionar Seguro
         </button>
+      </div>
+
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">Mapa de Comissões por Período</h3>
+            <p className="text-xs text-slate-500">
+              Gere o período, selecione as comissões recebidas e marque como pagas. As não selecionadas ficam pendentes.
+            </p>
+          </div>
+          <button
+            onClick={handleGenerateCommissionMap}
+            disabled={isGeneratingCommissions}
+            className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-black disabled:opacity-50"
+          >
+            {isGeneratingCommissions ? <RefreshCcw size={16} className="animate-spin" /> : <PieChart size={16} />}
+            Gerar Comissões
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Período Inicial</label>
+            <input
+              type="date"
+              value={commissionPeriodStart}
+              onChange={e => setCommissionPeriodStart(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">Período Final</label>
+            <input
+              type="date"
+              value={commissionPeriodEnd}
+              onChange={e => setCommissionPeriodEnd(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg text-sm"
+            />
+          </div>
+          <div className="bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">
+            <p className="text-[11px] font-bold uppercase text-amber-700">Pendente no período</p>
+            <p className="text-lg font-bold text-amber-800">{commissionTotals.pending.toFixed(2)}€</p>
+          </div>
+          <div className="bg-blue-50 rounded-lg px-3 py-2 border border-blue-100">
+            <p className="text-[11px] font-bold uppercase text-blue-700">Selecionado para pagar</p>
+            <p className="text-lg font-bold text-blue-800">{commissionTotals.selected.toFixed(2)}€</p>
+          </div>
+        </div>
+
+        {commissionRows.length > 0 ? (
+          <>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs text-slate-600">
+              <div>
+                Registos: <span className="font-bold">{commissionRows.length}</span> | Já pagos: <span className="font-bold text-green-700">{commissionRows.filter(row => row.isPaid).length}</span> | Pendentes: <span className="font-bold text-amber-700">{pendingCommissionRows.length}</span>
+              </div>
+              <button
+                onClick={handleMarkSelectedCommissionsAsPaid}
+                disabled={isMarkingCommissionsPaid || selectedCommissionRows.length === 0}
+                className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {isMarkingCommissionsPaid ? 'A marcar...' : `Marcar ${selectedCommissionRows.length} como pagas`}
+              </button>
+            </div>
+
+            <div className="overflow-x-auto border border-slate-100 rounded-lg">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+                  <tr>
+                    <th className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={allPendingSelected}
+                        onChange={toggleAllPendingCommissions}
+                        className="rounded"
+                        aria-label="Selecionar comissões pendentes"
+                      />
+                    </th>
+                    <th className="px-3 py-2">Liquidação</th>
+                    <th className="px-3 py-2">Cliente / Tomador</th>
+                    <th className="px-3 py-2">Apólice</th>
+                    <th className="px-3 py-2">Companhia</th>
+                    <th className="px-3 py-2">Fracionamento</th>
+                    <th className="px-3 py-2 text-right">Comissão</th>
+                    <th className="px-3 py-2 text-center">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {commissionRows.map(row => {
+                    const isSelected = selectedCommissionRowKeys.includes(row.key);
+                    return (
+                      <tr key={row.key} className={row.isPaid ? 'bg-emerald-50/50' : 'hover:bg-slate-50'}>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleCommissionRowSelection(row.key)}
+                            disabled={row.isPaid}
+                            className="rounded"
+                            aria-label={`Selecionar comissão ${row.clientName}`}
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-xs">{new Date(`${row.dueDate}T00:00:00`).toLocaleDateString('pt-PT')}</td>
+                        <td className="px-3 py-2">
+                          <div className="font-semibold text-slate-700">{row.clientName}</div>
+                          <div className="text-[11px] text-slate-400">{row.policyHolder}</div>
+                        </td>
+                        <td className="px-3 py-2 text-xs font-mono">{row.policyNumber}</td>
+                        <td className="px-3 py-2 text-xs">{row.company}</td>
+                        <td className="px-3 py-2 text-xs">{row.paymentFrequency}</td>
+                        <td className="px-3 py-2 text-right font-bold">{row.amount.toFixed(2)}€</td>
+                        <td className="px-3 py-2 text-center">
+                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold ${row.isPaid ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {row.isPaid ? 'Pago' : 'Pendente'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <div className="text-sm italic text-slate-400 border border-dashed border-slate-200 rounded-lg p-4">
+            Gere um período para listar comissões a receber e controlar os pagamentos.
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, SupabaseClientOptions } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, InsuranceCommissionSettlement, WorkSafetyService, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -1100,6 +1100,15 @@ const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
   document_checklist: p.documentChecklist || {},
 });
 
+const mapDbToInsuranceCommissionSettlement = (row: any): InsuranceCommissionSettlement => ({
+  id: row.id,
+  policyId: row.policy_id,
+  dueDate: row.due_date,
+  amount: Number(row.amount ?? 0),
+  paidAt: row.paid_at,
+  createdAt: row.created_at,
+});
+
 export const insuranceService = {
   async getAll(): Promise<InsurancePolicy[]> {
     const storeClient = ensureStoreClient();
@@ -1144,6 +1153,54 @@ export const insuranceService = {
 
     if (error) throw error;
     return mapDbToInsurancePolicy(data);
+  },
+  async getCommissionSettlementsByPeriod(periodStart: string, periodEnd: string): Promise<InsuranceCommissionSettlement[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('insurance_commission_settlements')
+      .select('*')
+      .gte('due_date', periodStart)
+      .lte('due_date', periodEnd)
+      .order('due_date', { ascending: true });
+
+    if (error) {
+      const missingTableError = /relation .*insurance_commission_settlements.* does not exist|schema cache|could not find the table/i;
+      if (missingTableError.test(error.message || '')) {
+        throw new Error('A tabela de comissões ainda não existe. Execute: supabase db push');
+      }
+      throw error;
+    }
+
+    return (data || []).map(mapDbToInsuranceCommissionSettlement);
+  },
+  async markCommissionSettlementsPaid(
+    settlements: Array<{ policyId: string; dueDate: string; amount: number }>
+  ): Promise<InsuranceCommissionSettlement[]> {
+    if (settlements.length === 0) return [];
+
+    const storeClient = ensureStoreClient();
+    const now = new Date().toISOString();
+    const payload = settlements.map(item => ({
+      policy_id: item.policyId,
+      due_date: item.dueDate,
+      amount: item.amount,
+      paid_at: now,
+    }));
+
+    const { data, error } = await storeClient
+      .from('insurance_commission_settlements')
+      .upsert(payload, { onConflict: 'policy_id,due_date' })
+      .select('*');
+
+    if (error) {
+      const missingTableError = /relation .*insurance_commission_settlements.* does not exist|schema cache|could not find the table/i;
+      if (missingTableError.test(error.message || '')) {
+        throw new Error('A tabela de comissões ainda não existe. Execute: supabase db push');
+      }
+      throw error;
+    }
+
+    return (data || []).map(mapDbToInsuranceCommissionSettlement);
   },
   async delete(id: string): Promise<void> {
     const storeClient = ensureStoreClient();

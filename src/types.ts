@@ -212,6 +212,15 @@ export interface InsurancePolicy {
   documentChecklist?: Record<string, boolean>;
 }
 
+export interface InsuranceCommissionSettlement {
+  id: string;
+  policyId: string;
+  dueDate: string;
+  amount: number;
+  paidAt: string;
+  createdAt: string;
+}
+
 export interface AppNotification {
   id: string;
   type: 'critical' | 'warning' | 'info' | 'success';
