@@ -1202,6 +1202,25 @@ export const insuranceService = {
 
     return (data || []).map(mapDbToInsuranceCommissionSettlement);
   },
+  async getCommissionSettlementsHistory(): Promise<InsuranceCommissionSettlement[]> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('insurance_commission_settlements')
+      .select('*')
+      .order('paid_at', { ascending: false })
+      .order('due_date', { ascending: false })
+      .limit(1000);
+
+    if (error) {
+      const missingTableError = /relation .*insurance_commission_settlements.* does not exist|schema cache|could not find the table/i;
+      if (missingTableError.test(error.message || '')) {
+        throw new Error('A tabela de comissões ainda não existe. Execute: supabase db push');
+      }
+      throw error;
+    }
+
+    return (data || []).map(mapDbToInsuranceCommissionSettlement);
+  },
   async delete(id: string): Promise<void> {
     const storeClient = ensureStoreClient();
     const { error } = await storeClient.from('insurance_policies').delete().match({ id });

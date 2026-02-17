@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { InsurancePolicy, Client } from '../types';
 import { insuranceService } from '../services/supabase';
 import { Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, FileCheck, FileClock, Paperclip, ChevronUp, ChevronDown, PieChart } from 'lucide-react';
@@ -23,6 +23,19 @@ interface CommissionPeriodRow {
   paymentFrequency: InsurancePolicy['paymentFrequency'];
   amount: number;
   isPaid: boolean;
+}
+
+interface PaidCommissionHistoryRow {
+  id: string;
+  policyId: string;
+  dueDate: string;
+  paidAt: string;
+  clientName: string;
+  policyHolder: string;
+  policyNumber: string;
+  company: string;
+  paymentFrequency: InsurancePolicy['paymentFrequency'];
+  amount: number;
 }
 
 const getCompany = (policy: Partial<InsurancePolicy>) => policy.company || policy.insuranceProvider || '';
@@ -153,11 +166,15 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
   const [isGeneratingCommissions, setIsGeneratingCommissions] = useState(false);
   const [isMarkingCommissionsPaid, setIsMarkingCommissionsPaid] = useState(false);
   const [hasGeneratedCommissions, setHasGeneratedCommissions] = useState(false);
+  const [paidCommissionHistoryRows, setPaidCommissionHistoryRows] = useState<PaidCommissionHistoryRow[]>([]);
+  const [isLoadingPaidCommissionHistory, setIsLoadingPaidCommissionHistory] = useState(false);
+  const [paidCommissionHistoryError, setPaidCommissionHistoryError] = useState<string | null>(null);
 
   const visiblePolicies = useMemo(() => {
     if (!forcedAgent) return policies;
     return policies.filter(policy => policy.agent === forcedAgent);
   }, [policies, forcedAgent]);
+  const visiblePolicyById = useMemo(() => new Map(visiblePolicies.map(policy => [policy.id, policy])), [visiblePolicies]);
 
   const uniqueCompanies = useMemo(() => {
     const companies = new Set(visiblePolicies.map(policy => getCompany(policy)).filter(Boolean));
@@ -257,6 +274,56 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     return { pending, paid, selected };
   }, [pendingCommissionRows, commissionRows, selectedCommissionRows]);
   const allPendingSelected = pendingCommissionRows.length > 0 && selectedCommissionRows.length === pendingCommissionRows.length;
+  const paidCommissionHistoryTotal = useMemo(
+    () => paidCommissionHistoryRows.reduce((sum, row) => sum + row.amount, 0),
+    [paidCommissionHistoryRows]
+  );
+
+  const loadPaidCommissionHistory = async () => {
+    setIsLoadingPaidCommissionHistory(true);
+    setPaidCommissionHistoryError(null);
+    try {
+      const settlements = await insuranceService.getCommissionSettlementsHistory();
+      const rows = settlements
+        .map(settlement => {
+          const policy = visiblePolicyById.get(settlement.policyId);
+          if (!policy) return null;
+          return {
+            id: settlement.id,
+            policyId: settlement.policyId,
+            dueDate: settlement.dueDate,
+            paidAt: settlement.paidAt,
+            clientName: policy.clientName || getPolicyHolder(policy) || 'Sem cliente',
+            policyHolder: getPolicyHolder(policy) || '-',
+            policyNumber: policy.policyNumber || '-',
+            company: getCompany(policy) || '-',
+            paymentFrequency: policy.paymentFrequency,
+            amount: Number(settlement.amount || 0),
+          } as PaidCommissionHistoryRow;
+        })
+        .filter((row): row is PaidCommissionHistoryRow => row !== null);
+
+      rows.sort((a, b) => {
+        const paidCompare = b.paidAt.localeCompare(a.paidAt);
+        if (paidCompare !== 0) return paidCompare;
+        const clientCompare = a.clientName.localeCompare(b.clientName, 'pt-PT', { sensitivity: 'base' });
+        if (clientCompare !== 0) return clientCompare;
+        const policyCompare = a.policyNumber.localeCompare(b.policyNumber, 'pt-PT', { sensitivity: 'base' });
+        if (policyCompare !== 0) return policyCompare;
+        return b.dueDate.localeCompare(a.dueDate);
+      });
+
+      setPaidCommissionHistoryRows(rows);
+    } catch (err: any) {
+      setPaidCommissionHistoryError('Erro ao carregar histórico de comissões: ' + err.message);
+    } finally {
+      setIsLoadingPaidCommissionHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPaidCommissionHistory();
+  }, [visiblePolicyById]);
 
   const handleOpenModal = (policy?: InsurancePolicy) => {
     setEditingPolicy(policy ? {
@@ -381,6 +448,9 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
 
           dueDates.forEach(dueDate => {
             const key = `${policy.id}__${dueDate}`;
+            if (paidKeys.has(key)) {
+              return;
+            }
             rows.push({
               key,
               policyId: policy.id,
@@ -391,15 +461,17 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               company: getCompany(policy) || '-',
               paymentFrequency: policy.paymentFrequency,
               amount: installmentAmount,
-              isPaid: paidKeys.has(key),
+              isPaid: false,
             });
           });
         });
 
       rows.sort((a, b) => {
-        const dateCompare = a.dueDate.localeCompare(b.dueDate);
-        if (dateCompare !== 0) return dateCompare;
-        return a.clientName.localeCompare(b.clientName);
+        const clientCompare = a.clientName.localeCompare(b.clientName, 'pt-PT', { sensitivity: 'base' });
+        if (clientCompare !== 0) return clientCompare;
+        const policyCompare = (a.policyNumber || '').localeCompare((b.policyNumber || ''), 'pt-PT', { sensitivity: 'base' });
+        if (policyCompare !== 0) return policyCompare;
+        return a.dueDate.localeCompare(b.dueDate);
       });
 
       setCommissionRows(rows);
@@ -443,10 +515,9 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
       );
 
       const selectedSet = new Set(selectedCommissionRows.map(row => row.key));
-      setCommissionRows(prev => prev.map(row => (
-        selectedSet.has(row.key) ? { ...row, isPaid: true } : row
-      )));
+      setCommissionRows(prev => prev.filter(row => !selectedSet.has(row.key)));
       setSelectedCommissionRowKeys([]);
+      await loadPaidCommissionHistory();
     } catch (err: any) {
       alert('Erro ao marcar comissões como pagas: ' + err.message);
     } finally {
@@ -545,7 +616,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
           <>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs text-slate-600">
               <div>
-                Registos: <span className="font-bold">{commissionRows.length}</span> | Já pagos: <span className="font-bold text-green-700">{commissionRows.filter(row => row.isPaid).length}</span> | Pendentes: <span className="font-bold text-amber-700">{pendingCommissionRows.length}</span>
+                Registos pendentes: <span className="font-bold text-amber-700">{pendingCommissionRows.length}</span>
               </div>
               <button
                 onClick={handleMarkSelectedCommissionsAsPaid}
@@ -619,6 +690,73 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
             {hasGeneratedCommissions
               ? 'Não foram encontradas comissões para este período com os seguros atuais.'
               : 'Gere um período para listar comissões a receber e controlar os pagamentos.'}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">Histórico de Comissões Pagas</h3>
+            <p className="text-xs text-slate-500">
+              Registo das comissões já liquidadas, com data de liquidação e referência da apólice.
+            </p>
+          </div>
+          <button
+            onClick={loadPaidCommissionHistory}
+            disabled={isLoadingPaidCommissionHistory}
+            className="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 disabled:opacity-50 flex items-center gap-2"
+          >
+            {isLoadingPaidCommissionHistory ? <RefreshCcw size={16} className="animate-spin" /> : <RefreshCcw size={16} />}
+            Atualizar Histórico
+          </button>
+        </div>
+
+        {paidCommissionHistoryError && (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            {paidCommissionHistoryError}
+          </div>
+        )}
+
+        <div className="text-xs text-slate-600">
+          Registos: <span className="font-bold">{paidCommissionHistoryRows.length}</span> | Total liquidado: <span className="font-bold text-green-700">{paidCommissionHistoryTotal.toFixed(2)}€</span>
+        </div>
+
+        {paidCommissionHistoryRows.length > 0 ? (
+          <div className="overflow-x-auto border border-slate-100 rounded-lg">
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+                <tr>
+                  <th className="px-3 py-2">Pago em</th>
+                  <th className="px-3 py-2">Liquidação</th>
+                  <th className="px-3 py-2">Cliente / Tomador</th>
+                  <th className="px-3 py-2">Apólice</th>
+                  <th className="px-3 py-2">Companhia</th>
+                  <th className="px-3 py-2">Fracionamento</th>
+                  <th className="px-3 py-2 text-right">Comissão</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paidCommissionHistoryRows.map(row => (
+                  <tr key={row.id} className="hover:bg-slate-50">
+                    <td className="px-3 py-2 text-xs">{new Date(row.paidAt).toLocaleString('pt-PT')}</td>
+                    <td className="px-3 py-2 text-xs">{new Date(`${row.dueDate}T00:00:00`).toLocaleDateString('pt-PT')}</td>
+                    <td className="px-3 py-2">
+                      <div className="font-semibold text-slate-700">{row.clientName}</div>
+                      <div className="text-[11px] text-slate-400">{row.policyHolder}</div>
+                    </td>
+                    <td className="px-3 py-2 text-xs font-mono">{row.policyNumber}</td>
+                    <td className="px-3 py-2 text-xs">{row.company}</td>
+                    <td className="px-3 py-2 text-xs">{row.paymentFrequency}</td>
+                    <td className="px-3 py-2 text-right font-bold text-green-700">{row.amount.toFixed(2)}€</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-sm italic text-slate-400 border border-dashed border-slate-200 rounded-lg p-4">
+            Ainda não existem comissões marcadas como pagas.
           </div>
         )}
       </div>
