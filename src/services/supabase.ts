@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, SupabaseClientOptions } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, InsuranceCommissionSettlement, WorkSafetyService, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, InsuranceCommissionSettlement, WorkSafetyService, WorkSafetyProfileData, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -591,6 +591,8 @@ const mapDbToWorkSafetyService = (p: any): WorkSafetyService => ({
   proposalStatus: p.proposal_status,
   attachment_url: p.attachment_url,
   documentChecklist: p.document_checklist && typeof p.document_checklist === 'object' ? p.document_checklist : {},
+  profileData: p.profile_data && typeof p.profile_data === 'object' ? (p.profile_data as WorkSafetyProfileData) : {},
+  aiObligationsSummary: p.ai_obligations_summary || '',
 });
 
 const mapWorkSafetyServiceToDb = (p: Partial<WorkSafetyService>) => ({
@@ -605,6 +607,8 @@ const mapWorkSafetyServiceToDb = (p: Partial<WorkSafetyService>) => ({
   proposal_status: p.proposalStatus,
   attachment_url: p.attachment_url,
   document_checklist: p.documentChecklist || {},
+  profile_data: p.profileData || {},
+  ai_obligations_summary: p.aiObligationsSummary || null,
 });
 
 export const workSafetyService = {
@@ -627,10 +631,12 @@ export const workSafetyService = {
       .single();
 
     if (error) {
-      const schemaError = /column .*document_checklist.* does not exist|schema cache/i;
+      const schemaError = /column .*document_checklist.* does not exist|column .*profile_data.* does not exist|column .*ai_obligations_summary.* does not exist|schema cache/i;
       if (schemaError.test(error.message || '')) {
         const fallbackPayload = { ...payload } as any;
         delete fallbackPayload.document_checklist;
+        delete fallbackPayload.profile_data;
+        delete fallbackPayload.ai_obligations_summary;
 
         const retry = await storeClient
           .from('work_safety_services')

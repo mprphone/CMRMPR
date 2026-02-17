@@ -1,7 +1,8 @@
-﻿import React, { useState, useMemo } from 'react';
-import { WorkSafetyService, Client } from '../types';
+import React, { useState, useMemo } from 'react';
+import { WorkSafetyService, WorkSafetyProfileData, Client } from '../types';
 import { workSafetyService } from '../services/supabase';
-import { HeartPulse, Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, CheckCircle, Circle, FileCheck, FileClock, FileX, Paperclip, AlertTriangle, BellRing } from 'lucide-react';
+import { generateTemplateWithAI } from '../services/geminiService';
+import { Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, CheckCircle, Circle, FileCheck, FileClock, FileX, Paperclip, AlertTriangle, BellRing, Sparkles, Mail } from 'lucide-react';
 
 interface WorkSafetyProps {
   services: WorkSafetyService[];
@@ -20,15 +21,24 @@ interface RenewalAlertItem {
   level: RenewalAlertLevel;
 }
 
-const REQUIRED_SHT_DOCUMENTS: Array<{ key: string; label: string }> = [
-  { key: 'sht_contract', label: 'Contrato SHT' },
-  { key: 'medical_clearance', label: 'Fichas de aptidao medica' },
-  { key: 'risk_assessment', label: 'Avaliacao de riscos' },
-  { key: 'payment_proof', label: 'Comprovativo de pagamento' },
+type ShtModalTab = 'service' | 'client' | 'checklist' | 'ai';
+
+const SHT_CHECKLIST_ITEMS: Array<{ key: string; label: string }> = [
+  { key: 'work_schedule', label: 'Horario' },
+  { key: 'extinguishers', label: 'Extintores' },
+  { key: 'training', label: 'Formacao' },
+  { key: 'holiday_publication', label: 'Publicacao de ferias' },
+  { key: 'hours_registry', label: 'Registo de horas' },
+  { key: 'work_tools', label: 'Indicacao do instrumento de trabalho' },
+  { key: 'code_of_conduct', label: 'Codigo de boa conduta para assedio no trabalho' },
+  { key: 'remote_surveillance', label: 'Utilizacao de meios eletronicos de vigilancia a distancia' },
+  { key: 'single_report', label: 'Relatorio Unico' },
+  { key: 'workers_registry', label: 'Registo dos Trabalhadores' },
+  { key: 'accident_policy', label: 'Apolice de acidentes de trabalho' },
 ];
 
 const createDefaultChecklist = () =>
-  REQUIRED_SHT_DOCUMENTS.reduce<Record<string, boolean>>((acc, doc) => {
+  SHT_CHECKLIST_ITEMS.reduce<Record<string, boolean>>((acc, doc) => {
     acc[doc.key] = false;
     return acc;
   }, {});
@@ -45,6 +55,31 @@ const getChecklistProgress = (checklist?: Record<string, boolean>) => {
   return { done, total };
 };
 
+const createDefaultProfileData = (client?: Client): WorkSafetyProfileData => ({
+  nif: client?.nif || '',
+  nic: '',
+  cae: client?.sector || '',
+  irct: '',
+  workSchedule: '',
+  occupationalMedicineAdmissionDate: '',
+  occupationalMedicinePeriodicDate: '',
+  occupationalMedicineHasRecords: false,
+  safetyVisitsNotes: '',
+  safetyReportMeasuresNotes: '',
+  providerDetails: '',
+  providerPeriodicity: 'Anual',
+  nextDueDate: '',
+  paidValue: 0,
+  commissionValue: 0,
+});
+
+const mergeProfileData = (profileData?: WorkSafetyProfileData, client?: Client): WorkSafetyProfileData => ({
+  ...createDefaultProfileData(client),
+  ...(profileData || {}),
+  nif: profileData?.nif || client?.nif || '',
+  cae: profileData?.cae || client?.sector || '',
+});
+
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
 const addMonths = (date: Date, months: number) => {
@@ -53,17 +88,26 @@ const addMonths = (date: Date, months: number) => {
   return next;
 };
 
-const getRenewalMonths = (term: WorkSafetyService['renewalTerm']) => {
+const getRenewalMonths = (
+  term: WorkSafetyService['renewalTerm'],
+  profilePeriodicity?: WorkSafetyProfileData['providerPeriodicity']
+) => {
+  if (profilePeriodicity === 'Semestral') return 6;
+  if (profilePeriodicity === 'Bi-anual') return 24;
   if (term === 'Bi-anual') return 24;
   return 12;
 };
 
-const getNextRenewalDate = (serviceDate: string, renewalTerm: WorkSafetyService['renewalTerm']) => {
+const getNextRenewalDate = (
+  serviceDate: string,
+  renewalTerm: WorkSafetyService['renewalTerm'],
+  profilePeriodicity?: WorkSafetyProfileData['providerPeriodicity']
+) => {
   const start = startOfDay(new Date(serviceDate));
   const today = startOfDay(new Date());
   if (Number.isNaN(start.getTime())) return null;
 
-  const stepMonths = getRenewalMonths(renewalTerm);
+  const stepMonths = getRenewalMonths(renewalTerm, profilePeriodicity);
   let next = new Date(start);
   while (next < today) {
     next = addMonths(next, stepMonths);
@@ -90,12 +134,16 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
   const [isSaving, setIsSaving] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeModalTab, setActiveModalTab] = useState<ShtModalTab>('service');
+  const [isGeneratingAiObligations, setIsGeneratingAiObligations] = useState(false);
+  const [emailPreview, setEmailPreview] = useState('');
 
   const clientsWithEmployees = useMemo(() => {
     return clients
       .filter(c => c.employeeCount > 0)
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [clients]);
+  const clientsById = useMemo(() => new Map(clients.map(client => [client.id, client])), [clients]);
 
   const latestServicesMap = useMemo(() => {
     const map = new Map<string, WorkSafetyService>();
@@ -126,7 +174,11 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
       .filter(item => Boolean(item.service))
       .map(item => {
         const service = item.service!;
-        const nextRenewal = getNextRenewalDate(service.serviceDate, service.renewalTerm);
+        const nextRenewal = getNextRenewalDate(
+          service.serviceDate,
+          service.renewalTerm,
+          service.profileData?.providerPeriodicity
+        );
         if (!nextRenewal) return null;
 
         const daysUntilRenewal = Math.ceil((nextRenewal.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
@@ -172,11 +224,14 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
   }, [displayList, searchTerm]);
 
   const handleOpenModal = (service?: Partial<WorkSafetyService>, clientId?: string) => {
+    const resolvedClient = service?.clientId ? clientsById.get(service.clientId) : (clientId ? clientsById.get(clientId) : undefined);
     setEditingService(
       service
         ? {
             ...service,
             documentChecklist: mergeChecklist(service.documentChecklist),
+            profileData: mergeProfileData(service.profileData, resolvedClient),
+            aiObligationsSummary: service.aiObligationsSummary || '',
           }
         : {
             clientId,
@@ -187,9 +242,13 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
             isCommissionPaid: false,
             totalValue: 0,
             documentChecklist: createDefaultChecklist(),
+            profileData: mergeProfileData(undefined, resolvedClient),
+            aiObligationsSummary: '',
           }
     );
     setSelectedFile(null);
+    setEmailPreview('');
+    setActiveModalTab('service');
     setIsModalOpen(true);
   };
 
@@ -204,6 +263,111 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
         },
       };
     });
+  };
+
+  const updateProfileData = <K extends keyof WorkSafetyProfileData>(key: K, value: WorkSafetyProfileData[K]) => {
+    setEditingService(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        profileData: {
+          ...mergeProfileData(prev.profileData, prev.clientId ? clientsById.get(prev.clientId) : undefined),
+          [key]: value,
+        },
+      };
+    });
+  };
+
+  const handleClientChange = (clientId: string) => {
+    const selectedClient = clientsById.get(clientId);
+    setEditingService(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        clientId,
+        profileData: mergeProfileData(prev.profileData, selectedClient),
+      };
+    });
+  };
+
+  const handleGenerateAiObligations = async () => {
+    if (!editingService?.clientId) {
+      alert('Selecione um cliente antes de usar a IA.');
+      return;
+    }
+
+    const client = clientsById.get(editingService.clientId);
+    const profileData = mergeProfileData(editingService.profileData, client);
+    const nif = (profileData.nif || client?.nif || '').trim();
+    const cae = (profileData.cae || client?.sector || '').trim();
+    const nic = (profileData.nic || '').trim();
+
+    if (!nif && !cae) {
+      alert('Preencha NIF/NIC e CAE para gerar recomendacoes.');
+      return;
+    }
+
+    setIsGeneratingAiObligations(true);
+    try {
+      const topic = [
+        'Seguranca e Saude no Trabalho em Portugal.',
+        `Cliente: ${client?.name || 'N/A'}.`,
+        `NIF: ${nif || 'N/A'}.`,
+        `NIC: ${nic || 'N/A'}.`,
+        `CAE: ${cae || 'N/A'}.`,
+        'Lista as obrigacoes principais para exercer esta atividade.',
+        'Inclui periodicidades recomendadas e documentos obrigatorios.',
+        'Resposta em portugues europeu, em bullets claros.',
+      ].join(' ');
+
+      const aiResponse = await generateTemplateWithAI(topic, 'Profissional');
+      setEditingService(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          profileData,
+          aiObligationsSummary: (aiResponse.body || '').trim(),
+        };
+      });
+    } catch (err: any) {
+      alert('Erro ao gerar recomendacoes IA: ' + err.message);
+    } finally {
+      setIsGeneratingAiObligations(false);
+    }
+  };
+
+  const handleGenerateEmailPreview = () => {
+    if (!editingService?.clientId) {
+      alert('Selecione um cliente antes de gerar o email.');
+      return;
+    }
+
+    const client = clientsById.get(editingService.clientId);
+    const obligations = (editingService.aiObligationsSummary || '').trim();
+    const pendingChecklist = SHT_CHECKLIST_ITEMS
+      .filter(item => !editingService.documentChecklist?.[item.key])
+      .map(item => `- ${item.label}`);
+
+    const lines = [
+      `Assunto: Lembrete de obrigacoes SHT - ${client?.name || 'Cliente'}`,
+      '',
+      `Exmo(a). ${client?.name || 'Cliente'},`,
+      '',
+      'No ambito da sua atividade, recordamos as obrigacoes de SST que devem ser mantidas atualizadas.',
+      '',
+      obligations ? 'Obrigacoes recomendadas para a sua atividade:' : 'Obrigacoes recomendadas:',
+      obligations || '- Sem recomendacoes IA geradas ainda.',
+      '',
+      'Checklist com pontos por validar:',
+      pendingChecklist.length > 0 ? pendingChecklist.join('\n') : '- Sem pendencias identificadas.',
+      '',
+      'Caso pretenda, apoiamos na regularizacao e calendarizacao das proximas acoes.',
+      '',
+      'Com os melhores cumprimentos,',
+      'Equipa MPR Negocios',
+    ];
+
+    setEmailPreview(lines.join('\n'));
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -223,12 +387,15 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
       }
 
       const client = clients.find(c => c.id === editingService.clientId);
+      const profileData = mergeProfileData(editingService.profileData, client);
       const serviceToSave: Partial<WorkSafetyService> = {
         ...editingService,
         id: serviceId,
         attachment_url: attachmentUrl,
         clientName: client?.name,
         documentChecklist: mergeChecklist(editingService.documentChecklist),
+        profileData,
+        aiObligationsSummary: (editingService.aiObligationsSummary || '').trim(),
       };
 
       const savedService = await workSafetyService.upsert(serviceToSave);
@@ -282,6 +449,9 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
         return 'bg-gray-100 text-gray-600';
     }
   };
+
+  const selectedClient = editingService?.clientId ? clientsById.get(editingService.clientId) : undefined;
+  const profileData = mergeProfileData(editingService?.profileData, selectedClient);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -356,7 +526,7 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
             <tbody className="divide-y divide-slate-50">
               {filteredDisplayList.map(({ client, service }) => {
                 const alert = service ? renewalAlertMap.get(service.id) : undefined;
-                const checklistProgress = service ? getChecklistProgress(service.documentChecklist) : { done: 0, total: REQUIRED_SHT_DOCUMENTS.length };
+                const checklistProgress = service ? getChecklistProgress(service.documentChecklist) : { done: 0, total: SHT_CHECKLIST_ITEMS.length };
 
                 return (
                   <tr key={client.id} className="hover:bg-slate-50">
@@ -378,7 +548,7 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
                     </td>
                     <td className="px-4 py-3">{service?.provider || '-'}</td>
                     <td className="px-4 py-3 text-center text-xs">{service ? new Date(service.serviceDate).toLocaleDateString('pt-PT') : '-'}</td>
-                    <td className="px-4 py-3 text-center text-xs">{service?.renewalTerm || '-'}</td>
+                    <td className="px-4 py-3 text-center text-xs">{service?.profileData?.providerPeriodicity || service?.renewalTerm || '-'}</td>
                     <td className="px-4 py-3 text-center">
                       {alert ? (
                         <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${getAlertLevelClass(alert.level)}`}>
@@ -436,90 +606,242 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
 
       {isModalOpen && editingService && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleSave} className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 space-y-4">
+          <form onSubmit={handleSave} className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-6 space-y-4 max-h-[95vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">{editingService.id ? 'Editar Registo SHT' : 'Novo Registo SHT'}</h3>
               <button type="button" onClick={() => setIsModalOpen(false)}><X size={20} /></button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Cliente*</label>
-                <select required value={editingService.clientId || ''} onChange={e => setEditingService({ ...editingService, clientId: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option value="" disabled>Selecione um cliente com funcionarios</option>
-                  {clientsWithEmployees.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Fornecedor*</label>
-                <input type="text" required value={editingService.provider || ''} onChange={e => setEditingService({ ...editingService, provider: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Data do Servico*</label>
-                <input type="date" required value={editingService.serviceDate} onChange={e => setEditingService({ ...editingService, serviceDate: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Prazo Renovacao</label>
-                <select value={editingService.renewalTerm} onChange={e => setEditingService({ ...editingService, renewalTerm: e.target.value as WorkSafetyService['renewalTerm'] })} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option>Anual</option>
-                  <option>Bi-anual</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Valor Total (EUR)</label>
-                <input type="number" step="0.01" value={editingService.totalValue} onChange={e => setEditingService({ ...editingService, totalValue: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Estado da Proposta</label>
-                <select value={editingService.proposalStatus} onChange={e => setEditingService({ ...editingService, proposalStatus: e.target.value as WorkSafetyService['proposalStatus'] })} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option>Não enviada</option>
-                  <option>Enviada</option>
-                  <option>Aceite</option>
-                  <option>Recusada</option>
-                </select>
-              </div>
-              <div className="md:col-span-2 flex items-center gap-6 pt-2">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={editingService.hasCommission} onChange={e => setEditingService({ ...editingService, hasCommission: e.target.checked })} className="rounded" />
-                  Recebe Comissao?
-                </label>
-                {editingService.hasCommission && (
+            <div className="flex flex-wrap gap-2 border-b pb-3">
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('service')}
+                className={`px-3 py-1.5 text-sm font-bold rounded-md ${activeModalTab === 'service' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                Servico
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('client')}
+                className={`px-3 py-1.5 text-sm font-bold rounded-md ${activeModalTab === 'client' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                Dados do Cliente
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('checklist')}
+                className={`px-3 py-1.5 text-sm font-bold rounded-md ${activeModalTab === 'checklist' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                Checklist
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('ai')}
+                className={`px-3 py-1.5 text-sm font-bold rounded-md ${activeModalTab === 'ai' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                IA e Email
+              </button>
+            </div>
+
+            {activeModalTab === 'service' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Cliente*</label>
+                  <select required value={editingService.clientId || ''} onChange={e => handleClientChange(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option value="" disabled>Selecione um cliente com funcionarios</option>
+                    {clientsWithEmployees.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Fornecedor*</label>
+                  <input type="text" required value={editingService.provider || ''} onChange={e => setEditingService({ ...editingService, provider: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Data do Servico*</label>
+                  <input type="date" required value={editingService.serviceDate} onChange={e => setEditingService({ ...editingService, serviceDate: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Prazo Renovacao</label>
+                  <select value={editingService.renewalTerm} onChange={e => setEditingService({ ...editingService, renewalTerm: e.target.value as WorkSafetyService['renewalTerm'] })} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option>Anual</option>
+                    <option>Bi-anual</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Valor Total (EUR)</label>
+                  <input type="number" step="0.01" value={editingService.totalValue} onChange={e => setEditingService({ ...editingService, totalValue: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Estado da Proposta</label>
+                  <select value={editingService.proposalStatus} onChange={e => setEditingService({ ...editingService, proposalStatus: e.target.value as WorkSafetyService['proposalStatus'] })} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option>Não enviada</option>
+                    <option>Enviada</option>
+                    <option>Aceite</option>
+                    <option>Recusada</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2 flex flex-wrap items-center gap-6 pt-2">
                   <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={editingService.isCommissionPaid} onChange={e => setEditingService({ ...editingService, isCommissionPaid: e.target.checked })} className="rounded" />
-                    Comissao Paga?
+                    <input type="checkbox" checked={Boolean(editingService.hasCommission)} onChange={e => setEditingService({ ...editingService, hasCommission: e.target.checked })} className="rounded" />
+                    Recebe Comissao?
                   </label>
-                )}
+                  {editingService.hasCommission && (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={Boolean(editingService.isCommissionPaid)} onChange={e => setEditingService({ ...editingService, isCommissionPaid: e.target.checked })} className="rounded" />
+                      Comissao Paga?
+                    </label>
+                  )}
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Anexo (Proposta/Contrato)</label>
+                  <input
+                    type="file"
+                    onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+                    className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
+                  {editingService.attachment_url && !selectedFile && (
+                    <div className="mt-2 text-xs">
+                      Ficheiro atual: <a href={editingService.attachment_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{editingService.attachment_url.split('/').pop()}</a>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="md:col-span-2 border rounded-lg p-3 bg-slate-50">
-                <p className="text-xs font-bold text-slate-500 mb-2">Checklist de documentos obrigatorios</p>
+            )}
+
+            {activeModalTab === 'client' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">NIF</label>
+                  <input type="text" value={profileData.nif || ''} onChange={e => updateProfileData('nif', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">NIC</label>
+                  <input type="text" value={profileData.nic || ''} onChange={e => updateProfileData('nic', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">CAE</label>
+                  <input type="text" value={profileData.cae || ''} onChange={e => updateProfileData('cae', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">IRCT</label>
+                  <input type="text" value={profileData.irct || ''} onChange={e => updateProfileData('irct', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Horario</label>
+                  <input type="text" value={profileData.workSchedule || ''} onChange={e => updateProfileData('workSchedule', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Medicina Trabalho (Admissao)</label>
+                  <input type="date" value={profileData.occupationalMedicineAdmissionDate || ''} onChange={e => updateProfileData('occupationalMedicineAdmissionDate', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Medicina Trabalho (Periodica)</label>
+                  <input type="date" value={profileData.occupationalMedicinePeriodicDate || ''} onChange={e => updateProfileData('occupationalMedicinePeriodicDate', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={Boolean(profileData.occupationalMedicineHasRecords)} onChange={e => updateProfileData('occupationalMedicineHasRecords', e.target.checked)} className="rounded" />
+                    Tem fichas de medicina do trabalho
+                  </label>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Seguranca no Trabalho (Visitas)</label>
+                  <textarea rows={3} value={profileData.safetyVisitsNotes || ''} onChange={e => updateProfileData('safetyVisitsNotes', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Relatorio e Medidas</label>
+                  <textarea rows={3} value={profileData.safetyReportMeasuresNotes || ''} onChange={e => updateProfileData('safetyReportMeasuresNotes', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Indicacao do Fornecedor</label>
+                  <input type="text" value={profileData.providerDetails || ''} onChange={e => updateProfileData('providerDetails', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Periodicidade</label>
+                  <select value={profileData.providerPeriodicity || 'Anual'} onChange={e => updateProfileData('providerPeriodicity', e.target.value as WorkSafetyProfileData['providerPeriodicity'])} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                    <option>Semestral</option>
+                    <option>Anual</option>
+                    <option>Bi-anual</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Proxima Data</label>
+                  <input type="date" value={profileData.nextDueDate || ''} onChange={e => updateProfileData('nextDueDate', e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Valor Pago (EUR)</label>
+                  <input type="number" step="0.01" value={profileData.paidValue || 0} onChange={e => updateProfileData('paidValue', parseFloat(e.target.value) || 0)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Comissao (EUR)</label>
+                  <input type="number" step="0.01" value={profileData.commissionValue || 0} onChange={e => updateProfileData('commissionValue', parseFloat(e.target.value) || 0)} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                </div>
+              </div>
+            )}
+
+            {activeModalTab === 'checklist' && (
+              <div className="border rounded-lg p-4 bg-slate-50">
+                <p className="text-xs font-bold text-slate-500 mb-3">Checklist de obrigacoes/documentos</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {REQUIRED_SHT_DOCUMENTS.map(doc => (
-                    <label key={doc.key} className="flex items-center gap-2 text-sm text-slate-700">
+                  {SHT_CHECKLIST_ITEMS.map(item => (
+                    <label key={item.key} className="flex items-center gap-2 text-sm text-slate-700">
                       <input
                         type="checkbox"
-                        checked={Boolean(editingService.documentChecklist?.[doc.key])}
-                        onChange={e => toggleChecklistDocument(doc.key, e.target.checked)}
+                        checked={Boolean(editingService.documentChecklist?.[item.key])}
+                        onChange={e => toggleChecklistDocument(item.key, e.target.checked)}
                         className="rounded"
                       />
-                      {doc.label}
+                      {item.label}
                     </label>
                   ))}
                 </div>
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-slate-500 mb-1">Anexo (Proposta/Contrato)</label>
-                <input
-                  type="file"
-                  onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
-                  className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                />
-                {editingService.attachment_url && !selectedFile && (
-                  <div className="mt-2 text-xs">
-                    Ficheiro atual: <a href={editingService.attachment_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{editingService.attachment_url.split('/').pop()}</a>
-                  </div>
-                )}
+            )}
+
+            {activeModalTab === 'ai' && (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-500">
+                  A IA usa NIC e CAE para sugerir obrigacoes da atividade em formato de resumo.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGenerateAiObligations}
+                    disabled={isGeneratingAiObligations}
+                    className="inline-flex items-center gap-2 bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50"
+                  >
+                    {isGeneratingAiObligations ? <RefreshCcw size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    Gerar recomendacao IA
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateEmailPreview}
+                    className="inline-flex items-center gap-2 bg-slate-700 text-white px-3 py-2 rounded-lg text-sm font-bold"
+                  >
+                    <Mail size={14} />
+                    Previsualizar Email
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Resumo IA de obrigacoes</label>
+                  <textarea
+                    rows={10}
+                    value={editingService.aiObligationsSummary || ''}
+                    onChange={e => setEditingService({ ...editingService, aiObligationsSummary: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">Preview de email</label>
+                  <textarea
+                    rows={10}
+                    value={emailPreview}
+                    readOnly
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-slate-50"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="flex justify-end gap-3 pt-4 border-t">
               <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">Cancelar</button>
@@ -535,3 +857,4 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
 };
 
 export default WorkSafety;
+

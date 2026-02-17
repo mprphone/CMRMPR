@@ -244,6 +244,26 @@ export interface WorkSafetyService {
   proposalStatus: 'Não enviada' | 'Enviada' | 'Aceite' | 'Recusada';
   attachment_url?: string;
   documentChecklist?: Record<string, boolean>;
+  profileData?: WorkSafetyProfileData;
+  aiObligationsSummary?: string;
+}
+
+export interface WorkSafetyProfileData {
+  nif?: string;
+  nic?: string;
+  cae?: string;
+  irct?: string;
+  workSchedule?: string;
+  occupationalMedicineAdmissionDate?: string;
+  occupationalMedicinePeriodicDate?: string;
+  occupationalMedicineHasRecords?: boolean;
+  safetyVisitsNotes?: string;
+  safetyReportMeasuresNotes?: string;
+  providerDetails?: string;
+  providerPeriodicity?: 'Semestral' | 'Anual' | 'Bi-anual';
+  nextDueDate?: string;
+  paidValue?: number;
+  commissionValue?: number;
 }
 
 export interface CashPayment {
