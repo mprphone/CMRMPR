@@ -29,7 +29,14 @@ const getCompany = (policy: Partial<InsurancePolicy>) => policy.company || polic
 const getBranch = (policy: Partial<InsurancePolicy>) => policy.branch || policy.policyType || '';
 const getPolicyHolder = (policy: Partial<InsurancePolicy>) => policy.policyHolder || policy.clientName || '';
 const getTotalPremium = (policy: Partial<InsurancePolicy>) => Number(policy.premiumValue ?? policy.netPremiumValue ?? 0);
-const getNetPremium = (policy: Partial<InsurancePolicy>) => Number(policy.netPremiumValue ?? policy.premiumValue ?? 0);
+const getNetPremium = (policy: Partial<InsurancePolicy>) => {
+  const totalPremium = getTotalPremium(policy);
+  const netPremiumRaw = Number(policy.netPremiumValue ?? Number.NaN);
+  if (!Number.isFinite(netPremiumRaw) || netPremiumRaw <= 0) {
+    return totalPremium;
+  }
+  return netPremiumRaw;
+};
 
 const parseIsoDate = (value?: string): Date | null => {
   if (!value) return null;
@@ -145,6 +152,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
   const [selectedCommissionRowKeys, setSelectedCommissionRowKeys] = useState<string[]>([]);
   const [isGeneratingCommissions, setIsGeneratingCommissions] = useState(false);
   const [isMarkingCommissionsPaid, setIsMarkingCommissionsPaid] = useState(false);
+  const [hasGeneratedCommissions, setHasGeneratedCommissions] = useState(false);
 
   const visiblePolicies = useMemo(() => {
     if (!forcedAgent) return policies;
@@ -396,6 +404,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
 
       setCommissionRows(rows);
       setSelectedCommissionRowKeys([]);
+      setHasGeneratedCommissions(true);
     } catch (err: any) {
       alert('Erro ao gerar mapa de comissões: ' + err.message);
     } finally {
@@ -607,7 +616,9 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
           </>
         ) : (
           <div className="text-sm italic text-slate-400 border border-dashed border-slate-200 rounded-lg p-4">
-            Gere um período para listar comissões a receber e controlar os pagamentos.
+            {hasGeneratedCommissions
+              ? 'Não foram encontradas comissões para este período com os seguros atuais.'
+              : 'Gere um período para listar comissões a receber e controlar os pagamentos.'}
           </div>
         )}
       </div>
