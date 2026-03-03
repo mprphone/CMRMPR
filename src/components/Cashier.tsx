@@ -266,21 +266,23 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     return { cashInHand: cashTotal, mbWayInHand: mbWayTotal };
   }, [consolidatedPayments]);
 
+  const totalSessionExpenses = useMemo(() => {
+    return sessionExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+  }, [sessionExpenses]);
+
   useEffect(() => {
     if (!isDepositAmountEdited) {
-      setDepositAmount(cashInHand.toFixed(2));
+      const parsedAdjustment = parseFloat(adjustmentAmount) || 0;
+      const suggestedDeposit = cashInHand - totalSessionExpenses - parsedAdjustment;
+      setDepositAmount(suggestedDeposit.toFixed(2));
     }
-  }, [cashInHand, isDepositAmountEdited]);
+  }, [cashInHand, totalSessionExpenses, adjustmentAmount, isDepositAmountEdited]);
 
   useEffect(() => {
     if (!isMbWayDepositAmountEdited) {
       setMbWayDepositAmount(mbWayInHand.toFixed(2));
     }
   }, [mbWayInHand, isMbWayDepositAmountEdited]);
-
-  const totalSessionExpenses = useMemo(() => {
-    return sessionExpenses.reduce((sum, exp) => sum + exp.amount, 0);
-  }, [sessionExpenses]);
 
   useEffect(() => {
     let isMounted = true;

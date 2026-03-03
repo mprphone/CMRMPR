@@ -294,7 +294,7 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
 
     try {
       for (const client of clientsToUpdate) {
-        await clientService.upsert({ ...client, monthlyFee: newFees[c.id] });
+        await clientService.upsert({ ...client, monthlyFee: newFees[client.id] });
       }
       const updatedClients = clients.map(c => newFees[c.id] ? { ...c, monthlyFee: newFees[c.id] } : c);
       setClients(updatedClients);
