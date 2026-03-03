@@ -238,6 +238,7 @@ export interface InsurancePolicy {
   commissionPaid: boolean;
   status: 'Proposta' | 'Aceite';
   communicationType?: string;
+  notes?: string;
   policyTier?: 'Base' | 'Flexível';
   attachment_url?: string;
   documentChecklist?: Record<string, boolean>;

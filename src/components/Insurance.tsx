@@ -389,6 +389,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
       branch: 'Automovel',
       insuranceProvider: 'Finiconde',
       policyType: 'Automovel',
+      notes: '',
     });
     setSelectedFile(null);
     setIsModalOpen(true);
@@ -1094,6 +1095,16 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               <div className="md:col-span-2">
                 <label className="block text-xs font-bold text-slate-500 mb-1">Tipo de Comunicação</label>
                 <input type="text" value={editingPolicy.communicationType || ''} onChange={e => setEditingPolicy({...editingPolicy, communicationType: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Ex: Via Mediador"/>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-slate-500 mb-1">Observações</label>
+                <textarea
+                  rows={3}
+                  value={editingPolicy.notes || ''}
+                  onChange={e => setEditingPolicy({ ...editingPolicy, notes: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                  placeholder="Notas internas sobre esta apólice"
+                />
               </div>
               <div className="md:col-span-2">
                 <label className="block text-xs font-bold text-slate-500 mb-1">Anexo (Apólice)</label>

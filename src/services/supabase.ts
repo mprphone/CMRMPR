@@ -1176,6 +1176,7 @@ const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
   status: p.status || 'Proposta',
   attachment_url: p.attachment_url,
   communicationType: p.communication_type,
+  notes: p.notes || '',
   policyTier: p.policy_tier,
   documentChecklist: p.document_checklist && typeof p.document_checklist === 'object' ? p.document_checklist : {},
 });
@@ -1200,6 +1201,7 @@ const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
   status: p.status,
   attachment_url: p.attachment_url,
   communication_type: p.communicationType,
+  notes: p.notes || null,
   policy_tier: p.policyTier,
   document_checklist: p.documentChecklist || {},
 });
@@ -1233,7 +1235,7 @@ export const insuranceService = {
       .single();
 
     if (error) {
-      const schemaError = /column .*document_checklist.* does not exist|column .*policy_holder.* does not exist|column .*agent.* does not exist|column .*renewal_date.* does not exist|column .*company.* does not exist|column .*branch.* does not exist|column .*net_premium_value.* does not exist|schema cache/i;
+      const schemaError = /column .*document_checklist.* does not exist|column .*policy_holder.* does not exist|column .*agent.* does not exist|column .*renewal_date.* does not exist|column .*company.* does not exist|column .*branch.* does not exist|column .*net_premium_value.* does not exist|column .*notes.* does not exist|schema cache/i;
       if (schemaError.test(error.message || '')) {
         const fallbackPayload = { ...payload } as any;
         delete fallbackPayload.document_checklist;
@@ -1243,6 +1245,7 @@ export const insuranceService = {
         delete fallbackPayload.company;
         delete fallbackPayload.branch;
         delete fallbackPayload.net_premium_value;
+        delete fallbackPayload.notes;
 
         const retry = await storeClient
           .from('insurance_policies')
