@@ -93,6 +93,7 @@ export interface Client {
   communicationCount?: number;
   meetingCount?: number;
   previousYearProfit?: number;
+  saftCollectEnabled?: boolean;
 
   tasks: ClientTaskOverride[];
   status: 'Ativo' | 'Em Análise' | 'Risco' | 'Cancelado';

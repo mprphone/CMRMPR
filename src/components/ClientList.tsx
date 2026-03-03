@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Client, Staff, Task, FeeGroup } from '../types';
-import { clientService } from '../services/supabase';
+import { clientService, saftDossierService } from '../services/supabase';
 import { Search, Plus, X, CloudCheck, RefreshCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ClientListProps {
   clients: Client[];
-  setClients: (clients: Client[]) => void;
+  setClients: React.Dispatch<React.SetStateAction<Client[]>>;
   tasks: Task[];
   areaCosts: Record<string, number>;
   staff: Staff[];
@@ -79,6 +79,8 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
   const [pageError, setPageError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [pagedClients, setPagedClients] = useState<Client[]>([]);
+  const [saftStatusByNif, setSaftStatusByNif] = useState<Record<string, { hasData: boolean; syncedAt: string }>>({});
+  const [isQueueingSaftSync, setIsQueueingSaftSync] = useState(false);
 
   const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({
     key: 'name',
@@ -222,6 +224,92 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
     setSortConfig({ key, direction });
   };
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSaftStatus = async () => {
+      const nifs = Array.from(
+        new Set(
+          processedClients
+            .map(client => normalizeNif(client.nif || ''))
+            .filter(nif => nif.length === 9)
+        )
+      );
+
+      if (nifs.length === 0) {
+        setSaftStatusByNif({});
+        return;
+      }
+
+      try {
+        const statusMap = await saftDossierService.getStatusByClientNifs(nifs);
+        if (!isMounted) return;
+        setSaftStatusByNif(statusMap);
+      } catch (err) {
+        console.error('Erro ao carregar estado SAFT da lista:', err);
+        if (!isMounted) return;
+        setSaftStatusByNif({});
+      }
+    };
+
+    loadSaftStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, [processedClients]);
+
+  const formatDateTime = (value?: string) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString('pt-PT');
+  };
+
+  const handleToggleSaftCollect = async (client: Client, enabled: boolean) => {
+    const previousClients = [...clients];
+    const previousPagedClients = [...pagedClients];
+    const updatedClient: Client = { ...client, saftCollectEnabled: enabled };
+
+    setClients(current => current.map(item => (item.id === client.id ? updatedClient : item)));
+    setPagedClients(current => current.map(item => (item.id === client.id ? updatedClient : item)));
+
+    try {
+      const saved = await clientService.upsert(updatedClient);
+      setClients(current => current.map(item => (item.id === saved.id ? saved : item)));
+      setPagedClients(current => current.map(item => (item.id === saved.id ? saved : item)));
+    } catch (err: any) {
+      setClients(previousClients);
+      setPagedClients(previousPagedClients);
+      alert('Falha ao gravar opção de recolha SAFT: ' + (err?.message || 'erro desconhecido'));
+    }
+  };
+
+  const handleQueueSaftSync = async () => {
+    const targetNifs = Array.from(
+      new Set(
+        clients
+          .filter(client => client.saftCollectEnabled !== false)
+          .map(client => normalizeNif(client.nif || ''))
+          .filter(nif => nif.length === 9)
+      )
+    );
+
+    if (targetNifs.length === 0) {
+      alert('Nenhum cliente está marcado para recolha SAFT.');
+      return;
+    }
+
+    setIsQueueingSaftSync(true);
+    try {
+      const queued = await saftDossierService.enqueueSyncRequests(targetNifs, 'client-list');
+      alert(`Recolha SAFT agendada para ${queued} cliente(s).`);
+    } catch (err: any) {
+      alert('Falha ao agendar recolha SAFT: ' + (err?.message || 'erro desconhecido'));
+    } finally {
+      setIsQueueingSaftSync(false);
+    }
+  };
+
   const openNewClientModal = () => {
     setEditingClient(null);
     setFormErrors({});
@@ -236,6 +324,7 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
       status: 'Ativo',
       responsibleStaff: '',
       monthlyFee: 0,
+      saftCollectEnabled: true,
       contractRenewalDate: todayIso(),
     });
     setIsModalOpen(true);
@@ -310,6 +399,7 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
         communicationCount: 0,
         meetingCount: 0,
         previousYearProfit: 0,
+        saftCollectEnabled: true,
         tasks: [],
         status: 'Ativo',
         contractRenewalDate: todayIso(),
@@ -329,11 +419,14 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
         responsibleStaff: formData.responsibleStaff || '',
         status: formData.status || 'Ativo',
         monthlyFee: Number(formData.monthlyFee || 0),
+        saftCollectEnabled: formData.saftCollectEnabled === undefined
+          ? (baseClient.saftCollectEnabled !== false)
+          : Boolean(formData.saftCollectEnabled),
         contractRenewalDate: formData.contractRenewalDate || baseClient.contractRenewalDate || todayIso(),
       };
 
       const savedClient = await clientService.upsert(clientToSave);
-      setClients(editingClient ? clients.map(c => c.id === savedClient.id ? savedClient : c) : [savedClient, ...clients]);
+      setClients(current => (editingClient ? current.map(c => c.id === savedClient.id ? savedClient : c) : [savedClient, ...current]));
       setIsModalOpen(false);
       setRefreshTick(value => value + 1);
     } catch (err: any) {
@@ -374,6 +467,14 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
             <div className="flex gap-3 w-full sm:w-auto">
               <button onClick={onSyncClientsRequest} className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-700 flex items-center gap-2">
                 <RefreshCcw size={16} /> <span className="hidden sm:inline">Sincronizar</span>
+              </button>
+              <button
+                onClick={handleQueueSaftSync}
+                disabled={isQueueingSaftSync}
+                className="bg-slate-800 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-900 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isQueueingSaftSync ? <RefreshCcw size={16} className="animate-spin" /> : <CloudCheck size={16} />}
+                <span className="hidden sm:inline">Fazer Recolha SAFT</span>
               </button>
               <button onClick={openNewClientModal} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
                 <Plus size={16} /> <span className="hidden sm:inline">Novo</span>
@@ -448,32 +549,62 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
                 <SortableHeader sortKey="employeeCount">Nº Func.</SortableHeader>
                 <SortableHeader sortKey="documentCount">Nº Docs</SortableHeader>
                 <th className="px-4 py-3">Responsável</th>
+                <th className="px-4 py-3 text-center">Recolha SAFT</th>
+                <th className="px-4 py-3 text-center">Estado SAFT</th>
                 <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
-              {processedClients.map(client => (
-                <tr key={client.id} className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors">
-                  <td className="px-4 py-4 font-mono text-xs">{client.nif}</td>
-                  <td className="px-4 py-4 font-bold text-slate-800">{client.name}</td>
-                  <td className="px-4 py-4">
-                    <div className="text-slate-600">{client.email}</div>
-                    <div className="text-xs text-slate-400">{client.phone}</div>
-                  </td>
-                  <td className="px-4 py-4 text-xs uppercase">{client.entityType}</td>
-                  <td className="px-4 py-4 text-center font-medium">{client.employeeCount}</td>
-                  <td className="px-4 py-4 text-center font-medium">{client.documentCount}</td>
-                  <td className="px-4 py-4 text-xs">{(client as any).responsibleStaffName}</td>
-                  <td className="px-4 py-4 text-right">
-                    <button onClick={() => onSelectClient(client)} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold border border-blue-100 transition-colors">
-                      Detalhes
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {processedClients.map(client => {
+                const clientNif = normalizeNif(client.nif || '');
+                const saftStatus = saftStatusByNif[clientNif];
+                const hasSaftData = Boolean(saftStatus?.hasData);
+
+                return (
+                  <tr key={client.id} className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors">
+                    <td className="px-4 py-4 font-mono text-xs">{client.nif}</td>
+                    <td className="px-4 py-4 font-bold text-slate-800">{client.name}</td>
+                    <td className="px-4 py-4">
+                      <div className="text-slate-600">{client.email}</div>
+                      <div className="text-xs text-slate-400">{client.phone}</div>
+                    </td>
+                    <td className="px-4 py-4 text-xs uppercase">{client.entityType}</td>
+                    <td className="px-4 py-4 text-center font-medium">{client.employeeCount}</td>
+                    <td className="px-4 py-4 text-center font-medium">{client.documentCount}</td>
+                    <td className="px-4 py-4 text-xs">{(client as any).responsibleStaffName}</td>
+                    <td className="px-4 py-4 text-center">
+                      <input
+                        type="checkbox"
+                        checked={client.saftCollectEnabled !== false}
+                        onChange={event => handleToggleSaftCollect(client, event.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      {hasSaftData ? (
+                        <span
+                          className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700"
+                          title={`Última recolha: ${formatDateTime(saftStatus?.syncedAt)}`}
+                        >
+                          Com dados
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">
+                          Sem dados
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <button onClick={() => onSelectClient(client)} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold border border-blue-100 transition-colors">
+                        Detalhes
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {!isLoadingPage && processedClients.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-slate-400 italic">Nenhum cliente encontrado para os filtros selecionados.</td>
+                  <td colSpan={10} className="px-6 py-12 text-center text-slate-400 italic">Nenhum cliente encontrado para os filtros selecionados.</td>
                 </tr>
               )}
             </tbody>

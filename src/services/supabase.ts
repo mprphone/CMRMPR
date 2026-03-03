@@ -316,6 +316,7 @@ const mapDbToClient = (db: any): Client => ({
   communicationCount: Number(db.communication_count || 0),
   meetingCount: Number(db.meeting_count || 0),
   previousYearProfit: Number(db.previous_year_profit || 0),
+  saftCollectEnabled: db.saft_collect_enabled === null || db.saft_collect_enabled === undefined ? true : Boolean(db.saft_collect_enabled),
   tasks: db.tasks || [],
   contractRenewalDate: db.contract_renewal_date || '',
   aiAnalysisCache: db.ai_analysis_cache || null
@@ -351,6 +352,7 @@ monthly_fee: c.monthlyFee,
   communication_count: c.communicationCount,
   meeting_count: c.meetingCount,
   previous_year_profit: c.previousYearProfit,
+  saft_collect_enabled: c.saftCollectEnabled === undefined ? true : Boolean(c.saftCollectEnabled),
   tasks: c.tasks,
   contract_renewal_date: c.contractRenewalDate || null,
   ai_analysis_cache: c.aiAnalysisCache
@@ -592,6 +594,65 @@ export const saftDossierService = {
     if (error) throw error;
     if (!data) return null;
     return mapDbToSaftDossierData(data);
+  },
+  async getStatusByClientNifs(clientNifs: string[]): Promise<Record<string, { hasData: boolean; syncedAt: string }>> {
+    const normalized = Array.from(
+      new Set(
+        clientNifs
+          .map(nif => (nif || '').replace(/\D/g, ''))
+          .filter(nif => nif.length === 9)
+      )
+    );
+
+    if (normalized.length === 0) return {};
+
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('saft_dossier_data')
+      .select('client_nif, synced_at')
+      .in('client_nif', normalized);
+
+    if (error) throw error;
+
+    return (data || []).reduce((acc, row: any) => {
+      const nif = (row.client_nif || '').replace(/\D/g, '');
+      if (!nif) return acc;
+      acc[nif] = {
+        hasData: true,
+        syncedAt: row.synced_at || '',
+      };
+      return acc;
+    }, {} as Record<string, { hasData: boolean; syncedAt: string }>);
+  },
+  async enqueueSyncRequests(clientNifs: string[], requestedBy?: string): Promise<number> {
+    const normalized = Array.from(
+      new Set(
+        clientNifs
+          .map(nif => (nif || '').replace(/\D/g, ''))
+          .filter(nif => nif.length === 9)
+      )
+    );
+
+    if (normalized.length === 0) return 0;
+
+    const nowIso = new Date().toISOString();
+    const payload = normalized.map(nif => ({
+      client_nif: nif,
+      status: 'pending',
+      requested_at: nowIso,
+      started_at: null,
+      finished_at: null,
+      last_error: null,
+      requested_by: requestedBy || null,
+    }));
+
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient
+      .from('saft_sync_queue')
+      .upsert(payload, { onConflict: 'client_nif' });
+
+    if (error) throw error;
+    return normalized.length;
   },
 };
 

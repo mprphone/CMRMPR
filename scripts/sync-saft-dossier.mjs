@@ -76,6 +76,8 @@ const parseContentDispositionFileName = (contentDisposition) => {
 };
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const isSchemaUnavailableError = (message) =>
+  /relation .* does not exist|column .* does not exist|schema cache|could not find the table/i.test(String(message || ''));
 
 const config = {
   saftBaseUrl: pickEnv('SAFT_BASE_URL') || 'https://app.saftonline.pt',
@@ -104,7 +106,7 @@ const requiredEnv = [
 
 const missing = requiredEnv.filter(([, value]) => !value).map(([name]) => name);
 if (missing.length > 0) {
-  console.error('Variáveis em falta no .env:');
+  console.error('Variaveis em falta no .env:');
   for (const name of missing) console.error(`- ${name}`);
   process.exit(1);
 }
@@ -148,7 +150,7 @@ const waitForManualLogin = async () => {
     input: process.stdin,
     output: process.stdout,
   });
-  await rl.question('Se existir captcha, faça login manualmente e prima Enter para continuar...');
+  await rl.question('Se existir captcha, faca login manualmente e prima Enter para continuar...');
   await rl.close();
 };
 
@@ -381,11 +383,180 @@ const upsertInBatches = async (rows) => {
   }
 };
 
+const getCollectEnabledNifs = async () => {
+  try {
+    const { data, error } = await supabase.from('clients').select('nif, saft_collect_enabled');
+    if (error) throw error;
+
+    return new Set(
+      (data || [])
+        .filter(row => row.saft_collect_enabled !== false)
+        .map(row => normalizeNif(row.nif))
+        .filter(nif => nif.length === 9)
+    );
+  } catch (err) {
+    if (isSchemaUnavailableError(err?.message)) {
+      console.warn('Coluna saft_collect_enabled indisponivel. A usar todos os clientes do dossier.');
+      return null;
+    }
+    throw err;
+  }
+};
+
+const getPendingQueueNifs = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('saft_sync_queue')
+      .select('client_nif')
+      .eq('status', 'pending')
+      .order('requested_at', { ascending: true });
+
+    if (error) throw error;
+    return Array.from(
+      new Set(
+        (data || [])
+          .map(row => normalizeNif(row.client_nif))
+          .filter(nif => nif.length === 9)
+      )
+    );
+  } catch (err) {
+    if (isSchemaUnavailableError(err?.message)) {
+      console.warn('Tabela saft_sync_queue indisponivel. A continuar sem fila.');
+      return [];
+    }
+    throw err;
+  }
+};
+
+const markQueueRowsRunning = async (clientNifs) => {
+  if (!Array.isArray(clientNifs) || clientNifs.length === 0) return;
+  const now = new Date().toISOString();
+  try {
+    const { error } = await supabase
+      .from('saft_sync_queue')
+      .update({
+        status: 'running',
+        started_at: now,
+        finished_at: null,
+        last_error: null,
+      })
+      .in('client_nif', clientNifs);
+    if (error) throw error;
+  } catch (err) {
+    if (isSchemaUnavailableError(err?.message)) return;
+    throw err;
+  }
+};
+
+const markQueueRowDone = async (clientNif) => {
+  const now = new Date().toISOString();
+  try {
+    const { error } = await supabase
+      .from('saft_sync_queue')
+      .update({
+        status: 'done',
+        finished_at: now,
+        last_error: null,
+      })
+      .eq('client_nif', clientNif);
+    if (error) throw error;
+  } catch (err) {
+    if (isSchemaUnavailableError(err?.message)) return;
+    throw err;
+  }
+};
+
+const markQueueRowError = async (clientNif, errorMessage) => {
+  const now = new Date().toISOString();
+  const message = normalizeText(errorMessage || 'Erro desconhecido').slice(0, 1800);
+  try {
+    const { error } = await supabase
+      .from('saft_sync_queue')
+      .update({
+        status: 'error',
+        finished_at: now,
+        last_error: message,
+      })
+      .eq('client_nif', clientNif);
+    if (error) throw error;
+  } catch (err) {
+    if (isSchemaUnavailableError(err?.message)) return;
+    throw err;
+  }
+};
+
+const listClientStoragePaths = async (clientNif) => {
+  const prefix = `saft-dossier/${clientNif}`;
+  const allPaths = [];
+  const pageSize = 100;
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await supabase.storage
+      .from(config.attachmentsBucket)
+      .list(prefix, { limit: pageSize, offset });
+
+    if (error) {
+      // If list fails we still continue with DB-known paths.
+      console.warn(`Falha a listar anexos antigos no bucket (${clientNif}): ${error.message}`);
+      break;
+    }
+
+    if (!Array.isArray(data) || data.length === 0) break;
+
+    for (const entry of data) {
+      if (!entry?.name) continue;
+      allPaths.push(`${prefix}/${entry.name}`);
+    }
+
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return allPaths;
+};
+
+const clearOldAttachments = async (clientNif) => {
+  const dbPaths = [];
+  const listedPaths = await listClientStoragePaths(clientNif);
+
+  const { data, error } = await supabase
+    .from('saft_dossier_data')
+    .select('attachments')
+    .eq('client_nif', clientNif)
+    .maybeSingle();
+
+  if (error && !isSchemaUnavailableError(error.message)) throw error;
+
+  const attachments = Array.isArray(data?.attachments) ? data.attachments : [];
+  for (const item of attachments) {
+    const storagePath = normalizeText(item?.storagePath);
+    if (storagePath) dbPaths.push(storagePath);
+  }
+
+  const allPaths = Array.from(new Set([...dbPaths, ...listedPaths]));
+  if (allPaths.length === 0) return 0;
+
+  let removedCount = 0;
+  const chunkSize = 100;
+  for (let i = 0; i < allPaths.length; i += chunkSize) {
+    const chunk = allPaths.slice(i, i + chunkSize);
+    const { error: removeError } = await supabase.storage.from(config.attachmentsBucket).remove(chunk);
+    if (removeError) {
+      console.warn(`Falha a apagar anexos antigos (${clientNif}): ${removeError.message}`);
+      continue;
+    }
+    removedCount += chunk.length;
+  }
+
+  return removedCount;
+};
+
 const run = async () => {
-  console.log('Iniciando sincronização SAFT Online...');
+  console.log('Iniciando sincronizacao SAFT Online...');
   console.log(`Base URL: ${config.saftBaseUrl}`);
   console.log(`Modo browser: ${config.headless ? 'headless' : 'headed'}`);
-  console.log(`Download anexos: ${config.downloadAttachments ? 'sim' : 'não'}`);
+  console.log(`Download anexos: ${config.downloadAttachments ? 'sim' : 'nao'}`);
 
   const browser = await chromium.launch({
     headless: config.headless,
@@ -424,7 +595,7 @@ const run = async () => {
       config.saftPassword
     );
     if (!emailFilled || !passwordFilled) {
-      throw new Error('Não foi possível identificar os campos de login (email/senha).');
+      throw new Error('Nao foi possivel identificar os campos de login (email/senha).');
     }
 
     const clickedLogin = await clickFirst(page, [
@@ -433,17 +604,17 @@ const run = async () => {
       'input[type="submit"]',
     ]);
     if (!clickedLogin) {
-      throw new Error('Não foi possível clicar no botão de login.');
+      throw new Error('Nao foi possivel clicar no botao de login.');
     }
 
     await wait(2500);
     if (!(await isLoggedIn(page))) {
       if (config.headless) {
-        throw new Error('Login automático não concluído (possível captcha). Execute com --headed para validação manual.');
+        throw new Error('Login automatico nao concluido (possivel captcha). Execute com --headed para validacao manual.');
       }
       await waitForManualLogin();
       if (!(await isLoggedIn(page))) {
-        throw new Error('Login não confirmado após intervenção manual.');
+        throw new Error('Login nao confirmado apos intervencao manual.');
       }
     }
 
@@ -452,33 +623,107 @@ const run = async () => {
       throw new Error('Nenhuma linha encontrada no Dossier SAFT.');
     }
 
-    const rowsToProcess = config.maxClients > 0 ? rows.slice(0, config.maxClients) : rows;
+    const pendingQueueNifs = await getPendingQueueNifs();
+    const queueMode = pendingQueueNifs.length > 0;
+    const collectEnabledNifs = queueMode ? null : await getCollectEnabledNifs();
+
+    let rowsToProcess = rows;
+    if (queueMode) {
+      const pendingSet = new Set(pendingQueueNifs);
+      rowsToProcess = rows.filter(row => pendingSet.has(normalizeNif(row.nif)));
+      const foundSet = new Set(rowsToProcess.map(row => normalizeNif(row.nif)));
+      const missingNifs = pendingQueueNifs.filter(nif => !foundSet.has(nif));
+
+      for (const missingNif of missingNifs) {
+        await markQueueRowError(missingNif, 'NIF não encontrado na lista do dossier SAFT.');
+      }
+
+      if (missingNifs.length > 0) {
+        console.warn(`NIFs pendentes não encontrados no dossier: ${missingNifs.join(', ')}`);
+      }
+
+      console.log(`Modo fila ativo: ${rowsToProcess.length}/${pendingQueueNifs.length} cliente(s) encontrados.`);
+    } else if (collectEnabledNifs instanceof Set) {
+      rowsToProcess = rows.filter(row => collectEnabledNifs.has(normalizeNif(row.nif)));
+      console.log(`Filtro de recolha SAFT ativo: ${rowsToProcess.length} cliente(s) com visto.`);
+    }
+
+    if (config.maxClients > 0) {
+      rowsToProcess = rowsToProcess.slice(0, config.maxClients);
+    }
+
+    if (rowsToProcess.length === 0) {
+      console.log('Nenhum cliente para recolher nesta execução.');
+      return;
+    }
+
+    if (queueMode) {
+      const nifsToRun = rowsToProcess
+        .map(row => normalizeNif(row.nif))
+        .filter(nif => nif.length === 9);
+      await markQueueRowsRunning(nifsToRun);
+    }
+
     const syncedAtIso = new Date().toISOString();
     const upsertRows = [];
+    const upsertClientNifs = [];
 
     for (let i = 0; i < rowsToProcess.length; i += 1) {
       const row = rowsToProcess[i];
-      const detailData = await scrapeDossierDetail(page, row.detail_url);
       const clientNif = normalizeNif(row.nif);
+      if (!clientNif) continue;
 
-      const attachments = config.downloadAttachments
-        ? await downloadAndStoreAttachments(context, clientNif, detailData.attachmentForms || [], syncedAtIso)
-        : [];
+      try {
+        const removed = await clearOldAttachments(clientNif);
+        if (removed > 0) {
+          console.log(`[${i + 1}/${rowsToProcess.length}] ${clientNif} - anexos antigos removidos: ${removed}`);
+        }
 
-      const payload = buildUpsertPayload(row, detailData, syncedAtIso, attachments);
-      if (!payload.client_nif) continue;
-      upsertRows.push(payload);
+        const detailData = await scrapeDossierDetail(page, row.detail_url);
 
-      console.log(
-        `[${i + 1}/${rowsToProcess.length}] ${payload.client_nif} - ${payload.client_name} (anexos: ${attachments.length})`
-      );
+        const attachments = config.downloadAttachments
+          ? await downloadAndStoreAttachments(context, clientNif, detailData.attachmentForms || [], syncedAtIso)
+          : [];
+
+        const payload = buildUpsertPayload(row, detailData, syncedAtIso, attachments);
+        if (!payload.client_nif) throw new Error('NIF inválido no payload de sincronização.');
+        upsertRows.push(payload);
+        upsertClientNifs.push(payload.client_nif);
+
+        console.log(
+          `[${i + 1}/${rowsToProcess.length}] ${payload.client_nif} - ${payload.client_name} (anexos: ${attachments.length})`
+        );
+      } catch (err) {
+        const message = err?.message || String(err);
+        console.warn(`[${i + 1}/${rowsToProcess.length}] ${clientNif} - falha: ${message}`);
+        if (queueMode) {
+          await markQueueRowError(clientNif, message);
+        }
+      }
     }
 
     if (upsertRows.length === 0) {
       throw new Error('Nenhum registo válido encontrado para upsert.');
     }
 
-    await upsertInBatches(upsertRows);
+    try {
+      await upsertInBatches(upsertRows);
+    } catch (err) {
+      if (queueMode) {
+        const message = err?.message || String(err);
+        for (const clientNif of Array.from(new Set(upsertClientNifs))) {
+          await markQueueRowError(clientNif, `Falha ao guardar em saft_dossier_data: ${message}`);
+        }
+      }
+      throw err;
+    }
+
+    if (queueMode) {
+      for (const clientNif of Array.from(new Set(upsertClientNifs))) {
+        await markQueueRowDone(clientNif);
+      }
+    }
+
     console.log(`Sincronização concluída. ${upsertRows.length} registos atualizados em saft_dossier_data.`);
   } finally {
     await context.close();
@@ -487,6 +732,6 @@ const run = async () => {
 };
 
 run().catch(err => {
-  console.error('Falha na sincronização SAFT:', err?.message || err);
+  console.error('Falha na sincronizacao SAFT:', err?.message || err);
   process.exit(1);
 });
