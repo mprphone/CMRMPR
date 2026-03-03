@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Client, Staff, Task, TurnoverBracket, ClientTaskOverride, TaskArea, AiAnalysis, InsurancePolicy } from '../types';
+import { Client, Staff, Task, TurnoverBracket, ClientTaskOverride, TaskArea, AiAnalysis, InsurancePolicy, SaftDossierData } from '../types';
 import { calculateClientProfitability } from '../services/calculator';
 import { analyzeClientWithAI } from '../services/geminiService';
-import { ensureStoreClient } from '../services/supabase';
+import { saftDossierService } from '../services/supabase';
 import { 
   ArrowLeft, BrainCircuit, Activity, Building, University, Wallet, AlertCircle, CheckCircle, Phone, MapPin, FileText, Plus, Trash2, Save, User, Clock, Users, RefreshCcw, BadgeEuro, Shield,
   FileCheck, Receipt, BarChart3, Building2, Target, Globe, MessageSquare, PieChart, Presentation, TrendingUp
@@ -30,6 +30,8 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
   const [editedClient, setEditedClient] = useState<Client>(client);
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saftDossierData, setSaftDossierData] = useState<SaftDossierData | null>(null);
+  const [isLoadingSaftDossierData, setIsLoadingSaftDossierData] = useState(false);
 
   // Sync when prop changes
   useEffect(() => {
@@ -37,6 +39,37 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
     setAiAnalysis(client.aiAnalysisCache || null);
     setIsDirty(false);
   }, [client]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSaftDossierData = async () => {
+      const normalizedNif = (client.nif || '').replace(/\D/g, '');
+      if (!normalizedNif) {
+        setSaftDossierData(null);
+        return;
+      }
+
+      setIsLoadingSaftDossierData(true);
+      try {
+        const data = await saftDossierService.getByClientNif(normalizedNif);
+        if (!isMounted) return;
+        setSaftDossierData(data);
+      } catch (err) {
+        console.error('Erro ao carregar dados SAFT do cliente:', err);
+        if (!isMounted) return;
+        setSaftDossierData(null);
+      } finally {
+        if (isMounted) setIsLoadingSaftDossierData(false);
+      }
+    };
+
+    loadSaftDossierData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [client.nif]);
 
   // Real-time calculation based on edited state
   const stats = calculateClientProfitability(editedClient, tasks, areaCosts as Record<TaskArea, number>, staff, turnoverBrackets);
@@ -64,6 +97,13 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
   const insuranceCount = useMemo(() => {
     return insurancePolicies.filter(p => p.clientId === client.id).length;
   }, [insurancePolicies, client.id]);
+
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString('pt-PT');
+  };
 
   // Calculate Staff Distribution for this Client
   const staffDistribution = useMemo(() => {
@@ -267,6 +307,65 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
       {/* TAB 1: GENERAL */}
       {activeTab === 'general' && (
         <div className="space-y-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <Shield size={18} className="text-blue-600" /> Dossier SAFT Online
+              </h3>
+              {saftDossierData?.sourceDetailUrl && (
+                <a
+                  href={saftDossierData.sourceDetailUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-bold text-blue-600 hover:underline"
+                >
+                  Abrir origem
+                </a>
+              )}
+            </div>
+
+            {isLoadingSaftDossierData ? (
+              <p className="text-sm text-slate-500">A carregar dados SAFT...</p>
+            ) : !saftDossierData ? (
+              <p className="text-sm text-slate-500 italic">Sem dados SAFT sincronizados para este NIF.</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase">Situação Fiscal AT</p>
+                  <p className="font-semibold text-slate-800">{saftDossierData.atStatus || '—'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase">Data Recolha AT</p>
+                  <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.atCollectedAt)}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase">Situação Fiscal SS</p>
+                  <p className="font-semibold text-slate-800">{saftDossierData.ssStatus || '—'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase">Data Recolha SS</p>
+                  <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.ssCollectedAt)}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão AT</p>
+                  <p className="font-semibold text-slate-800">{saftDossierData.certidaoAtStatus || '—'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão SS</p>
+                  <p className="font-semibold text-slate-800">{saftDossierData.certidaoSsStatus || '—'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão Permanente</p>
+                  <p className="font-semibold text-slate-800">{saftDossierData.certidaoPermanenteStatus || '—'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-[11px] text-slate-500 font-bold uppercase">Última Sincronização</p>
+                  <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.syncedAt)}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {userRole === 'admin' && (
             /* KPI Cards */
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

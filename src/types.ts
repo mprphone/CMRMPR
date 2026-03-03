@@ -100,6 +100,24 @@ export interface Client {
   aiAnalysisCache?: AiAnalysis | null;
 }
 
+export interface SaftDossierData {
+  clientNif: string;
+  clientName: string;
+  sourceDetailUrl?: string;
+  atStatus?: string;
+  atCollectedAt?: string | null;
+  ssStatus?: string;
+  ssCollectedAt?: string | null;
+  certidaoAtStatus?: string;
+  certidaoSsStatus?: string;
+  certidaoPermanenteStatus?: string;
+  certidaoPermanenteCode?: string;
+  rawList?: Record<string, any>;
+  rawDetail?: Record<string, any>;
+  syncedAt: string;
+  updatedAt: string;
+}
+
 export interface GlobalSettings {
   payrollUnitCost: number;
   documentUnitCost: number;

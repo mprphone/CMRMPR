@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, SupabaseClientOptions } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, InsuranceCommissionSettlement, WorkSafetyService, WorkSafetyProfileData, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, InsuranceCommissionSettlement, WorkSafetyService, WorkSafetyProfileData, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic, SaftDossierData } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -556,6 +556,42 @@ export const groupService = {
     // Map back from DB schema to app schema
     return { id: data.id, name: data.name, description: data.description, clientIds: data.client_ids || [], proposed_fees: data.proposed_fees || {} };
   }
+};
+
+const mapDbToSaftDossierData = (db: any): SaftDossierData => ({
+  clientNif: db.client_nif,
+  clientName: db.client_name || '',
+  sourceDetailUrl: db.source_detail_url || '',
+  atStatus: db.at_status || '',
+  atCollectedAt: db.at_collected_at || null,
+  ssStatus: db.ss_status || '',
+  ssCollectedAt: db.ss_collected_at || null,
+  certidaoAtStatus: db.certidao_at_status || '',
+  certidaoSsStatus: db.certidao_ss_status || '',
+  certidaoPermanenteStatus: db.certidao_permanente_status || '',
+  certidaoPermanenteCode: db.certidao_permanente_code || '',
+  rawList: db.raw_list && typeof db.raw_list === 'object' ? db.raw_list : {},
+  rawDetail: db.raw_detail && typeof db.raw_detail === 'object' ? db.raw_detail : {},
+  syncedAt: db.synced_at || '',
+  updatedAt: db.updated_at || '',
+});
+
+export const saftDossierService = {
+  async getByClientNif(clientNif: string): Promise<SaftDossierData | null> {
+    const normalizedNif = (clientNif || '').replace(/\D/g, '');
+    if (!normalizedNif) return null;
+
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('saft_dossier_data')
+      .select('*')
+      .eq('client_nif', normalizedNif)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+    return mapDbToSaftDossierData(data);
+  },
 };
 
 export const templateService = {
