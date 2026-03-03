@@ -19,6 +19,8 @@ Opcional:
 SAFT_BASE_URL=https://app.saftonline.pt
 SAFT_HEADLESS=false
 SAFT_MAX_CLIENTS=0
+SAFT_DOWNLOAD_ATTACHMENTS=true
+SAFT_ATTACHMENTS_BUCKET=attachments
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
@@ -39,6 +41,7 @@ Use `:headed` para permitir login manual/captcha quando necessário.
 ## 4) Onde aparece na app
 
 No detalhe do cliente (`Clientes` -> abrir cliente), existe o bloco `Dossier SAFT Online`.
+No detalhe do cliente, o separador `Dossier SAFT` mostra estado e anexos importados.
 
 Os dados são lidos da tabela:
 

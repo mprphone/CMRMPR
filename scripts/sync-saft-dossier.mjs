@@ -33,6 +33,16 @@ const toNull = (value) => {
 };
 const normalizeNif = (value) => normalizeText(value).replace(/\D/g, '');
 
+const sanitizeForPath = (value) => {
+  const normalized = normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return normalized || 'file';
+};
+
 const parsePtDateTime = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
@@ -54,6 +64,17 @@ const parsePtDateTime = (value) => {
   return parsed.toISOString();
 };
 
+const parseContentDispositionFileName = (contentDisposition) => {
+  if (!contentDisposition) return '';
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1]).trim();
+  const quotedMatch = contentDisposition.match(/filename=\"([^\"]+)\"/i);
+  if (quotedMatch?.[1]) return quotedMatch[1].trim();
+  const plainMatch = contentDisposition.match(/filename=([^;]+)/i);
+  if (plainMatch?.[1]) return plainMatch[1].trim();
+  return '';
+};
+
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const config = {
@@ -70,6 +91,8 @@ const config = {
   headless: forceHeaded ? false : parseBoolean(process.env.SAFT_HEADLESS, true),
   maxClients: Number.parseInt(pickEnv('SAFT_MAX_CLIENTS') || '0', 10) || 0,
   slowMoMs: debugMode ? 250 : 0,
+  downloadAttachments: parseBoolean(process.env.SAFT_DOWNLOAD_ATTACHMENTS, true),
+  attachmentsBucket: pickEnv('SAFT_ATTACHMENTS_BUCKET') || 'attachments',
 };
 
 const requiredEnv = [
@@ -160,11 +183,11 @@ const scrapeDossierList = async (page) => {
 };
 
 const scrapeDossierDetail = async (page, detailUrl) => {
-  if (!detailUrl) return { sourceDetailUrl: null, fields: {} };
+  if (!detailUrl) return { sourceDetailUrl: null, fields: {}, attachmentForms: [] };
 
   try {
     await page.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await wait(600);
+    await wait(700);
 
     const detail = await page.evaluate(() => {
       const normalize = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -198,20 +221,123 @@ const scrapeDossierDetail = async (page, detailUrl) => {
         }
       }
 
+      const attachmentForms = Array.from(document.querySelectorAll('form[action]'))
+        .map((form, index) => {
+          const actionPath = normalize(form.getAttribute('action'));
+          if (!actionPath) return null;
+          if (!/(\/dossier\/download|\/m22\/download|\/ies\/download)/i.test(actionPath)) return null;
+
+          const tokenInput = form.querySelector('input[name="__RequestVerificationToken"]');
+          const token = normalize(tokenInput?.getAttribute('value'));
+          if (!token) return null;
+
+          const parent = form.parentElement;
+          let label = '';
+          if (parent) {
+            const directLabel = parent.querySelector(':scope > label');
+            if (directLabel) label = normalize(directLabel.textContent);
+            if (!label) {
+              const previous = form.previousElementSibling;
+              if (previous && previous.tagName === 'LABEL') {
+                label = normalize(previous.textContent);
+              }
+            }
+          }
+
+          if (!label) {
+            label = `Anexo ${index + 1}`;
+          }
+
+          const hasEmailAction = Boolean(
+            (parent && parent.querySelector('i.fa-envelope, .fa-envelope')) || form.querySelector('i.fa-envelope, .fa-envelope')
+          );
+
+          return {
+            label,
+            actionPath,
+            token,
+            hasEmailAction,
+          };
+        })
+        .filter(Boolean);
+
       return {
         sourceDetailUrl: window.location.href,
         fields,
+        attachmentForms,
       };
     });
 
     return detail;
   } catch (err) {
     console.warn(`Falha ao recolher detalhe ${detailUrl}:`, err?.message || err);
-    return { sourceDetailUrl: detailUrl, fields: {} };
+    return { sourceDetailUrl: detailUrl, fields: {}, attachmentForms: [] };
   }
 };
 
-const buildUpsertPayload = (listRow, detailData, syncedAtIso) => {
+const downloadAndStoreAttachments = async (context, clientNif, attachmentForms, syncedAtIso) => {
+  if (!Array.isArray(attachmentForms) || attachmentForms.length === 0) return [];
+
+  const saved = [];
+  for (let i = 0; i < attachmentForms.length; i += 1) {
+    const attachment = attachmentForms[i];
+    const actionPath = normalizeText(attachment.actionPath);
+    const token = normalizeText(attachment.token);
+    if (!actionPath || !token) continue;
+
+    try {
+      const endpoint = new URL(actionPath, config.saftBaseUrl).toString();
+      const response = await context.request.post(endpoint, {
+        form: { __RequestVerificationToken: token },
+      });
+
+      if (!response.ok()) {
+        console.warn(`Anexo falhou (${clientNif}): ${attachment.label} -> HTTP ${response.status()}`);
+        continue;
+      }
+
+      const body = await response.body();
+      if (!body || body.length === 0) continue;
+
+      const contentType = response.headers()['content-type'] || 'application/octet-stream';
+      const contentDisposition = response.headers()['content-disposition'] || '';
+      const headerFileName = parseContentDispositionFileName(contentDisposition);
+      const fallbackFile = `${sanitizeForPath(attachment.label)}.bin`;
+      const fileName = sanitizeForPath(headerFileName || fallbackFile);
+      const storagePath = `saft-dossier/${clientNif}/${sanitizeForPath(attachment.label)}-${i + 1}-${fileName}`;
+
+      const upload = await supabase.storage
+        .from(config.attachmentsBucket)
+        .upload(storagePath, body, {
+          contentType,
+          upsert: true,
+        });
+
+      if (upload.error) {
+        console.warn(`Falha upload Supabase (${clientNif}): ${attachment.label} -> ${upload.error.message}`);
+        continue;
+      }
+
+      const { data: publicData } = supabase.storage.from(config.attachmentsBucket).getPublicUrl(storagePath);
+      saved.push({
+        label: attachment.label,
+        actionPath,
+        fileName,
+        contentType,
+        sizeBytes: body.length,
+        storagePath,
+        publicUrl: publicData.publicUrl,
+        syncedAt: syncedAtIso,
+      });
+    } catch (err) {
+      console.warn(`Erro ao descarregar anexo (${clientNif} / ${attachment.label}):`, err?.message || err);
+    }
+  }
+
+  return saved;
+};
+
+const buildUpsertPayload = (listRow, detailData, syncedAtIso, attachments) => {
   const detailFields = detailData?.fields || {};
   const certidaoPermanenteCode =
     detailFields['Certidão Permanente'] ||
@@ -237,6 +363,7 @@ const buildUpsertPayload = (listRow, detailData, syncedAtIso) => {
     certidao_ss_status: toNull(listRow.certidao_ss),
     certidao_permanente_status: toNull(certidaoPermanenteStatus),
     certidao_permanente_code: toNull(certidaoPermanenteCode),
+    attachments: Array.isArray(attachments) ? attachments : [],
     raw_list: listRow,
     raw_detail: detailFields,
     synced_at: syncedAtIso,
@@ -258,6 +385,7 @@ const run = async () => {
   console.log('Iniciando sincronização SAFT Online...');
   console.log(`Base URL: ${config.saftBaseUrl}`);
   console.log(`Modo browser: ${config.headless ? 'headless' : 'headed'}`);
+  console.log(`Download anexos: ${config.downloadAttachments ? 'sim' : 'não'}`);
 
   const browser = await chromium.launch({
     headless: config.headless,
@@ -273,8 +401,28 @@ const run = async () => {
   try {
     await page.goto(`${config.saftBaseUrl}/conta/inss`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
 
-    const emailFilled = await fillFirst(page, ['input[type="email"]', 'input[name="email"]', 'input#email'], config.saftEmail);
-    const passwordFilled = await fillFirst(page, ['input[type="password"]', 'input[name="password"]', 'input#password'], config.saftPassword);
+    const emailFilled = await fillFirst(
+      page,
+      [
+        'input[type="email"]',
+        'input[name="email"]',
+        'input[name="Email"]',
+        'input#email',
+        'input#Email',
+      ],
+      config.saftEmail
+    );
+    const passwordFilled = await fillFirst(
+      page,
+      [
+        'input[type="password"]',
+        'input[name="password"]',
+        'input[name="Senha"]',
+        'input#password',
+        'input#Senha',
+      ],
+      config.saftPassword
+    );
     if (!emailFilled || !passwordFilled) {
       throw new Error('Não foi possível identificar os campos de login (email/senha).');
     }
@@ -311,12 +459,19 @@ const run = async () => {
     for (let i = 0; i < rowsToProcess.length; i += 1) {
       const row = rowsToProcess[i];
       const detailData = await scrapeDossierDetail(page, row.detail_url);
-      const payload = buildUpsertPayload(row, detailData, syncedAtIso);
+      const clientNif = normalizeNif(row.nif);
 
+      const attachments = config.downloadAttachments
+        ? await downloadAndStoreAttachments(context, clientNif, detailData.attachmentForms || [], syncedAtIso)
+        : [];
+
+      const payload = buildUpsertPayload(row, detailData, syncedAtIso, attachments);
       if (!payload.client_nif) continue;
       upsertRows.push(payload);
 
-      console.log(`[${i + 1}/${rowsToProcess.length}] ${payload.client_nif} - ${payload.client_name}`);
+      console.log(
+        `[${i + 1}/${rowsToProcess.length}] ${payload.client_nif} - ${payload.client_name} (anexos: ${attachments.length})`
+      );
     }
 
     if (upsertRows.length === 0) {

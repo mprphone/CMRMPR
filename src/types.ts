@@ -101,6 +101,7 @@ export interface Client {
 }
 
 export interface SaftDossierData {
+  attachments?: SaftDossierAttachment[];
   clientNif: string;
   clientName: string;
   sourceDetailUrl?: string;
@@ -116,6 +117,17 @@ export interface SaftDossierData {
   rawDetail?: Record<string, any>;
   syncedAt: string;
   updatedAt: string;
+}
+
+export interface SaftDossierAttachment {
+  label: string;
+  actionPath: string;
+  fileName?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  storagePath?: string;
+  publicUrl?: string;
+  syncedAt?: string;
 }
 
 export interface GlobalSettings {

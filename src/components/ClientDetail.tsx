@@ -22,7 +22,7 @@ interface ClientDetailProps {
 }
 
 const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, staff, turnoverBrackets, onBack, onUpdateClient, insurancePolicies, userRole }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'tasks'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'tasks' | 'dossier'>('general');
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(client.aiAnalysisCache || null);
   const [isLoadingAi, setIsLoadingAi] = useState(false);
   
@@ -301,71 +301,22 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
           >
             Tarefas & Equipa Executante
           </button>
+          <button
+            onClick={() => setActiveTab('dossier')}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'dossier'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            Dossier SAFT
+          </button>
         </nav>
       </div>
 
       {/* TAB 1: GENERAL */}
       {activeTab === 'general' && (
         <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                <Shield size={18} className="text-blue-600" /> Dossier SAFT Online
-              </h3>
-              {saftDossierData?.sourceDetailUrl && (
-                <a
-                  href={saftDossierData.sourceDetailUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-bold text-blue-600 hover:underline"
-                >
-                  Abrir origem
-                </a>
-              )}
-            </div>
-
-            {isLoadingSaftDossierData ? (
-              <p className="text-sm text-slate-500">A carregar dados SAFT...</p>
-            ) : !saftDossierData ? (
-              <p className="text-sm text-slate-500 italic">Sem dados SAFT sincronizados para este NIF.</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">Situação Fiscal AT</p>
-                  <p className="font-semibold text-slate-800">{saftDossierData.atStatus || '—'}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">Data Recolha AT</p>
-                  <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.atCollectedAt)}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">Situação Fiscal SS</p>
-                  <p className="font-semibold text-slate-800">{saftDossierData.ssStatus || '—'}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">Data Recolha SS</p>
-                  <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.ssCollectedAt)}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão AT</p>
-                  <p className="font-semibold text-slate-800">{saftDossierData.certidaoAtStatus || '—'}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão SS</p>
-                  <p className="font-semibold text-slate-800">{saftDossierData.certidaoSsStatus || '—'}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão Permanente</p>
-                  <p className="font-semibold text-slate-800">{saftDossierData.certidaoPermanenteStatus || '—'}</p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">Última Sincronização</p>
-                  <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.syncedAt)}</p>
-                </div>
-              </div>
-            )}
-          </div>
-
           {userRole === 'admin' && (
             /* KPI Cards */
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -624,6 +575,123 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
                         Clique para obter um parecer estratégico e uma sugestão de avença. A análise será guardada.
                       </p>
                     )
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: DOSSIER */}
+      {activeTab === 'dossier' && (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                <Shield size={18} className="text-blue-600" /> Dossier SAFT Online
+              </h3>
+              {saftDossierData?.sourceDetailUrl && (
+                <a
+                  href={saftDossierData.sourceDetailUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-bold text-blue-600 hover:underline"
+                >
+                  Abrir origem
+                </a>
+              )}
+            </div>
+
+            {isLoadingSaftDossierData ? (
+              <p className="text-sm text-slate-500">A carregar dados SAFT...</p>
+            ) : !saftDossierData ? (
+              <p className="text-sm text-slate-500 italic">Sem dados SAFT sincronizados para este NIF.</p>
+            ) : (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase">Situação Fiscal AT</p>
+                    <p className="font-semibold text-slate-800">{saftDossierData.atStatus || '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase">Data Recolha AT</p>
+                    <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.atCollectedAt)}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase">Situação Fiscal SS</p>
+                    <p className="font-semibold text-slate-800">{saftDossierData.ssStatus || '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase">Data Recolha SS</p>
+                    <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.ssCollectedAt)}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão AT</p>
+                    <p className="font-semibold text-slate-800">{saftDossierData.certidaoAtStatus || '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão SS</p>
+                    <p className="font-semibold text-slate-800">{saftDossierData.certidaoSsStatus || '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase">Certidão Permanente</p>
+                    <p className="font-semibold text-slate-800">{saftDossierData.certidaoPermanenteStatus || '—'}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-3">
+                    <p className="text-[11px] text-slate-500 font-bold uppercase">Última Sincronização</p>
+                    <p className="font-semibold text-slate-800">{formatDateTime(saftDossierData.syncedAt)}</p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+                  <div className="px-4 py-3 border-b bg-slate-50">
+                    <h4 className="text-sm font-bold text-slate-700">Anexos Importados</h4>
+                  </div>
+                  {saftDossierData.attachments && saftDossierData.attachments.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                        <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+                          <tr>
+                            <th className="px-4 py-2">Documento</th>
+                            <th className="px-4 py-2">Ficheiro</th>
+                            <th className="px-4 py-2 text-right">Tamanho</th>
+                            <th className="px-4 py-2 text-right">Ação</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {saftDossierData.attachments.map((attachment, index) => (
+                            <tr key={`${attachment.label}-${attachment.fileName || index}`}>
+                              <td className="px-4 py-2 font-medium text-slate-700">{attachment.label}</td>
+                              <td className="px-4 py-2 text-slate-600">{attachment.fileName || '—'}</td>
+                              <td className="px-4 py-2 text-right text-slate-600">
+                                {typeof attachment.sizeBytes === 'number'
+                                  ? `${(attachment.sizeBytes / 1024).toFixed(1)} KB`
+                                  : '—'}
+                              </td>
+                              <td className="px-4 py-2 text-right">
+                                {attachment.publicUrl ? (
+                                  <a
+                                    href={attachment.publicUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs font-bold text-blue-600 hover:underline"
+                                  >
+                                    Abrir
+                                  </a>
+                                ) : (
+                                  <span className="text-xs text-slate-400">Sem link</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="px-4 py-6 text-sm text-slate-500 italic">
+                      Sem anexos importados neste dossier.
+                    </p>
                   )}
                 </div>
               </div>

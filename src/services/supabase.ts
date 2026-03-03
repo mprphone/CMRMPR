@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient, SupabaseClientOptions } from '@supabase/supabase-js';
-import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, InsuranceCommissionSettlement, WorkSafetyService, WorkSafetyProfileData, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic, SaftDossierData } from '../types';
+import { Client, Staff, FeeGroup, GlobalSettings, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, InsuranceCommissionSettlement, WorkSafetyService, WorkSafetyProfileData, CashPayment, CashAgreement, CashOperation, CashSessionExpense, Task, TaskArea, TaskType, MultiplierLogic, SaftDossierAttachment, SaftDossierData } from '../types';
 
 export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
@@ -559,6 +559,7 @@ export const groupService = {
 };
 
 const mapDbToSaftDossierData = (db: any): SaftDossierData => ({
+  attachments: Array.isArray(db.attachments) ? (db.attachments as SaftDossierAttachment[]) : [],
   clientNif: db.client_nif,
   clientName: db.client_name || '',
   sourceDetailUrl: db.source_detail_url || '',
