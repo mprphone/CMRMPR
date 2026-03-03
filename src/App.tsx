@@ -723,6 +723,7 @@ export default function App() {
                   policies={insurancePolicies} setPolicies={setInsurancePolicies}
                   clients={clients}
                   forcedAgent={isPaulaInsuranceOnlyUser ? 'Paula' : undefined}
+                  viewerEmail={currentUserEmail}
                 />
               )}
               {activeView === 'sht' && (
