@@ -371,6 +371,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
       branch: branchOption,
       premiumValue: getTotalPremium(policy),
       netPremiumValue: getNetPremium(policy),
+      policyTier: policy.policyTier || 'Base',
       insuranceProvider: companyOption,
       policyType: branchOption,
     } : {
@@ -451,6 +452,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
         branch: resolvedBranch,
         insuranceProvider: resolvedCompany,
         policyType: resolvedBranch,
+        policyTier: editingPolicy.policyTier || 'Base',
         netPremiumValue: netPremium,
         premiumValue: totalPremium,
       };
@@ -1074,6 +1076,18 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 <select required value={editingPolicy.status || 'Proposta'} onChange={e => setEditingPolicy({...editingPolicy, status: e.target.value as any})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                   <option value="Proposta">Proposta</option>
                   <option value="Aceite">Aceite</option>
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-slate-500 mb-1">Tipo*</label>
+                <select
+                  required
+                  value={editingPolicy.policyTier || 'Base'}
+                  onChange={e => setEditingPolicy({ ...editingPolicy, policyTier: e.target.value as InsurancePolicy['policyTier'] })}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  <option value="Base">Base</option>
+                  <option value="Flexível">Flexível</option>
                 </select>
               </div>
               <div className="md:col-span-2 grid grid-cols-2 gap-4">
