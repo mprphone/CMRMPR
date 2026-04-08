@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Client, FeeGroup, CashPayment, CashAgreement, CashOperation, CashSessionExpense } from '../types';
 import { cashPaymentService, cashAgreementService, cashOperationService, cashSessionExpenseService } from '../services/supabase';
 import { Landmark, Check, X, Save, RefreshCcw, Printer, ArrowLeft, DollarSign, Banknote, Download, History, CreditCard, Plus } from 'lucide-react';
+import IrsControlSection from './cashier/IrsControlSection';
+import { useIrsControl } from './cashier/useIrsControl';
 
 interface CashierProps {
   clients: Client[];
@@ -153,12 +155,26 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   });
 
   const cashGroup = useMemo(() => groups.find(g => g.name.toLowerCase().includes('pagamento numerário')), [groups]);
+  const irsGroup = useMemo(() => groups.find(g => g.name.toLowerCase().includes('irs')), [groups]);
   const groupClients = useMemo(() => {
     if (!cashGroup) return [];
     return clients
       .filter(c => cashGroup.clientIds.includes(c.id))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [clients, cashGroup]);
+  const irsGroupClients = useMemo(() => {
+    if (!irsGroup) return [];
+    return clients
+      .filter(c => irsGroup.clientIds.includes(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [clients, irsGroup]);
+  const {
+    irsControlMap,
+    handleIrsDeliveredToggle,
+    handleIrsPaidToggle,
+    handleIrsAmountChange,
+    handleIrsNotesChange,
+  } = useIrsControl(currentYear);
 
   const agreementsMap = useMemo(() => {
     return new Map(
@@ -1229,6 +1245,18 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
           </div>
         </div>
       </div>
+
+      <IrsControlSection
+        currentYear={currentYear}
+        setCurrentYear={setCurrentYear}
+        irsGroup={irsGroup}
+        irsGroupClients={irsGroupClients}
+        irsControlMap={irsControlMap}
+        onToggleDelivered={handleIrsDeliveredToggle}
+        onTogglePaid={handleIrsPaidToggle}
+        onAmountChange={handleIrsAmountChange}
+        onNotesChange={handleIrsNotesChange}
+      />
 
       {isPlanModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
