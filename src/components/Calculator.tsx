@@ -451,11 +451,11 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   <div className="text-[9px] text-slate-400">Âmbito da proposta</div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[9.5px] text-slate-700">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[8.5px] text-slate-700 leading-tight">
                   <div className="space-y-2">
                     {groupedLeft.map((group, index) => (
                       <div key={`left-${index}`}>
-                        <div className="text-[9px] font-semibold text-slate-800 uppercase tracking-[0.05em]">{group.title}</div>
+                        <div className="text-[8px] font-semibold text-slate-800 uppercase tracking-[0.05em]">{group.title}</div>
                         <div className="space-y-0.5 mt-0.5">
                           {group.items.map((item, idx) => (
                             <div key={`left-item-${index}-${idx}`} className="leading-snug">• {item}</div>
@@ -467,7 +467,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   <div className="space-y-2">
                     {groupedRight.map((group, index) => (
                       <div key={`right-${index}`}>
-                        <div className="text-[9px] font-semibold text-slate-800 uppercase tracking-[0.05em]">{group.title}</div>
+                        <div className="text-[8px] font-semibold text-slate-800 uppercase tracking-[0.05em]">{group.title}</div>
                         <div className="space-y-0.5 mt-0.5">
                           {group.items.map((item, idx) => (
                             <div key={`right-item-${index}-${idx}`} className="leading-snug">• {item}</div>
@@ -512,7 +512,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
             <div className="col-span-7 space-y-3">
               <div className="rounded-xl border border-slate-200/80 p-3">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Serviços não incluídos</div>
-                <div className="text-[9px] text-slate-600 space-y-1">
+                <div className="text-[8px] text-slate-600 space-y-0.5 leading-tight">
                   {proposalScope.excludedServices.map((item, index) => (
                     <div key={`ex-${index}`}>• {item}</div>
                   ))}
@@ -523,11 +523,6 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
                 <div className="text-[9px] text-slate-600 space-y-1">
                   <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
-                  <div>• Início do serviço após aceitação formal da proposta e entrega dos elementos necessários.</div>
-                  <div>• A entrega atempada da documentação é da responsabilidade do cliente.</div>
-                  <div>• Coimas decorrentes de atraso documental imputável ao cliente são da sua exclusiva responsabilidade.</div>
-                  <div>• Trabalhos extraordinários ou não previstos serão objeto de orçamento autónomo.</div>
-                  <div>• Faturação mensal; em caso de mora poderão ser aplicados juros legais.</div>
                   <div>• Confidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.</div>
                   <div>• A proposta é válida por 30 dias.</div>
                 </div>
