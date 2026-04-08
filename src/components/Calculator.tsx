@@ -520,15 +520,6 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               </div>
 
               <div className="rounded-xl border border-slate-200/80 p-2.5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
-                <div className="text-[8px] text-slate-600 space-y-0.5 leading-tight">
-                  <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
-                  <div>• Confidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.</div>
-                  <div>• A proposta é válida por 30 dias.</div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-200/80 p-2.5">
                 <div className="text-[10px] font-semibold text-slate-700">Com os melhores cumprimentos,</div>
                 <div className="text-[11px] font-semibold text-slate-900 mt-1">MPR Negócios</div>
                 <p className="mt-1.5 text-[8px] text-slate-600 leading-snug">
@@ -538,6 +529,14 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
             </div>
 
             <div className="col-span-5 space-y-2">
+              <div className="rounded-xl border border-slate-200/80 p-2.5">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
+                <div className="text-[8px] text-slate-600 space-y-0.5 leading-tight">
+                  <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
+                  <div>• Confidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.</div>
+                  <div>• A proposta é válida por 30 dias.</div>
+                </div>
+              </div>
 
               <div className="rounded-xl border border-slate-200/80 p-2.5">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Aceitação da proposta</div>
