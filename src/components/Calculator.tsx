@@ -29,6 +29,8 @@ const normalizeItem = (item: QuoteItem): QuoteItem => ({
 
 const PDF_PUBLIC_LOGO_CANDIDATES = ['/logo-mpr.png', '/logo.png', '/mpr-logo.png'];
 const MPR_OFFICIAL_ADDRESS = 'Rua Nossa Senhora da Ajuda 107F, 4815-364 Moreira de Cónegos';
+const MPR_OFFICIAL_EMAIL = 'mpr@mpr.pt';
+const MPR_OFFICIAL_PHONE = '253089591';
 
 const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnoverBrackets, globalSettings, quoteHistory, setQuoteHistory }) => {
   const [items, setItems] = useState<QuoteItem[]>([]);
@@ -341,28 +343,35 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 </div>
               </div>
 
+              <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
+                <div className="text-[10px] font-extrabold text-blue-700 uppercase tracking-wide mb-1">A. Apresenta??o MPR</div>
+                <p className="text-[9px] leading-snug text-slate-700">
+                  Somos uma equipa competente, com mais de 20 anos de experi?ncia, sempre pronta a servir com
+                  proximidade, rigor e resposta r?pida ?s necessidades do cliente.
+                </p>
+              </div>
+
               <div>
                 <div className="flex items-center justify-between">
-                  <h3 className="text-[10px] font-extrabold text-slate-800 uppercase tracking-wide border-l-4 border-blue-600 pl-2">Serviços incluídos</h3>
-                  <div className="text-[9px] text-slate-500">Lista resumida</div>
+                  <h3 className="text-[10px] font-extrabold text-slate-800 uppercase tracking-wide border-l-4 border-blue-600 pl-2">B. Servi?os inclu?dos</h3>
+                  <div className="text-[8px] text-slate-500">Apresenta??o em duas colunas</div>
                 </div>
 
-                <div className="mt-1 border border-slate-200 rounded-xl p-3">
-                  <div className="columns-2 gap-4 text-[8px] leading-tight">
+                <div className="mt-1 border border-slate-200 rounded-xl p-2.5">
+                  <div className="columns-2 gap-3 text-[7.6px] leading-tight">
                     {items.map((item) => {
                       const task = item.taskId ? tasks.find(t => t.id === item.taskId) : null;
                       const name = task?.name || item.customName || 'Tarefa personalizada';
-                      const area = task?.area || item.customArea;
-                      const meta = [
-                        area ? `${area}` : null,
-                        item.frequency ? `${item.frequency}x/ano` : null,
-                        item.quantity ? `mult. ${item.quantity}` : null,
-                      ].filter(Boolean).join(' | ');
+                      const frequencyLabel = item.frequency ? `${item.frequency}x/ano` : '';
+                      const quantityLabel = item.quantity ? `mult. ${item.quantity}` : '';
+                      const compactMeta = [frequencyLabel, quantityLabel].filter(Boolean).join(' | ');
 
                       return (
-                        <div key={item.id || `${name}-${meta}`} className="break-inside-avoid mb-1">
-                          <div className="text-slate-900 font-semibold">{name}</div>
-                          <div className="text-[7px] text-slate-500">{meta}</div>
+                        <div key={item.id || `${name}-${compactMeta}`} className="break-inside-avoid mb-0.5">
+                          <div className="text-slate-800 font-semibold truncate">
+                            {name}
+                            {compactMeta ? <span className="font-normal text-slate-500"> ({compactMeta})</span> : null}
+                          </div>
                         </div>
                       );
                     })}
@@ -397,7 +406,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   <p className="text-[9px] text-slate-500 leading-snug mt-1">
                     {MPR_OFFICIAL_ADDRESS}
                     <br />
-                    {(globalSettings as any)?.companyEmail || (globalSettings as any)?.company_email || '(email)'} | {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || '(telefone)'}
+                    {(globalSettings as any)?.companyEmail || (globalSettings as any)?.company_email || MPR_OFFICIAL_EMAIL} | {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || MPR_OFFICIAL_PHONE}
                   </p>
                 </div>
               </div>
