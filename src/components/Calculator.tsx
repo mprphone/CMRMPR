@@ -230,31 +230,31 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
     const includesAdministrative = selectedAreas.has(TaskArea.ADMINISTRATIVO);
 
     const includedServices: string[] = [
-      'Organiza??o e tratamento da documenta??o contabil?stica.',
-      'Registos contabil?sticos, confer?ncias e reconcilia??es.',
-      'Cumprimento das obriga??es fiscais e declarativas.',
-      'Prepara??o de informa??o para fecho mensal e anual.',
+      'Organização e tratamento da documentação contabilística.',
+      'Registos contabilísticos, conferências e reconciliações.',
+      'Cumprimento das obrigações fiscais e declarativas.',
+      'Preparação de informação para fecho mensal e anual.',
     ];
 
     if (includesPayroll) {
-      includedServices.push('Processamento salarial e cumprimento das obriga??es laborais.');
+      includedServices.push('Processamento salarial e cumprimento das obrigações laborais.');
     }
     if (includesManagement) {
-      includedServices.push('Apoio ? gest?o, acompanhamento de indicadores e suporte ? decis?o.');
+      includedServices.push('Apoio à gestão, acompanhamento de indicadores e suporte à decisão.');
     }
     if (includesAdministrative) {
-      includedServices.push('Apoio administrativo e acompanhamento documental cont?nuo.');
+      includedServices.push('Apoio administrativo e acompanhamento documental contínuo.');
     }
 
     const excludedServices: string[] = [
-      'Recupera??o de contabilidade em atraso.',
-      'Representa??o em inspe??es, contencioso ou procedimentos especiais.',
-      'Candidaturas, estudos econ?mico-financeiros e projetos.',
-      'Outros trabalhos extraordin?rios n?o abrangidos pela aven?a mensal.',
+      'Recuperação de contabilidade em atraso.',
+      'Representação em inspeções, contencioso ou procedimentos especiais.',
+      'Candidaturas, estudos económico-financeiros e projetos.',
+      'Outros trabalhos extraordinários não abrangidos pela avença mensal.',
     ];
 
     if (!includesPayroll) {
-      excludedServices.splice(1, 0, 'Processamento salarial e obriga??es laborais.');
+      excludedServices.splice(1, 0, 'Processamento salarial e obrigações laborais.');
     }
 
     return {
