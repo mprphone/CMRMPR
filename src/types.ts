@@ -26,9 +26,14 @@ export interface Task {
 }
 
 export interface QuoteItem {
-  taskId: string;
+  id?: string;
+  taskId?: string;
   quantity: number;
   frequency: number;
+  customName?: string;
+  customArea?: TaskArea | string;
+  customTimeMinutes?: number;
+  customHourlyCost?: number;
 }
 
 export interface ClientTaskOverride {
