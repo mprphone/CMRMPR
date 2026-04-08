@@ -27,6 +27,9 @@ const normalizeItem = (item: QuoteItem): QuoteItem => ({
   frequency: item.frequency > 0 ? item.frequency : 1,
 });
 
+const PDF_PUBLIC_LOGO_CANDIDATES = ['/logo-mpr.png', '/logo.png', '/mpr-logo.png'];
+const MPR_OFFICIAL_ADDRESS = 'Rua Nossa Senhora da Ajuda 107F, 4815-364 Moreira de Cónegos';
+
 const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnoverBrackets, globalSettings, quoteHistory, setQuoteHistory }) => {
   const [items, setItems] = useState<QuoteItem[]>([]);
   const [targetMargin, setTargetMargin] = useState(30);
@@ -41,6 +44,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
   const [isSaving, setIsSaving] = useState(false);
   const [finalMonthlyFee, setFinalMonthlyFee] = useState(0);
   const [manualFinalFee, setManualFinalFee] = useState(false);
+  const [pdfLogoTryIndex, setPdfLogoTryIndex] = useState(0);
 
   useEffect(() => {
     if (tasks.length === 0 || items.length > 0) return;
@@ -187,6 +191,11 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
     setFinalMonthlyFee(Number.isFinite(suggestedMonthlyFee) ? suggestedMonthlyFee : 0);
   }, [suggestedMonthlyFee, manualFinalFee]);
 
+  useEffect(() => {
+    if (!showPreview) return;
+    setPdfLogoTryIndex(0);
+  }, [showPreview]);
+
   const fairValue = useMemo(() => {
     const bracket = turnoverBrackets.find(b => clientVolume >= b.minTurnover && clientVolume <= b.maxTurnover);
     if (!bracket) return null;
@@ -257,6 +266,13 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
   };
 
   if (showPreview) {
+    const hasUploadedLogo = Boolean(logo);
+    const maxLogoTries = PDF_PUBLIC_LOGO_CANDIDATES.length + (hasUploadedLogo ? 1 : 0);
+    const currentPdfLogoSrc =
+      pdfLogoTryIndex < PDF_PUBLIC_LOGO_CANDIDATES.length
+        ? PDF_PUBLIC_LOGO_CANDIDATES[pdfLogoTryIndex]
+        : (pdfLogoTryIndex === PDF_PUBLIC_LOGO_CANDIDATES.length && hasUploadedLogo ? logo : '');
+
     return (
       <div className="animate-fade-in bg-white min-h-screen absolute top-0 left-0 w-full z-50 p-4 print:p-0">
         <style>{`
@@ -264,7 +280,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
           @media print {
             .no-print { display: none !important; }
             .print-reset { box-shadow: none !important; border: none !important; }
-            .print-fit { transform: scale(0.94); transform-origin: top left; width: 106.5%; }
+            .print-fit { transform: scale(0.92); transform-origin: top left; width: 108.7%; }
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
         `}</style>
@@ -280,8 +296,17 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
         <div className="print-fit max-w-4xl mx-auto bg-white p-6 border border-slate-100 rounded-2xl print-reset print:rounded-none print:p-2">
           <div className="h-16 print:h-16 flex items-center justify-between gap-4">
-            {logo ? (
-              <img src={logo} alt="Logo MPR" className="h-10 print:h-11 w-auto object-contain" />
+            {currentPdfLogoSrc ? (
+              <img
+                src={currentPdfLogoSrc}
+                alt="Logo MPR"
+                className="h-10 print:h-11 w-auto object-contain"
+                onError={() => {
+                  if (pdfLogoTryIndex < maxLogoTries) {
+                    setPdfLogoTryIndex(pdfLogoTryIndex + 1);
+                  }
+                }}
+              />
             ) : (
               <div className="h-11 px-4 rounded-md border border-slate-300 bg-slate-50 flex items-center font-black text-slate-800 tracking-widest">
                 MPR
@@ -323,7 +348,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 </div>
 
                 <div className="mt-1 border border-slate-200 rounded-xl p-3">
-                  <div className="columns-2 gap-6 text-[9.5px] leading-tight">
+                  <div className="columns-2 gap-4 text-[8px] leading-tight">
                     {items.map((item) => {
                       const task = item.taskId ? tasks.find(t => t.id === item.taskId) : null;
                       const name = task?.name || item.customName || 'Tarefa personalizada';
@@ -335,9 +360,9 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                       ].filter(Boolean).join(' | ');
 
                       return (
-                        <div key={item.id || `${name}-${meta}`} className="break-inside-avoid mb-1.5">
+                        <div key={item.id || `${name}-${meta}`} className="break-inside-avoid mb-1">
                           <div className="text-slate-900 font-semibold">{name}</div>
-                          <div className="text-[9px] text-slate-500">{meta}</div>
+                          <div className="text-[7px] text-slate-500">{meta}</div>
                         </div>
                       );
                     })}
@@ -370,7 +395,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                     {(globalSettings as any)?.companyName || (globalSettings as any)?.company_name || 'MPR'}
                   </p>
                   <p className="text-[9px] text-slate-500 leading-snug mt-1">
-                    {(globalSettings as any)?.companyAddress || (globalSettings as any)?.company_address || '(morada)'}
+                    {MPR_OFFICIAL_ADDRESS}
                     <br />
                     {(globalSettings as any)?.companyEmail || (globalSettings as any)?.company_email || '(email)'} | {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || '(telefone)'}
                   </p>
