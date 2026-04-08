@@ -9,7 +9,7 @@ interface IrsControlProps {
 }
 
 const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
-  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  const [currentYear, setCurrentYear] = useState(new Date().getFullYear() - 1);
   const irsGroup = useMemo(() => groups.find(g => g.name.toLowerCase().includes('irs')), [groups]);
   const irsGroupClients = useMemo(() => {
     if (!irsGroup) return [];
@@ -20,8 +20,14 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
 
   const {
     irsControlMap,
+    pendingDeliveryTotal,
+    pendingDeliveryCount,
+    pendingMbWayTotal,
+    deliveryHistoryForYear,
+    handleCloseDelivery,
     handleIrsDeliveredToggle,
     handleIrsPaidToggle,
+    handleIrsPaymentMethodChange,
     handleIrsAmountChange,
     handleIrsNotesChange,
   } = useIrsControl(currentYear);
@@ -34,8 +40,14 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
         irsGroup={irsGroup}
         irsGroupClients={irsGroupClients}
         irsControlMap={irsControlMap}
+        pendingDeliveryTotal={pendingDeliveryTotal}
+        pendingDeliveryCount={pendingDeliveryCount}
+        pendingMbWayTotal={pendingMbWayTotal}
+        deliveryHistoryForYear={deliveryHistoryForYear}
+        onCloseDelivery={handleCloseDelivery}
         onToggleDelivered={handleIrsDeliveredToggle}
         onTogglePaid={handleIrsPaidToggle}
+        onPaymentMethodChange={handleIrsPaymentMethodChange}
         onAmountChange={handleIrsAmountChange}
         onNotesChange={handleIrsNotesChange}
       />
@@ -44,4 +56,3 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
 };
 
 export default IrsControl;
-
