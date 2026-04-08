@@ -527,9 +527,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   <div>• A proposta é válida por 30 dias.</div>
                 </div>
               </div>
-            </div>
 
-            <div className="col-span-5 space-y-2">
               <div className="rounded-xl border border-slate-200/80 p-2.5">
                 <div className="text-[10px] font-semibold text-slate-700">Com os melhores cumprimentos,</div>
                 <div className="text-[11px] font-semibold text-slate-900 mt-1">MPR Negócios</div>
@@ -537,6 +535,9 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   Permanecemos inteiramente disponíveis para esclarecer qualquer ponto e ajustar a proposta às necessidades específicas da instituição.
                 </p>
               </div>
+            </div>
+
+            <div className="col-span-5 space-y-2">
 
               <div className="rounded-xl border border-slate-200/80 p-2.5">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Aceitação da proposta</div>
