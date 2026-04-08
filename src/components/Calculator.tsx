@@ -207,6 +207,48 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
     };
   }, [clientVolume, turnoverBrackets]);
 
+  const commercialServicePoints = useMemo(() => {
+    const selectedAreas = new Set<string>();
+    let hasPayrollContext = false;
+    let hasManagementContext = false;
+
+    items.forEach(item => {
+      const task = item.taskId ? tasks.find(t => t.id === item.taskId) : null;
+      const area = task?.area || item.customArea;
+      if (area) selectedAreas.add(String(area));
+
+      const taskName = (task?.name || item.customName || '').toLowerCase();
+      if (/sal|venc|rh|funcion|seguran/.test(taskName)) hasPayrollContext = true;
+      if (/gest|consult|anal|relat|orc/.test(taskName)) hasManagementContext = true;
+    });
+
+    const points: string[] = [
+      'Organização e tratamento da documentação contabilística.',
+      'Registos contabilísticos, conferências e reconciliações.',
+      'Cumprimento das obrigações fiscais e declarativas.',
+      'Preparação de informação para fecho mensal e anual.',
+    ];
+
+    if (selectedAreas.has(TaskArea.RH) || hasPayrollContext) {
+      points.push('Processamento salarial e cumprimento das obrigações laborais.');
+    }
+
+    if (
+      selectedAreas.has(TaskArea.CONSULTORIA) ||
+      selectedAreas.has(TaskArea.GESTAO) ||
+      hasManagementContext
+    ) {
+      points.push('Apoio à gestão, acompanhamento de indicadores e suporte à decisão.');
+    }
+
+    if (selectedAreas.has(TaskArea.ADMINISTRATIVO)) {
+      points.push('Apoio administrativo e acompanhamento documental contínuo.');
+    }
+
+    points.push('Acompanhamento técnico permanente e suporte próximo ao cliente.');
+    return points.slice(0, 7);
+  }, [items, tasks]);
+
   const handleSaveProposal = async () => {
     if (items.length === 0) {
       alert('Adicione pelo menos um serviço para salvar a proposta.');
@@ -275,6 +317,14 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
         ? PDF_PUBLIC_LOGO_CANDIDATES[pdfLogoTryIndex]
         : (pdfLogoTryIndex === PDF_PUBLIC_LOGO_CANDIDATES.length && hasUploadedLogo ? logo : '');
 
+    const finalMonthlyFeeLabel = finalMonthlyFee.toLocaleString('pt-PT', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    const leftServicePoints = commercialServicePoints.slice(0, Math.ceil(commercialServicePoints.length / 2));
+    const rightServicePoints = commercialServicePoints.slice(Math.ceil(commercialServicePoints.length / 2));
+
     return (
       <div className="animate-fade-in bg-white min-h-screen absolute top-0 left-0 w-full z-50 p-4 print:p-0">
         <style>{`
@@ -282,7 +332,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
           @media print {
             .no-print { display: none !important; }
             .print-reset { box-shadow: none !important; border: none !important; }
-            .print-fit { transform: scale(0.92); transform-origin: top left; width: 108.7%; }
+            .print-fit { transform: scale(0.935); transform-origin: top left; width: 107%; }
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
         `}</style>
@@ -291,129 +341,125 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
           <button onClick={() => setShowPreview(false)} className="flex items-center gap-2 text-slate-500 hover:text-slate-800">
             <ArrowLeft size={20} /> Voltar ao Simulador
           </button>
-          <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
+          <button onClick={() => window.print()} className="bg-slate-800 text-white px-6 py-2 rounded-lg flex items-center gap-2 hover:bg-slate-900 font-bold shadow-sm">
             <Printer size={20} /> Guardar PDF
           </button>
         </div>
 
-        <div className="print-fit max-w-4xl mx-auto bg-white p-6 border border-slate-100 rounded-2xl print-reset print:rounded-none print:p-2">
-          <div className="h-16 print:h-16 flex items-center justify-between gap-4">
-            {currentPdfLogoSrc ? (
-              <img
-                src={currentPdfLogoSrc}
-                alt="Logo MPR"
-                className="h-10 print:h-11 w-auto object-contain"
-                onError={() => {
-                  if (pdfLogoTryIndex < maxLogoTries) {
-                    setPdfLogoTryIndex(pdfLogoTryIndex + 1);
-                  }
-                }}
-              />
-            ) : (
-              <div className="h-11 px-4 rounded-md border border-slate-300 bg-slate-50 flex items-center font-black text-slate-800 tracking-widest">
-                MPR
-              </div>
-            )}
-            <div className="text-[10px] text-slate-500 text-right leading-tight">
-              <div className="font-semibold text-slate-600">Ref.: {`MPR-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`}</div>
-              <div>Data: {new Date().toLocaleDateString('pt-PT')}</div>
-              <div>Validade: 30 dias</div>
+        <div className="print-fit max-w-4xl mx-auto bg-white p-7 border border-slate-200/80 rounded-3xl print-reset print:rounded-none print:p-2">
+          <div className="flex items-start justify-between gap-6">
+            <div className="pt-1">
+              {currentPdfLogoSrc ? (
+                <img
+                  src={currentPdfLogoSrc}
+                  alt="Logo MPR"
+                  className="h-14 w-auto object-contain"
+                  onError={() => {
+                    if (pdfLogoTryIndex < maxLogoTries) setPdfLogoTryIndex(pdfLogoTryIndex + 1);
+                  }}
+                />
+              ) : (
+                <div className="h-12 px-4 rounded-md border border-emerald-200 bg-emerald-50 flex items-center font-black text-emerald-800 tracking-widest">
+                  MPR
+                </div>
+              )}
+            </div>
+
+            <div className="text-[10px] text-slate-500 text-right leading-relaxed">
+              <div><span className="font-semibold text-slate-700">Ref.:</span> {`MPR-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`}</div>
+              <div><span className="font-semibold text-slate-700">Data:</span> {new Date().toLocaleDateString('pt-PT')}</div>
+              <div><span className="font-semibold text-slate-700">Validade:</span> 30 dias</div>
             </div>
           </div>
 
-          <div className="mt-2 pb-2 border-b border-slate-200">
-            <h2 className="text-base font-extrabold text-slate-800 uppercase tracking-tight">Proposta de Serviços de Contabilidade</h2>
+          <div className="mt-5 pb-4 border-b border-slate-200">
+            <h2 className="text-[22px] font-semibold tracking-[0.02em] text-slate-900 uppercase">
+              Proposta de Serviços de Contabilidade
+            </h2>
           </div>
 
-          <div className="mt-3 grid grid-cols-12 gap-4">
+          <div className="mt-4 grid grid-cols-12 gap-4">
             <div className="col-span-8 space-y-3">
-              <div className="border border-slate-200 rounded-xl p-3">
-                <p className="text-[10px] uppercase font-extrabold text-slate-400 mb-1">Destinatário</p>
-                <p className="text-sm font-extrabold text-slate-800">{quoteClientName || 'Exmo(a). Senhor(a)'}</p>
-                <div className="mt-1 text-[10px] text-slate-600 leading-tight space-y-0.5">
-                  <div><span className="font-bold text-slate-700">NIF:</span> {quoteClientNif || '---'}</div>
-                  <div><span className="font-bold text-slate-700">Volume de negócios:</span> {clientVolume ? `${clientVolume.toLocaleString()} € / ano` : '---'}</div>
-                  {(employeeCount || documentCount) ? (
-                    <div className="text-[9px] text-slate-500">
-                      {employeeCount ? `Colaboradores: ${employeeCount}` : null}
-                      {employeeCount && documentCount ? ' | ' : null}
-                      {documentCount ? `Docs/mês: ${documentCount}` : null}
+              <div className="rounded-2xl border border-slate-200/80 p-4">
+                <p className="text-[10px] uppercase font-semibold tracking-[0.08em] text-slate-400 mb-1">Destinatário</p>
+                <p className="text-[17px] font-semibold text-slate-900 leading-tight">{quoteClientName || 'Exmo(a). Senhor(a)'}</p>
+                <div className="mt-2 text-[10.5px] text-slate-600 space-y-0.5">
+                  <div><span className="text-slate-500">NIF:</span> <span className="font-medium text-slate-700">{quoteClientNif || '---'}</span></div>
+                  {clientVolume > 0 ? (
+                    <div><span className="text-slate-500">Volume de negócios:</span> <span className="font-medium text-slate-700">{`${clientVolume.toLocaleString('pt-PT')} € / ano`}</span></div>
+                  ) : null}
+                  {(employeeCount > 0 || documentCount > 0) ? (
+                    <div className="text-[10px] text-slate-500">
+                      {employeeCount > 0 ? `Colaboradores: ${employeeCount}` : null}
+                      {employeeCount > 0 && documentCount > 0 ? ' | ' : null}
+                      {documentCount > 0 ? `Docs/mês: ${documentCount}` : null}
                     </div>
                   ) : null}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
-                <div className="text-[10px] font-extrabold text-blue-700 uppercase tracking-wide mb-1">A. Apresentação MPR</div>
-                <p className="text-[9px] leading-snug text-slate-700">
-                  A MPR Negócios é uma equipa experiente, com mais de 20 anos de atuação, orientada por rigor técnico,
-                  proximidade e disponibilidade permanente para apoiar cada cliente com qualidade e confiança.
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
+                <div className="text-[10px] font-semibold text-emerald-800 uppercase tracking-[0.08em] mb-1">A. Apresentação MPR</div>
+                <p className="text-[10px] leading-snug text-slate-700">
+                  A MPR Negócios presta serviços de contabilidade com foco em rigor, proximidade e acompanhamento contínuo.
+                  Trabalhamos com uma equipa experiente para garantir informação fiável, cumprimento atempado e suporte técnico de confiança.
                 </p>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-[10px] font-extrabold text-slate-800 uppercase tracking-wide border-l-4 border-blue-600 pl-2">B. Serviços incluídos</h3>
-                  <div className="text-[8px] text-slate-500">Apresentação em duas colunas</div>
+              <div className="rounded-2xl border border-slate-200/80 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-[11px] font-semibold text-slate-900 uppercase tracking-[0.07em]">B. Serviços incluídos</h3>
+                  <div className="text-[9px] text-slate-400">Síntese comercial</div>
                 </div>
 
-                <div className="mt-1 border border-slate-200 rounded-xl p-2.5">
-                  <div className="columns-2 gap-3 text-[7.6px] leading-tight">
-                    {items.map((item) => {
-                      const task = item.taskId ? tasks.find(t => t.id === item.taskId) : null;
-                      const name = task?.name || item.customName || 'Tarefa personalizada';
-                      const frequencyLabel = item.frequency ? `${item.frequency} vezes/ano` : '';
-                      const quantityLabel = item.quantity ? `qtd. ${item.quantity}` : '';
-                      const compactMeta = [frequencyLabel, quantityLabel].filter(Boolean).join(' | ');
-
-                      return (
-                        <div key={item.id || `${name}-${compactMeta}`} className="break-inside-avoid mb-0.5">
-                          <div className="text-slate-800 font-semibold truncate">
-                            {name}
-                            {compactMeta ? <span className="font-normal text-slate-500"> ({compactMeta})</span> : null}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9.5px] text-slate-700">
+                  <ul className="space-y-1">
+                    {leftServicePoints.map((point, index) => (
+                      <li key={`left-${index}`} className="leading-snug">• {point}</li>
+                    ))}
+                  </ul>
+                  <ul className="space-y-1">
+                    {rightServicePoints.map((point, index) => (
+                      <li key={`right-${index}`} className="leading-snug">• {point}</li>
+                    ))}
+                  </ul>
                 </div>
               </div>
 
               <div className="text-[9px] text-slate-600 leading-snug">
-                <div className="font-extrabold text-slate-700 uppercase tracking-wide text-[9px] mb-1">Condições</div>
-                <div>- Valores sujeitos a IVA a taxa legal em vigor.</div>
-                <div>- Ajustes podem ocorrer por alteração de volume/complexidade.</div>
-                <div>- Início do serviço após aceitação da proposta.</div>
+                <div className="font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
+                <div>• Valores sujeitos a IVA à taxa legal em vigor.</div>
+                <div>• A proposta poderá ser revista em caso de alteração relevante de volume ou complexidade.</div>
+                <div>• O início do serviço ocorre após aceitação formal da proposta.</div>
               </div>
             </div>
 
             <div className="col-span-4">
-              <div className="border border-slate-200 rounded-xl p-4">
-                <p className="text-[10px] uppercase font-extrabold text-slate-400">Avença mensal final</p>
-                <div className="mt-2 text-3xl font-black text-slate-900 leading-none">{finalMonthlyFee.toFixed(2)}€</div>
-                <div className="text-[9px] text-slate-500 mt-1">Sugerido: {suggestedMonthlyFee.toFixed(2)}€ (+ IVA / mês)</div>
+              <div className="rounded-2xl border border-slate-200/80 p-4">
+                <p className="text-[10px] uppercase font-semibold tracking-[0.07em] text-slate-400">Honorários Mensais</p>
+                <div className="mt-2 text-[43px] font-semibold text-slate-900 leading-none">{finalMonthlyFeeLabel} €</div>
 
-                <div className="mt-3 border-t border-slate-200 pt-2 text-[9px] text-slate-600 leading-snug space-y-1">
-                  <div className="flex justify-between gap-3"><span className="text-slate-500">Periodicidade</span><span className="font-bold text-slate-700">Mensal</span></div>
-                  <div className="flex justify-between gap-3"><span className="text-slate-500">Pagamento</span><span className="font-bold text-slate-700">Até dia 8</span></div>
+                <div className="mt-4 border-t border-slate-200 pt-3 text-[10px] text-slate-600 space-y-1">
+                  <div className="flex justify-between gap-3"><span>Periodicidade</span><span className="font-medium text-slate-700">Mensal</span></div>
+                  <div className="flex justify-between gap-3"><span>Pagamento</span><span className="font-medium text-slate-700">Até dia 8</span></div>
                 </div>
 
-                <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3">
-                  <p className="text-[9px] font-extrabold text-slate-700 uppercase tracking-wide mb-1">Emitido por</p>
-                  <p className="text-[10px] font-extrabold text-slate-800 leading-tight">
+                <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.07em] text-emerald-800 mb-1">Emitido por</p>
+                  <p className="text-[12px] font-semibold text-slate-900">
                     {(globalSettings as any)?.companyName || (globalSettings as any)?.company_name || 'MPR'}
                   </p>
-                  <p className="text-[9px] text-slate-500 leading-snug mt-1">
+                  <p className="mt-1 text-[9px] text-slate-600 leading-snug">
                     {MPR_OFFICIAL_ADDRESS}
                     <br />
-                    {(globalSettings as any)?.companyEmail || (globalSettings as any)?.company_email || MPR_OFFICIAL_EMAIL} | {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || MPR_OFFICIAL_PHONE}
+                    {(globalSettings as any)?.companyEmail || (globalSettings as any)?.company_email || MPR_OFFICIAL_EMAIL}
+                    <br />
+                    {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || MPR_OFFICIAL_PHONE}
                   </p>
                 </div>
               </div>
             </div>
           </div>
-
-          <div className="mt-2 text-[8px] text-slate-400 leading-relaxed text-center">Documento gerado automaticamente pelo sistema AccounTech CRM.</div>
         </div>
       </div>
     );
