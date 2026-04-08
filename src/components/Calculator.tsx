@@ -505,6 +505,15 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || MPR_OFFICIAL_PHONE}
                 </p>
               </div>
+
+              <div className="rounded-xl border border-slate-200/80 p-2.5">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
+                <div className="text-[8px] text-slate-600 space-y-0.5 leading-tight">
+                  <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
+                  <div>• Confidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.</div>
+                  <div>• A proposta é válida por 30 dias.</div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -529,15 +538,6 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
             </div>
 
             <div className="col-span-5 space-y-2">
-              <div className="rounded-xl border border-slate-200/80 p-2.5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
-                <div className="text-[8px] text-slate-600 space-y-0.5 leading-tight">
-                  <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
-                  <div>• Confidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.</div>
-                  <div>• A proposta é válida por 30 dias.</div>
-                </div>
-              </div>
-
               <div className="rounded-xl border border-slate-200/80 p-2.5">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Aceitação da proposta</div>
                 <p className="text-[8px] text-slate-600 leading-snug mb-1.5">
