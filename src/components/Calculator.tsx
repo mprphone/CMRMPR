@@ -207,7 +207,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
     };
   }, [clientVolume, turnoverBrackets]);
 
-  const commercialServicePoints = useMemo(() => {
+  const proposalScope = useMemo(() => {
     const selectedAreas = new Set<string>();
     let hasPayrollContext = false;
     let hasManagementContext = false;
@@ -222,31 +222,45 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
       if (/gest|consult|anal|relat|orc/.test(taskName)) hasManagementContext = true;
     });
 
-    const points: string[] = [
-      'Organização e tratamento da documentação contabilística.',
-      'Registos contabilísticos, conferências e reconciliações.',
-      'Cumprimento das obrigações fiscais e declarativas.',
-      'Preparação de informação para fecho mensal e anual.',
-    ];
-
-    if (selectedAreas.has(TaskArea.RH) || hasPayrollContext) {
-      points.push('Processamento salarial e cumprimento das obrigações laborais.');
-    }
-
-    if (
+    const includesPayroll = selectedAreas.has(TaskArea.RH) || hasPayrollContext;
+    const includesManagement =
       selectedAreas.has(TaskArea.CONSULTORIA) ||
       selectedAreas.has(TaskArea.GESTAO) ||
-      hasManagementContext
-    ) {
-      points.push('Apoio à gestão, acompanhamento de indicadores e suporte à decisão.');
+      hasManagementContext;
+    const includesAdministrative = selectedAreas.has(TaskArea.ADMINISTRATIVO);
+
+    const includedServices: string[] = [
+      'Organiza??o e tratamento da documenta??o contabil?stica.',
+      'Registos contabil?sticos, confer?ncias e reconcilia??es.',
+      'Cumprimento das obriga??es fiscais e declarativas.',
+      'Prepara??o de informa??o para fecho mensal e anual.',
+    ];
+
+    if (includesPayroll) {
+      includedServices.push('Processamento salarial e cumprimento das obriga??es laborais.');
+    }
+    if (includesManagement) {
+      includedServices.push('Apoio ? gest?o, acompanhamento de indicadores e suporte ? decis?o.');
+    }
+    if (includesAdministrative) {
+      includedServices.push('Apoio administrativo e acompanhamento documental cont?nuo.');
     }
 
-    if (selectedAreas.has(TaskArea.ADMINISTRATIVO)) {
-      points.push('Apoio administrativo e acompanhamento documental contínuo.');
+    const excludedServices: string[] = [
+      'Recupera??o de contabilidade em atraso.',
+      'Representa??o em inspe??es, contencioso ou procedimentos especiais.',
+      'Candidaturas, estudos econ?mico-financeiros e projetos.',
+      'Outros trabalhos extraordin?rios n?o abrangidos pela aven?a mensal.',
+    ];
+
+    if (!includesPayroll) {
+      excludedServices.splice(1, 0, 'Processamento salarial e obriga??es laborais.');
     }
 
-    points.push('Acompanhamento técnico permanente e suporte próximo ao cliente.');
-    return points.slice(0, 7);
+    return {
+      includedServices: includedServices.slice(0, 7),
+      excludedServices: excludedServices.slice(0, 5),
+    };
   }, [items, tasks]);
 
   const handleSaveProposal = async () => {
@@ -322,8 +336,8 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
       maximumFractionDigits: 2,
     });
 
-    const leftServicePoints = commercialServicePoints.slice(0, Math.ceil(commercialServicePoints.length / 2));
-    const rightServicePoints = commercialServicePoints.slice(Math.ceil(commercialServicePoints.length / 2));
+    const includedLeft = proposalScope.includedServices.slice(0, Math.ceil(proposalScope.includedServices.length / 2));
+    const includedRight = proposalScope.includedServices.slice(Math.ceil(proposalScope.includedServices.length / 2));
 
     return (
       <div className="animate-fade-in bg-white min-h-screen absolute top-0 left-0 w-full z-50 p-4 print:p-0">
@@ -332,7 +346,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
           @media print {
             .no-print { display: none !important; }
             .print-reset { box-shadow: none !important; border: none !important; }
-            .print-fit { transform: scale(0.935); transform-origin: top left; width: 107%; }
+            .print-fit { transform: scale(0.915); transform-origin: top left; width: 109.2%; }
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           }
         `}</style>
@@ -378,84 +392,107 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
             </h2>
           </div>
 
-          <div className="mt-4 grid grid-cols-12 gap-4">
+          <div className="mt-4 grid grid-cols-12 gap-4 items-start">
             <div className="col-span-8 space-y-3">
               <div className="rounded-2xl border border-slate-200/80 p-4">
                 <p className="text-[10px] uppercase font-semibold tracking-[0.08em] text-slate-400 mb-1">Destinatário</p>
                 <p className="text-[17px] font-semibold text-slate-900 leading-tight">{quoteClientName || 'Exmo(a). Senhor(a)'}</p>
-                <div className="mt-2 text-[10.5px] text-slate-600 space-y-0.5">
-                  <div><span className="text-slate-500">NIF:</span> <span className="font-medium text-slate-700">{quoteClientNif || '---'}</span></div>
-                  {clientVolume > 0 ? (
-                    <div><span className="text-slate-500">Volume de negócios:</span> <span className="font-medium text-slate-700">{`${clientVolume.toLocaleString('pt-PT')} € / ano`}</span></div>
-                  ) : null}
-                  {(employeeCount > 0 || documentCount > 0) ? (
-                    <div className="text-[10px] text-slate-500">
-                      {employeeCount > 0 ? `Colaboradores: ${employeeCount}` : null}
-                      {employeeCount > 0 && documentCount > 0 ? ' | ' : null}
-                      {documentCount > 0 ? `Docs/mês: ${documentCount}` : null}
-                    </div>
-                  ) : null}
+                <div className="mt-2 text-[10.5px] text-slate-600">
+                  <span className="text-slate-500">NIF:</span> <span className="font-medium text-slate-700">{quoteClientNif || '---'}</span>
                 </div>
               </div>
 
               <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
-                <div className="text-[10px] font-semibold text-emerald-800 uppercase tracking-[0.08em] mb-1">A. Apresentação MPR</div>
+                <div className="text-[10px] font-semibold text-emerald-800 uppercase tracking-[0.08em] mb-1">Sobre a MPR</div>
                 <p className="text-[10px] leading-snug text-slate-700">
-                  A MPR Negócios presta serviços de contabilidade com foco em rigor, proximidade e acompanhamento contínuo.
-                  Trabalhamos com uma equipa experiente para garantir informação fiável, cumprimento atempado e suporte técnico de confiança.
+                  A MPR Negócios presta serviços de contabilidade com enfoque no rigor técnico, no cumprimento atempado das obrigações legais e no acompanhamento próximo de cada cliente, assegurando informação fiável e suporte contínuo à gestão.
                 </p>
               </div>
 
               <div className="rounded-2xl border border-slate-200/80 p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-[11px] font-semibold text-slate-900 uppercase tracking-[0.07em]">B. Serviços incluídos</h3>
-                  <div className="text-[9px] text-slate-400">Síntese comercial</div>
+                  <h3 className="text-[11px] font-semibold text-slate-900 uppercase tracking-[0.07em]">Serviços incluídos</h3>
+                  <div className="text-[9px] text-slate-400">Âmbito da proposta</div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9.5px] text-slate-700">
                   <ul className="space-y-1">
-                    {leftServicePoints.map((point, index) => (
+                    {includedLeft.map((point, index) => (
                       <li key={`left-${index}`} className="leading-snug">• {point}</li>
                     ))}
                   </ul>
                   <ul className="space-y-1">
-                    {rightServicePoints.map((point, index) => (
+                    {includedRight.map((point, index) => (
                       <li key={`right-${index}`} className="leading-snug">• {point}</li>
                     ))}
                   </ul>
                 </div>
               </div>
-
-              <div className="text-[9px] text-slate-600 leading-snug">
-                <div className="font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
-                <div>• Valores sujeitos a IVA à taxa legal em vigor.</div>
-                <div>• A proposta poderá ser revista em caso de alteração relevante de volume ou complexidade.</div>
-                <div>• O início do serviço ocorre após aceitação formal da proposta.</div>
-              </div>
             </div>
 
-            <div className="col-span-4">
+            <div className="col-span-4 space-y-3">
               <div className="rounded-2xl border border-slate-200/80 p-4">
                 <p className="text-[10px] uppercase font-semibold tracking-[0.07em] text-slate-400">Honorários Mensais</p>
-                <div className="mt-2 text-[43px] font-semibold text-slate-900 leading-none">{finalMonthlyFeeLabel} €</div>
+                <div className="mt-2 text-[35px] font-semibold text-slate-900 leading-none">{finalMonthlyFeeLabel} € + IVA</div>
 
                 <div className="mt-4 border-t border-slate-200 pt-3 text-[10px] text-slate-600 space-y-1">
                   <div className="flex justify-between gap-3"><span>Periodicidade</span><span className="font-medium text-slate-700">Mensal</span></div>
                   <div className="flex justify-between gap-3"><span>Pagamento</span><span className="font-medium text-slate-700">Até dia 8</span></div>
                 </div>
+              </div>
 
-                <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
-                  <p className="text-[9px] font-semibold uppercase tracking-[0.07em] text-emerald-800 mb-1">Emitido por</p>
-                  <p className="text-[12px] font-semibold text-slate-900">
-                    {(globalSettings as any)?.companyName || (globalSettings as any)?.company_name || 'MPR'}
-                  </p>
-                  <p className="mt-1 text-[9px] text-slate-600 leading-snug">
-                    {MPR_OFFICIAL_ADDRESS}
-                    <br />
-                    {(globalSettings as any)?.companyEmail || (globalSettings as any)?.company_email || MPR_OFFICIAL_EMAIL}
-                    <br />
-                    {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || MPR_OFFICIAL_PHONE}
-                  </p>
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.07em] text-emerald-800 mb-1">Proposta apresentada por</p>
+                <p className="text-[12px] font-semibold text-slate-900">{(globalSettings as any)?.companyName || (globalSettings as any)?.company_name || 'MPR Negócios'}</p>
+                <p className="mt-1 text-[9px] text-slate-600 leading-snug">
+                  {MPR_OFFICIAL_ADDRESS}
+                  <br />
+                  {(globalSettings as any)?.companyEmail || (globalSettings as any)?.company_email || MPR_OFFICIAL_EMAIL}
+                  <br />
+                  {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || MPR_OFFICIAL_PHONE}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-12 gap-4">
+            <div className="col-span-7 space-y-3">
+              <div className="rounded-xl border border-slate-200/80 p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Serviços não incluídos</div>
+                <div className="text-[9px] text-slate-600 space-y-1">
+                  {proposalScope.excludedServices.map((item, index) => (
+                    <div key={`ex-${index}`}>• {item}</div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200/80 p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
+                <div className="text-[9px] text-slate-600 space-y-1">
+                  <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
+                  <div>• A presente proposta pressupõe a entrega atempada da documentação necessária.</div>
+                  <div>• Trabalhos extraordinários ou não previstos serão objeto de orçamento autónomo.</div>
+                  <div>• A proposta é válida por 30 dias.</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="col-span-5 space-y-3">
+              <div className="rounded-xl border border-slate-200/80 p-3">
+                <div className="text-[10px] font-semibold text-slate-700">Com os melhores cumprimentos,</div>
+                <div className="text-[11px] font-semibold text-slate-900 mt-1">MPR Negócios</div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200/80 p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Aceitação da proposta</div>
+                <p className="text-[9px] text-slate-600 leading-snug mb-2">
+                  Em nome de {quoteClientName || '________________________________'}, declara-se a aceitação da presente proposta de prestação de serviços.
+                </p>
+                <div className="text-[9px] text-slate-700 space-y-2">
+                  <div>Local e data: ______________________________</div>
+                  <div>Nome: ___________________________________</div>
+                  <div>Cargo: ___________________________________</div>
+                  <div>Assinatura: _______________________________</div>
                 </div>
               </div>
             </div>
