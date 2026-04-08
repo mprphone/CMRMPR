@@ -228,22 +228,46 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
       selectedAreas.has(TaskArea.GESTAO) ||
       hasManagementContext;
     const includesAdministrative = selectedAreas.has(TaskArea.ADMINISTRATIVO);
+    const includesFiscal = selectedAreas.has(TaskArea.FISCALIDADE);
 
-    const includedServices: string[] = [
-      'Organização e tratamento da documentação contabilística.',
-      'Registos contabilísticos, conferências e reconciliações.',
-      'Cumprimento das obrigações fiscais e declarativas.',
-      'Preparação de informação para fecho mensal e anual.',
+    const groupedIncludedServices: Array<{ title: string; items: string[] }> = [
+      {
+        title: 'Contabilidade',
+        items: [
+          'Organização e tratamento da documentação contabilística.',
+          'Registos contabilísticos, conferências e reconciliações.',
+          'Preparação de informação para fecho mensal e anual.',
+        ],
+      },
+      {
+        title: 'Fiscalidade',
+        items: ['Cumprimento das obrigações fiscais e declarativas.'],
+      },
     ];
 
     if (includesPayroll) {
-      includedServices.push('Processamento salarial e cumprimento das obrigações laborais.');
+      groupedIncludedServices.push({
+        title: 'Processamento salarial',
+        items: ['Processamento salarial e cumprimento das obrigações laborais.'],
+      });
     }
     if (includesManagement) {
-      includedServices.push('Apoio à gestão, acompanhamento de indicadores e suporte à decisão.');
+      groupedIncludedServices.push({
+        title: 'Apoio à gestão',
+        items: ['Apoio à gestão, acompanhamento de indicadores e suporte à decisão.'],
+      });
     }
     if (includesAdministrative) {
-      includedServices.push('Apoio administrativo e acompanhamento documental contínuo.');
+      groupedIncludedServices.push({
+        title: 'Apoio administrativo',
+        items: ['Apoio administrativo e acompanhamento documental contínuo.'],
+      });
+    }
+    if (includesFiscal && !groupedIncludedServices.some(group => group.title === 'Fiscalidade')) {
+      groupedIncludedServices.push({
+        title: 'Fiscalidade',
+        items: ['Cumprimento das obrigações fiscais e declarativas.'],
+      });
     }
 
     const excludedServices: string[] = [
@@ -258,8 +282,10 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
     }
 
     return {
-      includedServices: includedServices.slice(0, 7),
+      groupedIncludedServices: groupedIncludedServices.slice(0, 5),
       excludedServices: excludedServices.slice(0, 5),
+      includesPayroll,
+      includesManagement,
     };
   }, [items, tasks]);
 
@@ -336,8 +362,8 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
       maximumFractionDigits: 2,
     });
 
-    const includedLeft = proposalScope.includedServices.slice(0, Math.ceil(proposalScope.includedServices.length / 2));
-    const includedRight = proposalScope.includedServices.slice(Math.ceil(proposalScope.includedServices.length / 2));
+    const groupedLeft = proposalScope.groupedIncludedServices.slice(0, Math.ceil(proposalScope.groupedIncludedServices.length / 2));
+    const groupedRight = proposalScope.groupedIncludedServices.slice(Math.ceil(proposalScope.groupedIncludedServices.length / 2));
 
     return (
       <div className="animate-fade-in bg-white min-h-screen absolute top-0 left-0 w-full z-50 p-4 print:p-0">
@@ -387,9 +413,12 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
           </div>
 
           <div className="mt-5 pb-4 border-b border-slate-200">
-            <h2 className="text-[22px] font-semibold tracking-[0.02em] text-slate-900 uppercase">
+            <h2 className="text-[21px] font-semibold tracking-[0.02em] text-slate-900 uppercase">
               Proposta de Serviços de Contabilidade
             </h2>
+            <p className="mt-1 text-[10px] text-slate-500">
+              Proposta de prestação de serviços de contabilidade e apoio à gestão
+            </p>
           </div>
 
           <div className="mt-4 grid grid-cols-12 gap-4 items-start">
@@ -402,10 +431,17 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 </div>
               </div>
 
+              <div className="rounded-2xl border border-slate-200/80 p-4">
+                <div className="text-[10px] font-semibold text-slate-700 uppercase tracking-[0.08em] mb-1">Enquadramento da Entidade</div>
+                <p className="text-[10px] leading-snug text-slate-700">
+                  Considerando a natureza e exigências de uma instituição social, a presente proposta visa assegurar o cumprimento contabilístico, fiscal e laboral, bem como disponibilizar informação de apoio à gestão e acompanhamento regular.
+                </p>
+              </div>
+
               <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
                 <div className="text-[10px] font-semibold text-emerald-800 uppercase tracking-[0.08em] mb-1">Sobre a MPR</div>
                 <p className="text-[10px] leading-snug text-slate-700">
-                  A MPR Negócios presta serviços de contabilidade com enfoque no rigor técnico, no cumprimento atempado das obrigações legais e no acompanhamento próximo de cada cliente, assegurando informação fiável e suporte contínuo à gestão.
+                  A MPR Negócios assegura acompanhamento por responsável dedicado, resposta célere e reporte regular, combinando rigor técnico com proximidade operacional para garantir previsibilidade e confiança na gestão diária.
                 </p>
               </div>
 
@@ -415,17 +451,31 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   <div className="text-[9px] text-slate-400">Âmbito da proposta</div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9.5px] text-slate-700">
-                  <ul className="space-y-1">
-                    {includedLeft.map((point, index) => (
-                      <li key={`left-${index}`} className="leading-snug">• {point}</li>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[9.5px] text-slate-700">
+                  <div className="space-y-2">
+                    {groupedLeft.map((group, index) => (
+                      <div key={`left-${index}`}>
+                        <div className="text-[9px] font-semibold text-slate-800 uppercase tracking-[0.05em]">{group.title}</div>
+                        <div className="space-y-0.5 mt-0.5">
+                          {group.items.map((item, idx) => (
+                            <div key={`left-item-${index}-${idx}`} className="leading-snug">• {item}</div>
+                          ))}
+                        </div>
+                      </div>
                     ))}
-                  </ul>
-                  <ul className="space-y-1">
-                    {includedRight.map((point, index) => (
-                      <li key={`right-${index}`} className="leading-snug">• {point}</li>
+                  </div>
+                  <div className="space-y-2">
+                    {groupedRight.map((group, index) => (
+                      <div key={`right-${index}`}>
+                        <div className="text-[9px] font-semibold text-slate-800 uppercase tracking-[0.05em]">{group.title}</div>
+                        <div className="space-y-0.5 mt-0.5">
+                          {group.items.map((item, idx) => (
+                            <div key={`right-item-${index}-${idx}`} className="leading-snug">• {item}</div>
+                          ))}
+                        </div>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 </div>
               </div>
             </div>
@@ -433,7 +483,10 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
             <div className="col-span-4 space-y-3">
               <div className="rounded-2xl border border-slate-200/80 p-4">
                 <p className="text-[10px] uppercase font-semibold tracking-[0.07em] text-slate-400">Honorários Mensais</p>
-                <div className="mt-2 text-[28px] font-semibold text-slate-900 leading-tight">{finalMonthlyFeeLabel} € + IVA</div>
+                <div className="mt-2 text-[22px] font-semibold text-slate-900 leading-tight">{finalMonthlyFeeLabel} € + IVA</div>
+                <p className="mt-2 text-[9px] text-slate-500 leading-snug">
+                  O valor mensal pressupõe o volume corrente de atividade atualmente conhecido. Alterações relevantes na estrutura operacional, número de colaboradores ou volume documental poderão determinar revisão da avença.
+                </p>
 
                 <div className="mt-4 border-t border-slate-200 pt-3 text-[10px] text-slate-600 space-y-1">
                   <div className="flex justify-between gap-3"><span>Periodicidade</span><span className="font-medium text-slate-700">Mensal</span></div>
@@ -470,8 +523,12 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
                 <div className="text-[9px] text-slate-600 space-y-1">
                   <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
-                  <div>• A presente proposta pressupõe a entrega atempada da documentação necessária.</div>
+                  <div>• Início do serviço após aceitação formal da proposta e entrega dos elementos necessários.</div>
+                  <div>• A entrega atempada da documentação é da responsabilidade do cliente.</div>
+                  <div>• Coimas decorrentes de atraso documental imputável ao cliente são da sua exclusiva responsabilidade.</div>
                   <div>• Trabalhos extraordinários ou não previstos serão objeto de orçamento autónomo.</div>
+                  <div>• Faturação mensal; em caso de mora poderão ser aplicados juros legais.</div>
+                  <div>• Confidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.</div>
                   <div>• A proposta é válida por 30 dias.</div>
                 </div>
               </div>
@@ -481,6 +538,9 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               <div className="rounded-xl border border-slate-200/80 p-3">
                 <div className="text-[10px] font-semibold text-slate-700">Com os melhores cumprimentos,</div>
                 <div className="text-[11px] font-semibold text-slate-900 mt-1">MPR Negócios</div>
+                <p className="mt-2 text-[9px] text-slate-600 leading-snug">
+                  Permanecemos inteiramente disponíveis para esclarecer qualquer ponto e ajustar a proposta às necessidades específicas da instituição.
+                </p>
               </div>
 
               <div className="rounded-xl border border-slate-200/80 p-3">
