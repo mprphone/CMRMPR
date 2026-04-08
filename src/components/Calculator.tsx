@@ -433,7 +433,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
             <div className="col-span-4 space-y-3">
               <div className="rounded-2xl border border-slate-200/80 p-4">
                 <p className="text-[10px] uppercase font-semibold tracking-[0.07em] text-slate-400">Honorários Mensais</p>
-                <div className="mt-2 text-[35px] font-semibold text-slate-900 leading-none">{finalMonthlyFeeLabel} € + IVA</div>
+                <div className="mt-2 text-[28px] font-semibold text-slate-900 leading-tight">{finalMonthlyFeeLabel} € + IVA</div>
 
                 <div className="mt-4 border-t border-slate-200 pt-3 text-[10px] text-slate-600 space-y-1">
                   <div className="flex justify-between gap-3"><span>Periodicidade</span><span className="font-medium text-slate-700">Mensal</span></div>
