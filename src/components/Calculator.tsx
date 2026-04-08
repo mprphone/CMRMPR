@@ -344,17 +344,17 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               </div>
 
               <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
-                <div className="text-[10px] font-extrabold text-blue-700 uppercase tracking-wide mb-1">A. Apresenta??o MPR</div>
+                <div className="text-[10px] font-extrabold text-blue-700 uppercase tracking-wide mb-1">A. Apresentação MPR</div>
                 <p className="text-[9px] leading-snug text-slate-700">
-                  Somos uma equipa competente, com mais de 20 anos de experi?ncia, sempre pronta a servir com
-                  proximidade, rigor e resposta r?pida ?s necessidades do cliente.
+                  A MPR Negócios é uma equipa experiente, com mais de 20 anos de atuação, orientada por rigor técnico,
+                  proximidade e disponibilidade permanente para apoiar cada cliente com qualidade e confiança.
                 </p>
               </div>
 
               <div>
                 <div className="flex items-center justify-between">
-                  <h3 className="text-[10px] font-extrabold text-slate-800 uppercase tracking-wide border-l-4 border-blue-600 pl-2">B. Servi?os inclu?dos</h3>
-                  <div className="text-[8px] text-slate-500">Apresenta??o em duas colunas</div>
+                  <h3 className="text-[10px] font-extrabold text-slate-800 uppercase tracking-wide border-l-4 border-blue-600 pl-2">B. Serviços incluídos</h3>
+                  <div className="text-[8px] text-slate-500">Apresentação em duas colunas</div>
                 </div>
 
                 <div className="mt-1 border border-slate-200 rounded-xl p-2.5">
@@ -362,8 +362,8 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                     {items.map((item) => {
                       const task = item.taskId ? tasks.find(t => t.id === item.taskId) : null;
                       const name = task?.name || item.customName || 'Tarefa personalizada';
-                      const frequencyLabel = item.frequency ? `${item.frequency}x/ano` : '';
-                      const quantityLabel = item.quantity ? `mult. ${item.quantity}` : '';
+                      const frequencyLabel = item.frequency ? `${item.frequency} vezes/ano` : '';
+                      const quantityLabel = item.quantity ? `qtd. ${item.quantity}` : '';
                       const compactMeta = [frequencyLabel, quantityLabel].filter(Boolean).join(' | ');
 
                       return (
@@ -382,7 +382,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               <div className="text-[9px] text-slate-600 leading-snug">
                 <div className="font-extrabold text-slate-700 uppercase tracking-wide text-[9px] mb-1">Condições</div>
                 <div>- Valores sujeitos a IVA a taxa legal em vigor.</div>
-                <div>- Ajustes podem ocorrer por alteracao de volume/complexidade.</div>
+                <div>- Ajustes podem ocorrer por alteração de volume/complexidade.</div>
                 <div>- Início do serviço após aceitação da proposta.</div>
               </div>
             </div>
@@ -395,7 +395,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
                 <div className="mt-3 border-t border-slate-200 pt-2 text-[9px] text-slate-600 leading-snug space-y-1">
                   <div className="flex justify-between gap-3"><span className="text-slate-500">Periodicidade</span><span className="font-bold text-slate-700">Mensal</span></div>
-                  <div className="flex justify-between gap-3"><span className="text-slate-500">Pagamento</span><span className="font-bold text-slate-700">Ate dia 8</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-slate-500">Pagamento</span><span className="font-bold text-slate-700">Até dia 8</span></div>
                 </div>
 
                 <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3">
