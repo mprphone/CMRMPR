@@ -20,6 +20,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLo
     { id: 'insurance', label: 'Seguros', icon: Shield, roles: ['admin', 'user'] },
     { id: 'sht', label: 'SHT', icon: HeartPulse, roles: ['admin', 'user'] },
     { id: 'cashier', label: 'Caixa Numerário', icon: Landmark, roles: ['admin', 'user'] },
+    { id: 'irs-control', label: 'Control IRS', icon: Landmark, roles: ['admin', 'user'] },
     { id: 'emails', label: 'Email Marketing', icon: Mail, roles: ['admin'] },
     { id: 'team', label: 'Equipa', icon: Briefcase, roles: ['admin'] },
     { id: 'tasks', label: 'Catálogo Tarefas', icon: ListTodo, roles: ['admin', 'user'] },
@@ -98,3 +99,4 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLo
 };
 
 export default Sidebar;
+

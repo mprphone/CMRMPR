@@ -23,6 +23,7 @@ import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-r
 import Insurance from './components/Insurance';
 import WorkSafety from './components/WorkSafety';
 import Cashier from './components/Cashier';
+import IrsControl from './components/IrsControl';
 
 // Polyfill for crypto.randomUUID for non-secure contexts or older browsers
 const generateUUID = () => {
@@ -742,6 +743,12 @@ export default function App() {
                   setCashAgreements={setCashAgreements}
                   cashOperations={cashOperations}
                   setCashOperations={setCashOperations}
+                />
+              )}
+              {activeView === 'irs-control' && (
+                <IrsControl
+                  clients={clients}
+                  groups={groups}
                 />
               )}
               {activeView === 'groups' && (
