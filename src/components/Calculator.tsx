@@ -494,6 +494,15 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 </div>
               </div>
 
+              <div className="rounded-xl border border-slate-200/80 p-2.5">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
+                <div className="text-[8px] text-slate-600 space-y-0.5 leading-tight">
+                  <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
+                  <div>• Confidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.</div>
+                  <div>• A proposta é válida por 30 dias.</div>
+                </div>
+              </div>
+
               <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.07em] text-emerald-800 mb-1">Proposta apresentada por</p>
                 <p className="text-[12px] font-semibold text-slate-900">{(globalSettings as any)?.companyName || (globalSettings as any)?.company_name || 'MPR Negócios'}</p>
@@ -505,19 +514,10 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   {(globalSettings as any)?.companyPhone || (globalSettings as any)?.company_phone || MPR_OFFICIAL_PHONE}
                 </p>
               </div>
-
-              <div className="rounded-xl border border-slate-200/80 p-2.5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
-                <div className="text-[8px] text-slate-600 space-y-0.5 leading-tight">
-                  <div>• Valores acrescidos de IVA à taxa legal em vigor.</div>
-                  <div>• Confidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.</div>
-                  <div>• A proposta é válida por 30 dias.</div>
-                </div>
-              </div>
             </div>
           </div>
 
-          <div className="mt-2.5 grid grid-cols-12 gap-3">
+          <div className="mt-1.5 grid grid-cols-12 gap-2.5">
             <div className="col-span-7 space-y-2">
               <div className="rounded-xl border border-slate-200/80 p-2.5">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Serviços não incluídos</div>
