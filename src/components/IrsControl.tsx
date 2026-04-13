@@ -599,6 +599,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
         currentYear={currentYear}
         setCurrentYear={setCurrentYear}
         irsGroup={irsGroup}
+        allClients={clients}
         irsGroupClients={irsGroupClients}
         clientFichaInfoMap={clientFichaInfoMap}
         irsControlMap={irsControlMap}

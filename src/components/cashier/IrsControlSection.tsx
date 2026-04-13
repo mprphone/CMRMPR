@@ -3,11 +3,13 @@ import { Check, Copy, Eye, EyeOff, X } from 'lucide-react';
 import { Client, FeeGroup } from '../../types';
 import type { IrsClientFichaInfo } from '../IrsControl';
 import { IrsControlRecord, IrsDeliveryClose } from './useIrsControl';
+import { parseIrsPdfNifsWithAI } from '../../services/geminiService';
 
 interface IrsControlSectionProps {
   currentYear: number;
   setCurrentYear: React.Dispatch<React.SetStateAction<number>>;
   irsGroup?: FeeGroup;
+  allClients: Client[];
   irsGroupClients: Client[];
   clientFichaInfoMap: Map<string, IrsClientFichaInfo>;
   irsControlMap: Map<string, IrsControlRecord>;
@@ -32,10 +34,209 @@ const buildMemberLine = (member: IrsClientFichaInfo['householdMembers'][number])
   `${resolveMemberNifForCopy(member)}\t${member.atPassword || ''}`
 );
 
+const normalizeNif = (value: string): string => (value || '').replace(/\D/g, '');
+const normalizeSearch = (value: string): string => (
+  (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+);
+
+interface IrsPdfParseResult {
+  subjectANif: string;
+  subjectBNif: string;
+  dependentNifs: string[];
+  firstPageText: string;
+  hasBLabel: boolean;
+  hasDependentLabel: boolean;
+  source: 'local' | 'local+ai';
+}
+
+interface IrsPdfValidationResult {
+  parsed: IrsPdfParseResult;
+  notes: string[];
+  suggestions: string[];
+}
+
+const buildLinesFromPdfItems = (items: any[]): string[] => {
+  const byY = new Map<number, string[]>();
+  items.forEach((item) => {
+    const raw = String(item?.str || '').trim();
+    if (!raw) return;
+    const y = Math.round(Number(item?.transform?.[5] || 0));
+    if (!byY.has(y)) byY.set(y, []);
+    byY.get(y)!.push(raw);
+  });
+
+  return Array.from(byY.entries())
+    .sort((a, b) => b[0] - a[0])
+    .map(([, chunks]) => chunks.join(' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+};
+
+const parseIrsPdfFirstPage = async (file: File): Promise<IrsPdfParseResult> => {
+  const pdfjsLib: any = await import('pdfjs-dist');
+  const buffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+  });
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const textContent = await page.getTextContent();
+  const lines = buildLinesFromPdfItems((textContent?.items || []) as any[]);
+  const fullText = lines.join('\n');
+  const normalizedFullText = normalizeSearch(fullText);
+  const normalizedLines = lines.map((line) => normalizeSearch(line));
+  const hasBLabel = normalizedFullText.includes('sujeito passivo b');
+  const hasDependentLabel = normalizedFullText.includes('dependente');
+
+  const findFirstByLabel = (labels: string[]): string => {
+    for (let index = 0; index < normalizedLines.length; index += 1) {
+      const line = normalizedLines[index];
+      if (!labels.some((label) => line.includes(label))) continue;
+      const candidate = [lines[index], lines[index + 1] || '', lines[index + 2] || ''].join(' ');
+      const match = candidate.match(/(\d{9})/);
+      if (match) return match[1];
+    }
+    return '';
+  };
+
+  const subjectANif = findFirstByLabel(['sujeito passivo a']);
+  const subjectBNif = findFirstByLabel(['sujeito passivo b']);
+
+  const dependentNifSet = new Set<string>();
+  const dependentRegex = /dependente[^0-9]{0,80}(\d{9})/gi;
+  let dependentMatch: RegExpExecArray | null = dependentRegex.exec(normalizedFullText);
+  while (dependentMatch) {
+    dependentNifSet.add(dependentMatch[1]);
+    dependentMatch = dependentRegex.exec(normalizedFullText);
+  }
+
+  if (dependentNifSet.size === 0) {
+    normalizedLines.forEach((line, index) => {
+      if (!line.includes('dependente')) return;
+      const candidate = [lines[index], lines[index + 1] || ''].join(' ');
+      const matches = candidate.match(/\d{9}/g) || [];
+      matches.forEach((nif) => dependentNifSet.add(nif));
+    });
+  }
+
+  return {
+    subjectANif: normalizeNif(subjectANif),
+    subjectBNif: normalizeNif(subjectBNif),
+    dependentNifs: Array.from(dependentNifSet).map((nif) => normalizeNif(nif)).filter((nif) => nif.length === 9),
+    firstPageText: fullText,
+    hasBLabel,
+    hasDependentLabel,
+    source: 'local',
+  };
+};
+
+const shouldUseAiFallback = (parsed: IrsPdfParseResult): boolean => {
+  if (!parsed.subjectANif) return true;
+  if (parsed.hasBLabel && !parsed.subjectBNif) return true;
+  if (parsed.hasDependentLabel && parsed.dependentNifs.length === 0) return true;
+  return false;
+};
+
+const mergeParsedWithAi = (
+  localParsed: IrsPdfParseResult,
+  aiParsed: { subjectANif: string; subjectBNif: string; dependentNifs: string[] }
+): IrsPdfParseResult => {
+  const mergedDependentNifs = Array.from(
+    new Set([
+      ...localParsed.dependentNifs.map((nif) => normalizeNif(nif)),
+      ...(aiParsed.dependentNifs || []).map((nif) => normalizeNif(nif)),
+    ].filter((nif) => nif.length === 9))
+  );
+
+  return {
+    ...localParsed,
+    subjectANif: localParsed.subjectANif || normalizeNif(aiParsed.subjectANif),
+    subjectBNif: localParsed.subjectBNif || normalizeNif(aiParsed.subjectBNif),
+    dependentNifs: mergedDependentNifs,
+    source: 'local+ai',
+  };
+};
+
+const validateIrsPdfData = (
+  parsed: IrsPdfParseResult,
+  currentClient: Client,
+  currentFichaInfo: IrsClientFichaInfo | undefined,
+  allClients: Client[]
+): IrsPdfValidationResult => {
+  const allClientsByNif = new Map<string, Client>();
+  allClients.forEach((client) => {
+    const nif = normalizeNif(client.nif);
+    if (nif) allClientsByNif.set(nif, client);
+  });
+
+  const notes: string[] = [];
+  const suggestions: string[] = [];
+  const members = currentFichaInfo?.householdMembers || [];
+
+  const hasRelation = (nif: string, relationKind: 'conjuge' | 'filho'): boolean => {
+    const expectedNif = normalizeNif(nif);
+    return members.some((member) => {
+      const memberNif = normalizeNif(resolveMemberNifForCopy(member));
+      if (memberNif !== expectedNif) return false;
+      const relation = normalizeSearch(member.relation || '');
+      if (relationKind === 'conjuge') {
+        return relation.includes('conjuge') || relation.includes('marido') || relation.includes('esposa');
+      }
+      return relation.includes('filho') || relation.includes('filha') || relation.includes('dependente');
+    });
+  };
+
+  const currentClientNif = normalizeNif(currentClient.nif);
+
+  if (!parsed.subjectANif) {
+    notes.push('Não foi possível detetar o NIF do Sujeito Passivo A na 1ª página.');
+  } else if (currentClientNif !== parsed.subjectANif) {
+    notes.push(`Sujeito Passivo A (${parsed.subjectANif}) é diferente do cliente aberto (${currentClientNif}).`);
+  }
+
+  if (parsed.subjectBNif) {
+    if (!allClientsByNif.has(parsed.subjectBNif)) {
+      suggestions.push(`Criar ficha para Sujeito Passivo B (NIF ${parsed.subjectBNif}).`);
+    }
+    if (!hasRelation(parsed.subjectBNif, 'conjuge')) {
+      suggestions.push(`Criar relação "cônjuge" com o NIF ${parsed.subjectBNif}.`);
+    }
+  } else {
+    notes.push('Sem Sujeito Passivo B identificado na 1ª página.');
+  }
+
+  if (parsed.dependentNifs.length === 0) {
+    notes.push('Sem dependentes identificados na 1ª página.');
+  } else {
+    parsed.dependentNifs.forEach((dependentNif) => {
+      if (!allClientsByNif.has(dependentNif)) {
+        suggestions.push(`Criar ficha para dependente (NIF ${dependentNif}).`);
+      }
+      if (!hasRelation(dependentNif, 'filho')) {
+        suggestions.push(`Criar relação "filho" para dependente (NIF ${dependentNif}).`);
+      }
+    });
+  }
+
+  if (suggestions.length === 0 && notes.length === 0) {
+    notes.push('Validação OK: NIFs e relações principais estão consistentes.');
+  }
+
+  if (parsed.source === 'local+ai') {
+    notes.unshift('Alguns NIFs foram inferidos por IA (Gemini) por dúvida na leitura local.');
+  }
+
+  return { parsed, notes, suggestions };
+};
+
 const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   currentYear,
   setCurrentYear,
   irsGroup,
+  allClients,
   irsGroupClients,
   clientFichaInfoMap,
   irsControlMap,
@@ -54,6 +255,9 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   const [floatingClientId, setFloatingClientId] = React.useState<string | null>(null);
   const [visiblePasswords, setVisiblePasswords] = React.useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = React.useState<string>('');
+  const [isVerifyingPdf, setIsVerifyingPdf] = React.useState(false);
+  const [pdfValidationResult, setPdfValidationResult] = React.useState<IrsPdfValidationResult | null>(null);
+  const pdfFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const floatingClient = floatingClientId
     ? irsGroupClients.find((client) => client.id === floatingClientId) || null
@@ -70,6 +274,56 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
       console.error('Erro ao copiar texto para clipboard:', err);
     }
   }, []);
+
+  React.useEffect(() => {
+    setPdfValidationResult(null);
+    setIsVerifyingPdf(false);
+  }, [floatingClientId]);
+
+  const handleVerifyPdfClick = React.useCallback(() => {
+    pdfFileInputRef.current?.click();
+  }, []);
+
+  const handlePdfSelected = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !floatingClient) return;
+
+    setIsVerifyingPdf(true);
+    try {
+      const localParsed = await parseIrsPdfFirstPage(file);
+      let finalParsed = localParsed;
+
+      if (shouldUseAiFallback(localParsed)) {
+        try {
+          const aiParsed = await parseIrsPdfNifsWithAI(localParsed.firstPageText);
+          finalParsed = mergeParsedWithAi(localParsed, aiParsed);
+        } catch (aiErr) {
+          console.error('Falha no fallback Gemini para IRS:', aiErr);
+        }
+      }
+
+      const validation = validateIrsPdfData(finalParsed, floatingClient, floatingFichaInfo, allClients);
+      setPdfValidationResult(validation);
+    } catch (err) {
+      console.error('Erro ao verificar PDF do IRS:', err);
+      setPdfValidationResult({
+        parsed: {
+          subjectANif: '',
+          subjectBNif: '',
+          dependentNifs: [],
+          firstPageText: '',
+          hasBLabel: false,
+          hasDependentLabel: false,
+          source: 'local',
+        },
+        notes: ['Não foi possível ler o PDF. Confirme se é um PDF de texto (não imagem digitalizada).'],
+        suggestions: [],
+      });
+    } finally {
+      setIsVerifyingPdf(false);
+    }
+  }, [allClients, floatingClient, floatingFichaInfo]);
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
@@ -254,6 +508,49 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
             </div>
 
             <div className="p-5 space-y-4">
+              <div className="bg-white border border-slate-200 rounded-lg p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleVerifyPdfClick}
+                    disabled={isVerifyingPdf}
+                    className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-60"
+                  >
+                    {isVerifyingPdf ? 'A verificar...' : 'Verificar IRS (PDF)'}
+                  </button>
+                  <span className="text-xs text-slate-500">
+                    Lê a 1ª página: Sujeito Passivo A/B e Dependentes.
+                  </span>
+                </div>
+                <input
+                  ref={pdfFileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={handlePdfSelected}
+                />
+
+                {pdfValidationResult && (
+                  <div className="mt-3 space-y-2 text-sm">
+                    <div className="text-xs text-slate-600">
+                      <span className="font-bold">Detetado:</span>{' '}
+                      A={pdfValidationResult.parsed.subjectANif || '-'} | B={pdfValidationResult.parsed.subjectBNif || '-'} | Dependentes={pdfValidationResult.parsed.dependentNifs.join(', ') || '-'}
+                    </div>
+                    {pdfValidationResult.notes.map((note) => (
+                      <p key={`note-${note}`} className="text-slate-700">• {note}</p>
+                    ))}
+                    {pdfValidationResult.suggestions.length > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                        <p className="text-xs font-bold uppercase text-amber-700 mb-1">Sugestões</p>
+                        {pdfValidationResult.suggestions.map((suggestion) => (
+                          <p key={`suggestion-${suggestion}`} className="text-amber-800">• {suggestion}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <p className="text-xs font-bold uppercase text-slate-500">Agregado Familiar</p>
@@ -282,13 +579,12 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                         <th className="px-2 py-2 text-left">Nome</th>
                         <th className="px-2 py-2 text-left">NIF</th>
                         <th className="px-2 py-2 text-left">Senha AT</th>
-                        <th className="px-2 py-2 text-right">Ação</th>
+                        <th className="px-2 py-2 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       {(floatingFichaInfo?.householdMembers || []).map((member) => {
                         const memberKey = `${floatingClient.id}-${member.key}`;
-                        const memberLine = buildMemberLine(member);
                         const isVisible = Boolean(visiblePasswords[memberKey]);
                         return (
                           <tr key={memberKey}>
@@ -317,14 +613,24 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                               </div>
                             </td>
                             <td className="px-2 py-2 text-right">
-                              <button
-                                type="button"
-                                onClick={() => copyText(memberLine, memberKey)}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-blue-700 hover:text-blue-800"
-                              >
-                                <Copy size={13} />
-                                {copiedKey === memberKey ? 'Copiado' : 'Copiar NIF+Senha'}
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => copyText(resolveMemberNifForCopy(member) || '', `${memberKey}-nif`)}
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-blue-700 hover:text-blue-800"
+                                >
+                                  <Copy size={13} />
+                                  {copiedKey === `${memberKey}-nif` ? 'NIF Copiado' : 'Copiar NIF'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => copyText(member.atPassword || '', `${memberKey}-pwd`)}
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-blue-700 hover:text-blue-800"
+                                >
+                                  <Copy size={13} />
+                                  {copiedKey === `${memberKey}-pwd` ? 'Senha Copiada' : 'Copiar Senha'}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
