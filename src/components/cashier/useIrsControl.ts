@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { appConfigService } from '../../services/supabase';
 
+export type IrsSettlementStatus = '' | 'A pagar' | 'A receber';
+
 export interface IrsControlRecord {
   clientId: string;
   year: number;
@@ -9,6 +11,9 @@ export interface IrsControlRecord {
   amount: number;
   paymentMethod: 'Numerário' | 'MB Way';
   notes: string;
+  householdInfo: string;
+  financasPassword: string;
+  irsSettlement: IrsSettlementStatus;
   deliveryCloseId?: string | null;
   updatedAt: string;
 }
@@ -48,6 +53,9 @@ const normalizeIrsControlRecords = (parsedValue: unknown): IrsControlRecord[] =>
       amount: Number.isFinite(Number(item?.amount)) ? Number(item.amount) : 0,
       paymentMethod: item?.paymentMethod === 'MB Way' ? 'MB Way' : 'Numerário',
       notes: typeof item?.notes === 'string' ? item.notes : '',
+      householdInfo: typeof item?.householdInfo === 'string' ? item.householdInfo : '',
+      financasPassword: typeof item?.financasPassword === 'string' ? item.financasPassword : '',
+      irsSettlement: item?.irsSettlement === 'A pagar' || item?.irsSettlement === 'A receber' ? item.irsSettlement : '',
       deliveryCloseId: typeof item?.deliveryCloseId === 'string' ? item.deliveryCloseId : null,
       updatedAt: typeof item?.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
     });
@@ -228,7 +236,11 @@ export const useIrsControl = (currentYear: number) => {
   const upsertIrsRecord = useCallback((clientId: string, updater: (previous: IrsControlRecord) => IrsControlRecord) => {
     setIrsControlRecords(prev => {
       const recordKey = `${clientId}-${currentYear}`;
-      const existing = prev.find(record => `${record.clientId}-${record.year}` === recordKey) || {
+      const existingForYear = prev.find(record => `${record.clientId}-${record.year}` === recordKey);
+      const latestForClient = prev
+        .filter(record => record.clientId === clientId)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      const existing = existingForYear || {
         clientId,
         year: currentYear,
         delivered: false,
@@ -236,6 +248,9 @@ export const useIrsControl = (currentYear: number) => {
         amount: 0,
         paymentMethod: 'Numerário',
         notes: '',
+        householdInfo: latestForClient?.householdInfo || '',
+        financasPassword: latestForClient?.financasPassword || '',
+        irsSettlement: latestForClient?.irsSettlement || '',
         deliveryCloseId: null,
         updatedAt: new Date().toISOString(),
       };
@@ -302,6 +317,27 @@ export const useIrsControl = (currentYear: number) => {
     }));
   }, [upsertIrsRecord]);
 
+  const handleIrsHouseholdInfoChange = useCallback((clientId: string, householdInfo: string) => {
+    upsertIrsRecord(clientId, previous => ({
+      ...previous,
+      householdInfo,
+    }));
+  }, [upsertIrsRecord]);
+
+  const handleIrsFinancasPasswordChange = useCallback((clientId: string, financasPassword: string) => {
+    upsertIrsRecord(clientId, previous => ({
+      ...previous,
+      financasPassword,
+    }));
+  }, [upsertIrsRecord]);
+
+  const handleIrsSettlementChange = useCallback((clientId: string, irsSettlement: IrsSettlementStatus) => {
+    upsertIrsRecord(clientId, previous => ({
+      ...previous,
+      irsSettlement,
+    }));
+  }, [upsertIrsRecord]);
+
   const handleIrsPaymentMethodChange = useCallback((clientId: string, paymentMethod: 'Numerário' | 'MB Way') => {
     const existing = irsControlMap.get(`${clientId}-${currentYear}`);
     if (existing?.deliveryCloseId) return;
@@ -356,5 +392,8 @@ export const useIrsControl = (currentYear: number) => {
     handleIrsPaymentMethodChange,
     handleIrsAmountChange,
     handleIrsNotesChange,
+    handleIrsHouseholdInfoChange,
+    handleIrsFinancasPasswordChange,
+    handleIrsSettlementChange,
   };
 };

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Check } from 'lucide-react';
 import { Client, FeeGroup } from '../../types';
-import { IrsControlRecord, IrsDeliveryClose } from './useIrsControl';
+import { IrsControlRecord, IrsDeliveryClose, IrsSettlementStatus } from './useIrsControl';
 
 interface IrsControlSectionProps {
   currentYear: number;
@@ -19,6 +19,9 @@ interface IrsControlSectionProps {
   onPaymentMethodChange: (clientId: string, method: 'Numerário' | 'MB Way') => void;
   onAmountChange: (clientId: string, value: string) => void;
   onNotesChange: (clientId: string, notes: string) => void;
+  onHouseholdInfoChange: (clientId: string, householdInfo: string) => void;
+  onFinancasPasswordChange: (clientId: string, password: string) => void;
+  onIrsSettlementChange: (clientId: string, settlement: IrsSettlementStatus) => void;
 }
 
 const IrsControlSection: React.FC<IrsControlSectionProps> = ({
@@ -37,7 +40,12 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   onPaymentMethodChange,
   onAmountChange,
   onNotesChange,
+  onHouseholdInfoChange,
+  onFinancasPasswordChange,
+  onIrsSettlementChange,
 }) => {
+  const [expandedClientId, setExpandedClientId] = React.useState<string | null>(null);
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
       <div className="flex items-center justify-between mb-4">
@@ -95,66 +103,122 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                   const amount = record?.amount ?? 0;
                   const paymentMethod = record?.paymentMethod || 'Numerário';
                   const notes = record?.notes ?? '';
+                  const householdInfo = record?.householdInfo ?? '';
+                  const financasPassword = record?.financasPassword ?? '';
+                  const irsSettlement = record?.irsSettlement ?? '';
                   const isClosed = Boolean(record?.deliveryCloseId);
+                  const isExpanded = expandedClientId === client.id;
 
                   return (
-                    <tr key={`${client.id}-${currentYear}`} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-medium text-slate-700">{client.name}</td>
-                      <td className="px-3 py-2 text-slate-600">{client.nif}</td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => onToggleDelivered(client.id)}
-                          className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${delivered ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-green-50'}`}
-                        >
-                          <Check size={14} />
-                        </button>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => onTogglePaid(client.id)}
-                          className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${paid ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-blue-50'}`}
-                        >
-                          <Check size={14} />
-                        </button>
-                      </td>
-                      <td className="px-3 py-2">
-                        <select
-                          value={paymentMethod}
-                          disabled={!paid || isClosed}
-                          onChange={(e) => onPaymentMethodChange(client.id, e.target.value as 'Numerário' | 'MB Way')}
-                          className="w-full px-2 py-1.5 border rounded-lg text-sm disabled:bg-slate-100 disabled:text-slate-400"
-                        >
-                          <option value="Numerário">Numerário</option>
-                          <option value="MB Way">MB Way</option>
-                        </select>
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={amount > 0 ? amount.toString() : ''}
-                          disabled={!paid || isClosed}
-                          onChange={(e) => onAmountChange(client.id, e.target.value)}
-                          className="w-full px-3 py-1.5 border rounded-lg text-right disabled:bg-slate-100 disabled:text-slate-400"
-                          placeholder={paid ? '0.00' : '-'}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={notes}
-                          onChange={(e) => onNotesChange(client.id, e.target.value)}
-                          className="w-full px-3 py-1.5 border rounded-lg"
-                          placeholder="Ex: oferta, motivo..."
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-center text-xs">
-                        {isClosed ? 'Fechado' : 'Aberto'}
-                      </td>
-                    </tr>
+                    <React.Fragment key={`${client.id}-${currentYear}`}>
+                      <tr className="hover:bg-slate-50">
+                        <td className="px-3 py-2 font-medium text-slate-700">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedClientId(prev => prev === client.id ? null : client.id)}
+                            className="text-left hover:text-blue-600"
+                          >
+                            <span className="block">{client.name}</span>
+                            <span className="block text-[10px] font-normal text-blue-500">{isExpanded ? 'Ocultar detalhes IRS' : 'Ver detalhes IRS'}</span>
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{client.nif}</td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => onToggleDelivered(client.id)}
+                            className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${delivered ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-green-50'}`}
+                          >
+                            <Check size={14} />
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => onTogglePaid(client.id)}
+                            className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${paid ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-blue-50'}`}
+                          >
+                            <Check size={14} />
+                          </button>
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={paymentMethod}
+                            disabled={!paid || isClosed}
+                            onChange={(e) => onPaymentMethodChange(client.id, e.target.value as 'Numerário' | 'MB Way')}
+                            className="w-full px-2 py-1.5 border rounded-lg text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                          >
+                            <option value="Numerário">Numerário</option>
+                            <option value="MB Way">MB Way</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={amount > 0 ? amount.toString() : ''}
+                            disabled={!paid || isClosed}
+                            onChange={(e) => onAmountChange(client.id, e.target.value)}
+                            className="w-full px-3 py-1.5 border rounded-lg text-right disabled:bg-slate-100 disabled:text-slate-400"
+                            placeholder={paid ? '0.00' : '-'}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="text"
+                            value={notes}
+                            onChange={(e) => onNotesChange(client.id, e.target.value)}
+                            className="w-full px-3 py-1.5 border rounded-lg"
+                            placeholder="Ex: oferta, motivo..."
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center text-xs">
+                          {isClosed ? 'Fechado' : 'Aberto'}
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-slate-50">
+                          <td colSpan={8} className="px-3 py-3">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div>
+                                <label className="text-[11px] font-bold text-slate-500 uppercase">Agregado Familiar</label>
+                                <textarea
+                                  value={householdInfo}
+                                  onChange={(e) => onHouseholdInfoChange(client.id, e.target.value)}
+                                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                                  rows={2}
+                                  placeholder="Composição do agregado familiar"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] font-bold text-slate-500 uppercase">Senha Finanças</label>
+                                <input
+                                  type="password"
+                                  value={financasPassword}
+                                  onChange={(e) => onFinancasPasswordChange(client.id, e.target.value)}
+                                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                                  placeholder="Senha do Portal das Finanças"
+                                  autoComplete="off"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[11px] font-bold text-slate-500 uppercase">IRS a Pagar/Receber</label>
+                                <select
+                                  value={irsSettlement}
+                                  onChange={(e) => onIrsSettlementChange(client.id, e.target.value as IrsSettlementStatus)}
+                                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                                >
+                                  <option value="">Não definido</option>
+                                  <option value="A pagar">A pagar</option>
+                                  <option value="A receber">A receber</option>
+                                </select>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

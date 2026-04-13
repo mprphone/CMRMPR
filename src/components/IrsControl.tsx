@@ -30,6 +30,9 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
     handleIrsPaymentMethodChange,
     handleIrsAmountChange,
     handleIrsNotesChange,
+    handleIrsHouseholdInfoChange,
+    handleIrsFinancasPasswordChange,
+    handleIrsSettlementChange,
   } = useIrsControl(currentYear);
 
   return (
@@ -50,6 +53,9 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
         onPaymentMethodChange={handleIrsPaymentMethodChange}
         onAmountChange={handleIrsAmountChange}
         onNotesChange={handleIrsNotesChange}
+        onHouseholdInfoChange={handleIrsHouseholdInfoChange}
+        onFinancasPasswordChange={handleIrsFinancasPasswordChange}
+        onIrsSettlementChange={handleIrsSettlementChange}
       />
     </div>
   );
