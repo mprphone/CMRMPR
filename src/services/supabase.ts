@@ -313,6 +313,7 @@ export const taskCatalogService = {
 
 // --- MAPEAMENTOS ---
 const mapDbToClient = (db: any): Client => ({
+  ...db,
   id: db.id,
   name: db.name || db.nome || db.Name || db.Nome || db.cliente || db.Cliente || 'Sem Nome',
   email: db.email || '',

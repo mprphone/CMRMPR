@@ -1,13 +1,14 @@
 import React from 'react';
-import { Check } from 'lucide-react';
+import { Check, Eye, EyeOff } from 'lucide-react';
 import { Client, FeeGroup } from '../../types';
-import { IrsControlRecord, IrsDeliveryClose, IrsSettlementStatus } from './useIrsControl';
+import { IrsControlRecord, IrsDeliveryClose } from './useIrsControl';
 
 interface IrsControlSectionProps {
   currentYear: number;
   setCurrentYear: React.Dispatch<React.SetStateAction<number>>;
   irsGroup?: FeeGroup;
   irsGroupClients: Client[];
+  clientFichaInfoMap: Map<string, { householdSummary: string; atUsername: string; atPassword: string }>;
   irsControlMap: Map<string, IrsControlRecord>;
   pendingDeliveryTotal: number;
   pendingDeliveryCount: number;
@@ -19,9 +20,7 @@ interface IrsControlSectionProps {
   onPaymentMethodChange: (clientId: string, method: 'Numerário' | 'MB Way') => void;
   onAmountChange: (clientId: string, value: string) => void;
   onNotesChange: (clientId: string, notes: string) => void;
-  onHouseholdInfoChange: (clientId: string, householdInfo: string) => void;
-  onFinancasPasswordChange: (clientId: string, password: string) => void;
-  onIrsSettlementChange: (clientId: string, settlement: IrsSettlementStatus) => void;
+  onSettlementAmountChange: (clientId: string, amount: number) => void;
 }
 
 const IrsControlSection: React.FC<IrsControlSectionProps> = ({
@@ -29,6 +28,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   setCurrentYear,
   irsGroup,
   irsGroupClients,
+  clientFichaInfoMap,
   irsControlMap,
   pendingDeliveryTotal,
   pendingDeliveryCount,
@@ -40,11 +40,10 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   onPaymentMethodChange,
   onAmountChange,
   onNotesChange,
-  onHouseholdInfoChange,
-  onFinancasPasswordChange,
-  onIrsSettlementChange,
+  onSettlementAmountChange,
 }) => {
   const [expandedClientId, setExpandedClientId] = React.useState<string | null>(null);
+  const [visiblePasswords, setVisiblePasswords] = React.useState<Record<string, boolean>>({});
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
@@ -98,16 +97,21 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {irsGroupClients.map(client => {
                   const record = irsControlMap.get(`${client.id}-${currentYear}`);
+                  const fichaInfo = clientFichaInfoMap.get(client.id);
                   const delivered = Boolean(record?.delivered);
                   const paid = Boolean(record?.paid);
                   const amount = record?.amount ?? 0;
                   const paymentMethod = record?.paymentMethod || 'Numerário';
                   const notes = record?.notes ?? '';
-                  const householdInfo = record?.householdInfo ?? '';
-                  const financasPassword = record?.financasPassword ?? '';
-                  const irsSettlement = record?.irsSettlement ?? '';
+                  const householdSummary = fichaInfo?.householdSummary || '';
+                  const atUsername = fichaInfo?.atUsername || '';
+                  const atPassword = fichaInfo?.atPassword || '';
+                  const irsSettlementAmount = Number(record?.irsSettlementAmount || 0);
+                  const settlementDirection = irsSettlementAmount < 0 ? 'A pagar' : 'A receber';
+                  const settlementAbsoluteAmount = Math.abs(irsSettlementAmount);
                   const isClosed = Boolean(record?.deliveryCloseId);
                   const isExpanded = expandedClientId === client.id;
+                  const isPasswordVisible = Boolean(visiblePasswords[client.id]);
 
                   return (
                     <React.Fragment key={`${client.id}-${currentYear}`}>
@@ -183,36 +187,81 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               <div>
                                 <label className="text-[11px] font-bold text-slate-500 uppercase">Agregado Familiar</label>
-                                <textarea
-                                  value={householdInfo}
-                                  onChange={(e) => onHouseholdInfoChange(client.id, e.target.value)}
-                                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
-                                  rows={2}
-                                  placeholder="Composição do agregado familiar"
-                                />
+                                <div className="mt-1 w-full px-3 py-2 border rounded-lg text-sm bg-white min-h-[42px]">
+                                  {householdSummary || 'Sem cônjuge/filhos registados na ficha do cliente.'}
+                                </div>
                               </div>
                               <div>
-                                <label className="text-[11px] font-bold text-slate-500 uppercase">Senha Finanças</label>
-                                <input
-                                  type="password"
-                                  value={financasPassword}
-                                  onChange={(e) => onFinancasPasswordChange(client.id, e.target.value)}
-                                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
-                                  placeholder="Senha do Portal das Finanças"
-                                  autoComplete="off"
-                                />
+                                <label className="text-[11px] font-bold text-slate-500 uppercase">Acesso Finanças da Ficha</label>
+                                <div className="mt-1 space-y-2">
+                                  <input
+                                    type="text"
+                                    value={atUsername}
+                                    readOnly
+                                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                                    placeholder="Utilizador AT não definido na ficha"
+                                  />
+                                  <div className="relative">
+                                    <input
+                                      type={isPasswordVisible ? 'text' : 'password'}
+                                      value={atPassword}
+                                      readOnly
+                                      className="w-full px-3 py-2 border rounded-lg text-sm bg-white pr-10"
+                                      placeholder="Senha AT não definida na ficha"
+                                      autoComplete="off"
+                                    />
+                                    {atPassword && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setVisiblePasswords(prev => ({ ...prev, [client.id]: !prev[client.id] }))}
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                                      >
+                                        {isPasswordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                               <div>
-                                <label className="text-[11px] font-bold text-slate-500 uppercase">IRS a Pagar/Receber</label>
-                                <select
-                                  value={irsSettlement}
-                                  onChange={(e) => onIrsSettlementChange(client.id, e.target.value as IrsSettlementStatus)}
-                                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
-                                >
-                                  <option value="">Não definido</option>
-                                  <option value="A pagar">A pagar</option>
-                                  <option value="A receber">A receber</option>
-                                </select>
+                                <label className="text-[11px] font-bold text-slate-500 uppercase">Valor IRS (Pagar/Receber)</label>
+                                <div className="mt-1 grid grid-cols-2 gap-2">
+                                  <select
+                                    value={settlementDirection}
+                                    onChange={(e) => {
+                                      const nextDirection = e.target.value as 'A pagar' | 'A receber';
+                                      const signedAmount = nextDirection === 'A pagar'
+                                        ? -Math.abs(settlementAbsoluteAmount)
+                                        : Math.abs(settlementAbsoluteAmount);
+                                      onSettlementAmountChange(client.id, signedAmount);
+                                    }}
+                                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                                  >
+                                    <option value="A pagar">A pagar</option>
+                                    <option value="A receber">A receber</option>
+                                  </select>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={settlementAbsoluteAmount > 0 ? settlementAbsoluteAmount.toString() : ''}
+                                    onChange={(e) => {
+                                      const rawValue = (e.target.value || '').replace(',', '.');
+                                      const parsedValue = Number(rawValue);
+                                      const absoluteValue = Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : 0;
+                                      const signedAmount = settlementDirection === 'A pagar' ? -absoluteValue : absoluteValue;
+                                      onSettlementAmountChange(client.id, signedAmount);
+                                    }}
+                                    className="w-full px-3 py-2 border rounded-lg text-sm text-right bg-white"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-1">
+                                  {irsSettlementAmount < 0
+                                    ? `A pagar: ${Math.abs(irsSettlementAmount).toFixed(2)} EUR`
+                                    : irsSettlementAmount > 0
+                                      ? `A receber: ${irsSettlementAmount.toFixed(2)} EUR`
+                                      : 'Sem valor definido'}
+                                </p>
                               </div>
                             </div>
                           </td>
