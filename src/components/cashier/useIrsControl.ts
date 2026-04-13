@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { appConfigService } from '../../services/supabase';
 
 export interface IrsControlRecord {
   clientId: string;
@@ -23,31 +24,60 @@ export interface IrsDeliveryClose {
 
 const IRS_CONTROL_STORAGE_KEY = 'cashier-irs-control-records-v1';
 const IRS_DELIVERY_CLOSES_STORAGE_KEY = 'cashier-irs-delivery-closes-v1';
+const IRS_CONTROL_APP_CONFIG_KEY = 'cashier_irs_control_v1';
+
+interface IrsControlPersistedState {
+  records?: unknown;
+  deliveryCloses?: unknown;
+  closes?: unknown;
+}
+
+const normalizeIrsControlRecords = (parsedValue: unknown): IrsControlRecord[] => {
+  if (!Array.isArray(parsedValue)) return [];
+
+  return parsedValue.reduce<IrsControlRecord[]>((acc, item: any) => {
+    const clientId = typeof item?.clientId === 'string' ? item.clientId : '';
+    const year = Number(item?.year);
+    if (!clientId || !Number.isFinite(year)) return acc;
+
+    acc.push({
+      clientId,
+      year,
+      delivered: Boolean(item?.delivered),
+      paid: Boolean(item?.paid),
+      amount: Number.isFinite(Number(item?.amount)) ? Number(item.amount) : 0,
+      paymentMethod: item?.paymentMethod === 'MB Way' ? 'MB Way' : 'Numerário',
+      notes: typeof item?.notes === 'string' ? item.notes : '',
+      deliveryCloseId: typeof item?.deliveryCloseId === 'string' ? item.deliveryCloseId : null,
+      updatedAt: typeof item?.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+    });
+    return acc;
+  }, []);
+};
+
+const normalizeIrsDeliveryCloses = (parsedValue: unknown): IrsDeliveryClose[] => {
+  if (!Array.isArray(parsedValue)) return [];
+
+  return parsedValue.reduce<IrsDeliveryClose[]>((acc, item: any) => {
+    const id = typeof item?.id === 'string' ? item.id : '';
+    const year = Number(item?.year);
+    if (!id || !Number.isFinite(year)) return acc;
+    acc.push({
+      id,
+      year,
+      createdAt: typeof item?.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+      totalAmount: Number.isFinite(Number(item?.totalAmount)) ? Number(item.totalAmount) : 0,
+      itemCount: Number.isFinite(Number(item?.itemCount)) ? Number(item.itemCount) : 0,
+      note: typeof item?.note === 'string' ? item.note : '',
+    });
+    return acc;
+  }, []);
+};
 
 const parseStoredIrsControlRecords = (rawValue: string | null): IrsControlRecord[] => {
   if (!rawValue) return [];
   try {
-    const parsedValue = JSON.parse(rawValue);
-    if (!Array.isArray(parsedValue)) return [];
-
-    return parsedValue.reduce<IrsControlRecord[]>((acc, item: any) => {
-      const clientId = typeof item?.clientId === 'string' ? item.clientId : '';
-      const year = Number(item?.year);
-      if (!clientId || !Number.isFinite(year)) return acc;
-
-      acc.push({
-        clientId,
-        year,
-        delivered: Boolean(item?.delivered),
-        paid: Boolean(item?.paid),
-        amount: Number.isFinite(Number(item?.amount)) ? Number(item.amount) : 0,
-        paymentMethod: item?.paymentMethod === 'MB Way' ? 'MB Way' : 'Numerário',
-        notes: typeof item?.notes === 'string' ? item.notes : '',
-        deliveryCloseId: typeof item?.deliveryCloseId === 'string' ? item.deliveryCloseId : null,
-        updatedAt: typeof item?.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
-      });
-      return acc;
-    }, []);
+    return normalizeIrsControlRecords(JSON.parse(rawValue));
   } catch {
     return [];
   }
@@ -56,23 +86,7 @@ const parseStoredIrsControlRecords = (rawValue: string | null): IrsControlRecord
 const parseStoredIrsDeliveryCloses = (rawValue: string | null): IrsDeliveryClose[] => {
   if (!rawValue) return [];
   try {
-    const parsedValue = JSON.parse(rawValue);
-    if (!Array.isArray(parsedValue)) return [];
-
-    return parsedValue.reduce<IrsDeliveryClose[]>((acc, item: any) => {
-      const id = typeof item?.id === 'string' ? item.id : '';
-      const year = Number(item?.year);
-      if (!id || !Number.isFinite(year)) return acc;
-      acc.push({
-        id,
-        year,
-        createdAt: typeof item?.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
-        totalAmount: Number.isFinite(Number(item?.totalAmount)) ? Number(item.totalAmount) : 0,
-        itemCount: Number.isFinite(Number(item?.itemCount)) ? Number(item.itemCount) : 0,
-        note: typeof item?.note === 'string' ? item.note : '',
-      });
-      return acc;
-    }, []);
+    return normalizeIrsDeliveryCloses(JSON.parse(rawValue));
   } catch {
     return [];
   }
@@ -87,6 +101,10 @@ export const useIrsControl = (currentYear: number) => {
     if (typeof window === 'undefined') return [];
     return parseStoredIrsDeliveryCloses(localStorage.getItem(IRS_DELIVERY_CLOSES_STORAGE_KEY));
   });
+  const initialLocalRecordsRef = useRef(irsControlRecords);
+  const initialLocalClosesRef = useRef(deliveryCloses);
+  const [isDbHydrated, setIsDbHydrated] = useState(false);
+  const [isDbAvailable, setIsDbAvailable] = useState(true);
 
   const irsControlMap = useMemo(() => {
     const map = new Map<string, IrsControlRecord>();
@@ -98,12 +116,85 @@ export const useIrsControl = (currentYear: number) => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(IRS_CONTROL_STORAGE_KEY, JSON.stringify(irsControlRecords));
+    try {
+      localStorage.setItem(IRS_CONTROL_STORAGE_KEY, JSON.stringify(irsControlRecords));
+    } catch (err) {
+      console.error('Erro ao guardar controlo IRS localmente:', err);
+    }
   }, [irsControlRecords]);
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(IRS_DELIVERY_CLOSES_STORAGE_KEY, JSON.stringify(deliveryCloses));
+    try {
+      localStorage.setItem(IRS_DELIVERY_CLOSES_STORAGE_KEY, JSON.stringify(deliveryCloses));
+    } catch (err) {
+      console.error('Erro ao guardar histórico de fecho IRS localmente:', err);
+    }
   }, [deliveryCloses]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydrateFromDb = async () => {
+      try {
+        const remoteValue = await appConfigService.getValueByKey<IrsControlPersistedState>(IRS_CONTROL_APP_CONFIG_KEY);
+        if (!isMounted) return;
+
+        const remoteRecords = normalizeIrsControlRecords(remoteValue?.records);
+        const remoteCloses = normalizeIrsDeliveryCloses(remoteValue?.deliveryCloses ?? remoteValue?.closes);
+
+        if (remoteRecords.length > 0 || remoteCloses.length > 0) {
+          setIrsControlRecords(remoteRecords);
+          setDeliveryCloses(remoteCloses);
+        } else if (initialLocalRecordsRef.current.length > 0 || initialLocalClosesRef.current.length > 0) {
+          await appConfigService.upsertValueByKey(IRS_CONTROL_APP_CONFIG_KEY, {
+            records: initialLocalRecordsRef.current,
+            deliveryCloses: initialLocalClosesRef.current,
+          });
+        }
+
+        setIsDbAvailable(true);
+      } catch (err) {
+        console.error('Erro ao sincronizar controlo IRS com o servidor:', err);
+        if (isMounted) {
+          setIsDbAvailable(false);
+        }
+      } finally {
+        if (isMounted) {
+          setIsDbHydrated(true);
+        }
+      }
+    };
+
+    hydrateFromDb();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDbHydrated || !isDbAvailable) return;
+    let isMounted = true;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        await appConfigService.upsertValueByKey(IRS_CONTROL_APP_CONFIG_KEY, {
+          records: irsControlRecords,
+          deliveryCloses,
+        });
+      } catch (err) {
+        console.error('Erro ao gravar controlo IRS no servidor:', err);
+        if (isMounted) {
+          setIsDbAvailable(false);
+        }
+      }
+    }, 400);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(timer);
+    };
+  }, [deliveryCloses, irsControlRecords, isDbAvailable, isDbHydrated]);
 
   const pendingDeliveryRecords = useMemo(() => (
     irsControlRecords.filter(record =>
@@ -155,8 +246,13 @@ export const useIrsControl = (currentYear: number) => {
   }, [currentYear]);
 
   const handleIrsDeliveredToggle = useCallback((clientId: string) => {
+    const existing = irsControlMap.get(`${clientId}-${currentYear}`);
+    if (existing?.deliveryCloseId) {
+      alert('Este registo já está fechado numa entrega de dinheiro.');
+      return;
+    }
     upsertIrsRecord(clientId, previous => ({ ...previous, delivered: !previous.delivered }));
-  }, [upsertIrsRecord]);
+  }, [currentYear, irsControlMap, upsertIrsRecord]);
 
   const handleIrsPaidToggle = useCallback((clientId: string) => {
     const existing = irsControlMap.get(`${clientId}-${currentYear}`);
@@ -229,6 +325,7 @@ export const useIrsControl = (currentYear: number) => {
         record.year === currentYear &&
         record.paid &&
         (record.amount || 0) > 0 &&
+        record.paymentMethod === 'Numerário' &&
         !record.deliveryCloseId;
       if (!isPendingForClose) return record;
       return { ...record, deliveryCloseId: closeId, updatedAt: now };

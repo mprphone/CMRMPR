@@ -117,6 +117,32 @@ export interface TaskCatalogSaveResult extends VersionedTaskCatalog {
 const toIsoStringOrNull = (value: string | null | undefined): string | null => value || null;
 
 export const appConfigService = {
+  async getValueByKey<T = unknown>(key: string): Promise<T | null> {
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('app_config')
+      .select('value')
+      .eq('key', key)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+    return (data.value as T) || null;
+  },
+  async upsertValueByKey<T = unknown>(key: string, value: T): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient
+      .from('app_config')
+      .upsert(
+        {
+          key,
+          value,
+        },
+        { onConflict: 'key' }
+      );
+
+    if (error) throw error;
+  },
   async getGlobalSettingsWithMeta(): Promise<VersionedGlobalSettings | null> {
     const storeClient = ensureStoreClient();
     const { data, error } = await storeClient
