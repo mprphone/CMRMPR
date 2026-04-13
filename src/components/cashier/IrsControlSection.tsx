@@ -1,3 +1,4 @@
+﻿
 import React from 'react';
 import { Check, Copy, Eye, EyeOff, X } from 'lucide-react';
 import { Client, FeeGroup } from '../../types';
@@ -26,22 +27,6 @@ interface IrsControlSectionProps {
   onSettlementAmountChange: (clientId: string, amount: number) => void;
 }
 
-const resolveMemberNifForCopy = (member: IrsClientFichaInfo['householdMembers'][number]): string => (
-  member.nif || member.atUsername || ''
-);
-
-const buildMemberLine = (member: IrsClientFichaInfo['householdMembers'][number]): string => (
-  `${resolveMemberNifForCopy(member)}\t${member.atPassword || ''}`
-);
-
-const normalizeNif = (value: string): string => (value || '').replace(/\D/g, '');
-const normalizeSearch = (value: string): string => (
-  (value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-);
-
 interface IrsPdfParseResult {
   subjectANif: string;
   subjectBNif: string;
@@ -57,6 +42,22 @@ interface IrsPdfValidationResult {
   notes: string[];
   suggestions: string[];
 }
+
+const normalizeNif = (value: string): string => (value || '').replace(/\D/g, '');
+const normalizeSearch = (value: string): string => (
+  (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+);
+
+const resolveMemberNifForCopy = (member: IrsClientFichaInfo['householdMembers'][number]): string => (
+  member.nif || member.atUsername || ''
+);
+
+const buildMemberLine = (member: IrsClientFichaInfo['householdMembers'][number]): string => (
+  `${resolveMemberNifForCopy(member)}\t${member.atPassword || ''}`
+);
 
 const buildLinesFromPdfItems = (items: any[]): string[] => {
   const byY = new Map<number, string[]>();
@@ -159,7 +160,6 @@ const mergeParsedWithAi = (
     source: 'local+ai',
   };
 };
-
 const validateIrsPdfData = (
   parsed: IrsPdfParseResult,
   currentClient: Client,
@@ -232,6 +232,27 @@ const validateIrsPdfData = (
   return { parsed, notes, suggestions };
 };
 
+const runIrsPdfValidation = async (
+  file: File,
+  currentClient: Client,
+  currentFichaInfo: IrsClientFichaInfo | undefined,
+  allClients: Client[]
+): Promise<IrsPdfValidationResult> => {
+  const localParsed = await parseIrsPdfFirstPage(file);
+  let finalParsed = localParsed;
+
+  if (shouldUseAiFallback(localParsed)) {
+    try {
+      const aiParsed = await parseIrsPdfNifsWithAI(localParsed.firstPageText);
+      finalParsed = mergeParsedWithAi(localParsed, aiParsed);
+    } catch (aiErr) {
+      console.error('Falha no fallback Gemini para IRS:', aiErr);
+    }
+  }
+
+  return validateIrsPdfData(finalParsed, currentClient, currentFichaInfo, allClients);
+};
+
 const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   currentYear,
   setCurrentYear,
@@ -259,6 +280,11 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   const [pdfValidationResult, setPdfValidationResult] = React.useState<IrsPdfValidationResult | null>(null);
   const pdfFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
+  const [rowVerifyingClientId, setRowVerifyingClientId] = React.useState<string | null>(null);
+  const [rowPdfPickerClientId, setRowPdfPickerClientId] = React.useState<string | null>(null);
+  const [rowValidationMap, setRowValidationMap] = React.useState<Record<string, IrsPdfValidationResult>>({});
+  const rowPdfFileInputRef = React.useRef<HTMLInputElement | null>(null);
+
   const floatingClient = floatingClientId
     ? irsGroupClients.find((client) => client.id === floatingClientId) || null
     : null;
@@ -284,6 +310,11 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     pdfFileInputRef.current?.click();
   }, []);
 
+  const handleRowVerifyPdfClick = React.useCallback((clientId: string) => {
+    setRowPdfPickerClientId(clientId);
+    rowPdfFileInputRef.current?.click();
+  }, []);
+
   const handlePdfSelected = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -291,19 +322,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
 
     setIsVerifyingPdf(true);
     try {
-      const localParsed = await parseIrsPdfFirstPage(file);
-      let finalParsed = localParsed;
-
-      if (shouldUseAiFallback(localParsed)) {
-        try {
-          const aiParsed = await parseIrsPdfNifsWithAI(localParsed.firstPageText);
-          finalParsed = mergeParsedWithAi(localParsed, aiParsed);
-        } catch (aiErr) {
-          console.error('Falha no fallback Gemini para IRS:', aiErr);
-        }
-      }
-
-      const validation = validateIrsPdfData(finalParsed, floatingClient, floatingFichaInfo, allClients);
+      const validation = await runIrsPdfValidation(file, floatingClient, floatingFichaInfo, allClients);
       setPdfValidationResult(validation);
     } catch (err) {
       console.error('Erro ao verificar PDF do IRS:', err);
@@ -325,8 +344,53 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     }
   }, [allClients, floatingClient, floatingFichaInfo]);
 
+  const handleRowPdfSelected = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    const clientId = rowPdfPickerClientId;
+    setRowPdfPickerClientId(null);
+    if (!file || !clientId) return;
+
+    const targetClient = irsGroupClients.find((client) => client.id === clientId);
+    if (!targetClient) return;
+    const targetFichaInfo = clientFichaInfoMap.get(clientId);
+
+    setRowVerifyingClientId(clientId);
+    try {
+      const validation = await runIrsPdfValidation(file, targetClient, targetFichaInfo, allClients);
+      setRowValidationMap((prev) => ({ ...prev, [clientId]: validation }));
+    } catch (err) {
+      console.error('Erro ao verificar PDF do IRS na linha:', err);
+      setRowValidationMap((prev) => ({
+        ...prev,
+        [clientId]: {
+          parsed: {
+            subjectANif: '',
+            subjectBNif: '',
+            dependentNifs: [],
+            firstPageText: '',
+            hasBLabel: false,
+            hasDependentLabel: false,
+            source: 'local',
+          },
+          notes: ['Não foi possível ler o PDF para validação desta ficha.'],
+          suggestions: [],
+        },
+      }));
+    } finally {
+      setRowVerifyingClientId((current) => (current === clientId ? null : current));
+    }
+  }, [allClients, clientFichaInfoMap, irsGroupClients, rowPdfPickerClientId]);
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+      <input
+        ref={rowPdfFileInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={handleRowPdfSelected}
+      />
+
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-bold text-slate-800">Control IRS</h3>
         <div className="flex items-center gap-2 text-xs">
@@ -383,74 +447,108 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                   const paymentMethod = record?.paymentMethod || 'Numerário';
                   const notes = record?.notes ?? '';
                   const isClosed = Boolean(record?.deliveryCloseId);
+                  const rowValidation = rowValidationMap[client.id];
+                  const isRowVerifying = rowVerifyingClientId === client.id;
 
                   return (
-                    <tr key={`${client.id}-${currentYear}`} className="hover:bg-slate-50">
-                      <td className="px-3 py-2 font-medium text-slate-700">
-                        <button
-                          type="button"
-                          onClick={() => setFloatingClientId(client.id)}
-                          className="text-left hover:text-blue-600"
-                        >
-                          <span className="block">{client.name}</span>
-                          <span className="block text-[10px] font-normal text-blue-500">Abrir caixa IRS</span>
-                        </button>
-                      </td>
-                      <td className="px-3 py-2 text-slate-600">{client.nif}</td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => onToggleDelivered(client.id)}
-                          className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${delivered ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-green-50'}`}
-                        >
-                          <Check size={14} />
-                        </button>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => onTogglePaid(client.id)}
-                          className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${paid ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-blue-50'}`}
-                        >
-                          <Check size={14} />
-                        </button>
-                      </td>
-                      <td className="px-3 py-2">
-                        <select
-                          value={paymentMethod}
-                          disabled={!paid || isClosed}
-                          onChange={(e) => onPaymentMethodChange(client.id, e.target.value as 'Numerário' | 'MB Way')}
-                          className="w-full px-2 py-1.5 border rounded-lg text-sm disabled:bg-slate-100 disabled:text-slate-400"
-                        >
-                          <option value="Numerário">Numerário</option>
-                          <option value="MB Way">MB Way</option>
-                        </select>
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={amount > 0 ? amount.toString() : ''}
-                          disabled={!paid || isClosed}
-                          onChange={(e) => onAmountChange(client.id, e.target.value)}
-                          className="w-full px-3 py-1.5 border rounded-lg text-right disabled:bg-slate-100 disabled:text-slate-400"
-                          placeholder={paid ? '0.00' : '-'}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={notes}
-                          onChange={(e) => onNotesChange(client.id, e.target.value)}
-                          className="w-full px-3 py-1.5 border rounded-lg"
-                          placeholder="Ex: oferta, motivo..."
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-center text-xs">
-                        {isClosed ? 'Fechado' : 'Aberto'}
-                      </td>
-                    </tr>
+                    <React.Fragment key={`${client.id}-${currentYear}`}>
+                      <tr className="hover:bg-slate-50">
+                        <td className="px-3 py-2 font-medium text-slate-700">
+                          <button
+                            type="button"
+                            onClick={() => setFloatingClientId(client.id)}
+                            className="text-left hover:text-blue-600"
+                          >
+                            <span className="block">{client.name}</span>
+                            <span className="block text-[10px] font-normal text-blue-500">Abrir caixa IRS</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRowVerifyPdfClick(client.id)}
+                            disabled={isRowVerifying}
+                            className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-60"
+                          >
+                            {isRowVerifying ? 'A verificar...' : 'Verificar IRS'}
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{client.nif}</td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => onToggleDelivered(client.id)}
+                            className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${delivered ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-green-50'}`}
+                          >
+                            <Check size={14} />
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => onTogglePaid(client.id)}
+                            className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${paid ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-blue-50'}`}
+                          >
+                            <Check size={14} />
+                          </button>
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={paymentMethod}
+                            disabled={!paid || isClosed}
+                            onChange={(e) => onPaymentMethodChange(client.id, e.target.value as 'Numerário' | 'MB Way')}
+                            className="w-full px-2 py-1.5 border rounded-lg text-sm disabled:bg-slate-100 disabled:text-slate-400"
+                          >
+                            <option value="Numerário">Numerário</option>
+                            <option value="MB Way">MB Way</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={amount > 0 ? amount.toString() : ''}
+                            disabled={!paid || isClosed}
+                            onChange={(e) => onAmountChange(client.id, e.target.value)}
+                            className="w-full px-3 py-1.5 border rounded-lg text-right disabled:bg-slate-100 disabled:text-slate-400"
+                            placeholder={paid ? '0.00' : '-'}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="text"
+                            value={notes}
+                            onChange={(e) => onNotesChange(client.id, e.target.value)}
+                            className="w-full px-3 py-1.5 border rounded-lg"
+                            placeholder="Ex: oferta, motivo..."
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center text-xs">
+                          {isClosed ? 'Fechado' : 'Aberto'}
+                        </td>
+                      </tr>
+                      {rowValidation && (
+                        <tr className="bg-blue-50/40">
+                          <td colSpan={8} className="px-3 py-2">
+                            <div className="text-xs text-slate-700">
+                              <p>
+                                <span className="font-bold">Detetado:</span>{' '}
+                                A={rowValidation.parsed.subjectANif || '-'} | B={rowValidation.parsed.subjectBNif || '-'} | Dependentes={rowValidation.parsed.dependentNifs.join(', ') || '-'}
+                              </p>
+                              {rowValidation.notes.map((note) => (
+                                <p key={`${client.id}-note-${note}`}>• {note}</p>
+                              ))}
+                              {rowValidation.suggestions.length > 0 && (
+                                <div className="mt-1 bg-amber-50 border border-amber-200 rounded p-2 text-amber-800">
+                                  {rowValidation.suggestions.map((suggestion) => (
+                                    <p key={`${client.id}-suggest-${suggestion}`}>• {suggestion}</p>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
