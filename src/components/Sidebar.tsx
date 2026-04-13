@@ -16,7 +16,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, logo, onLo
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin'] },
     { id: 'clients', label: 'Clientes', icon: Users, roles: ['admin', 'user'] },
-    { id: 'groups', label: 'Grupos Avenças', icon: FolderTree, roles: ['admin'] },
+    { id: 'groups', label: 'Grupos Avenças', icon: FolderTree, roles: ['admin', 'user'] },
     { id: 'insurance', label: 'Seguros', icon: Shield, roles: ['admin', 'user'] },
     { id: 'sht', label: 'SHT', icon: HeartPulse, roles: ['admin', 'user'] },
     { id: 'cashier', label: 'Caixa Numerário', icon: Landmark, roles: ['admin', 'user'] },
