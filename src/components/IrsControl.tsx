@@ -62,6 +62,7 @@ interface ApplyPdfSuggestionsResult {
   createdClientsStore: number;
   createdClientsImport: number;
   createdRelations: number;
+  createdRelationsImport: number;
   addedToIrsGroup: number;
   errors: string[];
 }
@@ -354,11 +355,15 @@ const ensureImportClientByNif = async (nif: string, name: string): Promise<{ cre
   if (existingError) throw existingError;
   if (Array.isArray(existing) && existing.length > 0) return { created: false };
 
-  const payload = {
-    nif,
-    nome: normalizeText(name) || `Cliente ${nif}`,
-  };
-  const { error: insertError } = await importClient.from('clientes').insert([payload]);
+  const finalName = normalizeText(name) || `Cliente ${nif}`;
+  const payloadBase = { nif, nome: finalName };
+  let insertError: any = null;
+
+  ({ error: insertError } = await importClient.from('clientes').insert([payloadBase]));
+  if (insertError) {
+    const payloadWithId = { id: crypto.randomUUID(), ...payloadBase };
+    ({ error: insertError } = await importClient.from('clientes').insert([payloadWithId]));
+  }
   if (insertError) throw insertError;
   return { created: true };
 };
@@ -532,6 +537,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
       createdClientsStore: 0,
       createdClientsImport: 0,
       createdRelations: 0,
+      createdRelationsImport: 0,
       addedToIrsGroup: 0,
       errors: [],
     };
@@ -641,6 +647,62 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
         result.createdRelations = relationsToAdd.length;
       } catch (err: any) {
         result.errors.push(`Falha ao gravar relações IRS: ${err?.message || 'erro desconhecido'}`);
+      }
+    }
+
+    if (importClient) {
+      try {
+        const relationTargets = Array.from(new Set([
+          ...(subjectBNif ? [subjectBNif] : []),
+          ...dependentNifs,
+        ]));
+        const [sourceRows, targetRows] = await Promise.all([
+          getImportClientRowsByNif([subjectANif]),
+          getImportClientRowsByNif(relationTargets),
+        ]);
+        const sourceRow = sourceRows[0];
+        if (sourceRow?.id) {
+          const currentRows = [
+            ...parseMaybeJsonArray(sourceRow.agregado_familiar_json),
+          ];
+          const byNif = new Map(targetRows.map((row) => [normalizeNif(row.nif), row]));
+          const existingKeys = new Set(
+            currentRows.map((row) => (
+              `${normalizeNif(row.customerNif ?? row.relatedClientNif ?? row.nif)}|${normalizeSearchText(row.relationType ?? row.relacao ?? row.relation)}`
+            ))
+          );
+
+          const rowsToAdd = relationCandidates
+            .filter((relation) => {
+              const key = `${normalizeNif(relation.targetNif)}|${normalizeSearchText(relation.relation)}`;
+              return !existingKeys.has(key);
+            })
+            .map((relation) => {
+              const target = byNif.get(normalizeNif(relation.targetNif));
+              return {
+                relationType: relation.relation,
+                relacao: relation.relation,
+                customerNif: relation.targetNif,
+                customerName: normalizeText(namesByNif[relation.targetNif]) || normalizeText(target?.nome) || `Cliente ${relation.targetNif}`,
+                customerSourceId: normalizeText(target?.id),
+                note: 'auto_irs',
+              };
+            });
+
+          if (rowsToAdd.length > 0) {
+            const { error: updateError } = await importClient
+              .from('clientes')
+              .update({ agregado_familiar_json: [...currentRows, ...rowsToAdd] })
+              .eq('id', sourceRow.id);
+            if (updateError) {
+              result.errors.push(`Falha ao gravar relações no Supabase original: ${updateError.message || 'erro desconhecido'}`);
+            } else {
+              result.createdRelationsImport = rowsToAdd.length;
+            }
+          }
+        }
+      } catch (err: any) {
+        result.errors.push(`Falha ao sincronizar relações no Supabase original: ${err?.message || 'erro desconhecido'}`);
       }
     }
 

@@ -23,6 +23,7 @@ interface IrsControlSectionProps {
     createdClientsStore: number;
     createdClientsImport: number;
     createdRelations: number;
+    createdRelationsImport: number;
     addedToIrsGroup: number;
     errors: string[];
   }>;
@@ -479,6 +480,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
       if (applyResult.createdClientsStore > 0) summaryParts.push(`${applyResult.createdClientsStore} ficha(s) criada(s) na app`);
       if (applyResult.createdClientsImport > 0) summaryParts.push(`${applyResult.createdClientsImport} ficha(s) criada(s) no Supabase clientes`);
       if (applyResult.createdRelations > 0) summaryParts.push(`${applyResult.createdRelations} relação(ões) criada(s)`);
+      if (applyResult.createdRelationsImport > 0) summaryParts.push(`${applyResult.createdRelationsImport} relação(ões) criada(s) no Supabase original`);
       if (applyResult.addedToIrsGroup > 0) summaryParts.push(`${applyResult.addedToIrsGroup} cliente(s) adicionado(s) ao grupo IRS`);
       if (summaryParts.length === 0) summaryParts.push('Sem alterações (já estava tudo criado)');
 
