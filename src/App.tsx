@@ -748,6 +748,7 @@ export default function App() {
               {activeView === 'irs-control' && (
                 <IrsControl
                   clients={clients}
+                  setClients={setClients}
                   groups={groups}
                   setGroups={setGroups}
                 />

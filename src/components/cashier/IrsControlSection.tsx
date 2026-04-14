@@ -14,6 +14,16 @@ interface IrsControlSectionProps {
   availableClientsToAdd: Client[];
   isAddingClientToIrsGroup: boolean;
   onQuickAddClientToIrsGroup: (clientId: string) => Promise<void>;
+  onApplyPdfSuggestions: (payload: {
+    subjectANif: string;
+    subjectBNif: string;
+    dependentNifs: string[];
+  }) => Promise<{
+    createdClients: number;
+    createdRelations: number;
+    addedToIrsGroup: number;
+    errors: string[];
+  }>;
   irsGroupClients: Client[];
   clientFichaInfoMap: Map<string, IrsClientFichaInfo>;
   irsControlMap: Map<string, IrsControlRecord>;
@@ -243,6 +253,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   availableClientsToAdd,
   isAddingClientToIrsGroup,
   onQuickAddClientToIrsGroup,
+  onApplyPdfSuggestions,
   irsGroupClients,
   clientFichaInfoMap,
   irsControlMap,
@@ -262,8 +273,10 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   const [visiblePasswords, setVisiblePasswords] = React.useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = React.useState<string>('');
   const [isVerifyingPdf, setIsVerifyingPdf] = React.useState(false);
+  const [isApplyingSuggestions, setIsApplyingSuggestions] = React.useState(false);
   const [selectedClientIdToAdd, setSelectedClientIdToAdd] = React.useState('');
   const [pdfValidationResult, setPdfValidationResult] = React.useState<IrsPdfValidationResult | null>(null);
+  const [applySummary, setApplySummary] = React.useState<string>('');
   const pdfFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const floatingClient = floatingClientId
@@ -292,6 +305,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     if (!file) return;
 
     setIsVerifyingPdf(true);
+    setApplySummary('');
     try {
       let finalParsed: IrsPdfParseResult;
       try {
@@ -368,6 +382,44 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
       setIsVerifyingPdf(false);
     }
   }, [allClients, clientFichaInfoMap, irsGroupClients]);
+
+  const handleApplySuggestions = React.useCallback(async () => {
+    if (!pdfValidationResult) return;
+    setIsApplyingSuggestions(true);
+    setApplySummary('');
+    try {
+      const applyResult = await onApplyPdfSuggestions({
+        subjectANif: pdfValidationResult.parsed.subjectANif,
+        subjectBNif: pdfValidationResult.parsed.subjectBNif,
+        dependentNifs: pdfValidationResult.parsed.dependentNifs,
+      });
+
+      const summaryParts: string[] = [];
+      if (applyResult.createdClients > 0) summaryParts.push(`${applyResult.createdClients} ficha(s) criada(s)`);
+      if (applyResult.createdRelations > 0) summaryParts.push(`${applyResult.createdRelations} relação(ões) criada(s)`);
+      if (applyResult.addedToIrsGroup > 0) summaryParts.push(`${applyResult.addedToIrsGroup} cliente(s) adicionado(s) ao grupo IRS`);
+      if (summaryParts.length === 0) summaryParts.push('Sem alterações (já estava tudo criado)');
+
+      const nextNotes = [...pdfValidationResult.notes];
+      if (applyResult.errors.length > 0) {
+        applyResult.errors.forEach((error) => nextNotes.push(error));
+      } else {
+        nextNotes.push('Criação automática concluída.');
+      }
+
+      setPdfValidationResult({
+        ...pdfValidationResult,
+        notes: nextNotes,
+        suggestions: [],
+      });
+      setApplySummary(summaryParts.join(' | '));
+    } catch (err: any) {
+      setApplySummary(`Falha na criação automática: ${err?.message || 'erro desconhecido'}`);
+    } finally {
+      setIsApplyingSuggestions(false);
+    }
+  }, [onApplyPdfSuggestions, pdfValidationResult]);
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
       <input ref={pdfFileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfSelected} />
@@ -465,11 +517,24 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                 ))}
                 {pdfValidationResult.suggestions.length > 0 && (
                   <div className="bg-amber-50 border border-amber-200 rounded p-3">
-                    <p className="text-xs font-bold uppercase text-amber-700 mb-1">Sugestões</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <p className="text-xs font-bold uppercase text-amber-700">Sugestões</p>
+                      <button
+                        type="button"
+                        onClick={handleApplySuggestions}
+                        disabled={isApplyingSuggestions}
+                        className="inline-flex items-center gap-2 bg-amber-600 text-white px-3 py-1.5 rounded-md text-xs font-bold disabled:opacity-60"
+                      >
+                        {isApplyingSuggestions ? 'A criar...' : 'Criar fichas + relações automaticamente'}
+                      </button>
+                    </div>
                     {pdfValidationResult.suggestions.map((suggestion) => (
                       <p key={`global-suggestion-${suggestion}`} className="text-amber-800">• {suggestion}</p>
                     ))}
                   </div>
+                )}
+                {applySummary && (
+                  <p className="text-xs font-bold text-emerald-700">{applySummary}</p>
                 )}
               </div>
             )}

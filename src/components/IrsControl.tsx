@@ -2,10 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Client, FeeGroup } from '../types';
 import IrsControlSection from './cashier/IrsControlSection';
 import { useIrsControl } from './cashier/useIrsControl';
-import { groupService, importClient } from '../services/supabase';
+import { appConfigService, clientService, groupService, importClient } from '../services/supabase';
 
 interface IrsControlProps {
   clients: Client[];
+  setClients: React.Dispatch<React.SetStateAction<Client[]>>;
   groups: FeeGroup[];
   setGroups: React.Dispatch<React.SetStateAction<FeeGroup[]>>;
 }
@@ -42,6 +43,28 @@ interface ImportCredentialRow {
   password_encrypted?: string;
   ativo?: boolean;
 }
+
+interface ManualIrsRelation {
+  sourceNif: string;
+  targetNif: string;
+  relation: string;
+  createdAt: string;
+}
+
+interface ApplyPdfSuggestionsPayload {
+  subjectANif: string;
+  subjectBNif: string;
+  dependentNifs: string[];
+}
+
+interface ApplyPdfSuggestionsResult {
+  createdClients: number;
+  createdRelations: number;
+  addedToIrsGroup: number;
+  errors: string[];
+}
+
+const IRS_MANUAL_RELATIONS_APP_CONFIG_KEY = 'irs_manual_relations_v1';
 
 const normalizeText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 const normalizeNif = (value: unknown): string => normalizeText(value).replace(/\D/g, '');
@@ -361,9 +384,10 @@ const buildHouseholdSummaryFromMembers = (members: IrsHouseholdMemberInfo[]): st
   return parts.join(' | ');
 };
 
-const IrsControl: React.FC<IrsControlProps> = ({ clients, groups, setGroups }) => {
+const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, setGroups }) => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear() - 1);
   const [importFichaInfoMap, setImportFichaInfoMap] = useState<Map<string, IrsClientFichaInfo>>(new Map());
+  const [manualRelations, setManualRelations] = useState<ManualIrsRelation[]>([]);
   const [isAddingClientToIrsGroup, setIsAddingClientToIrsGroup] = useState(false);
   const irsGroup = useMemo(() => groups.find(g => g.name.toLowerCase().includes('irs')), [groups]);
   const clientsById = useMemo(() => new Map(clients.map(client => [client.id, client])), [clients]);
@@ -384,6 +408,41 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups, setGroups }) =
       .filter((client) => !currentIds.has(client.id))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [clients, irsGroup]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const loadManualRelations = async () => {
+      try {
+        const stored = await appConfigService.getValueByKey<ManualIrsRelation[]>(IRS_MANUAL_RELATIONS_APP_CONFIG_KEY);
+        if (isCancelled) return;
+        setManualRelations(Array.isArray(stored) ? stored : []);
+      } catch (err) {
+        console.error('Erro ao carregar relações IRS manuais:', err);
+        if (!isCancelled) setManualRelations([]);
+      }
+    };
+
+    loadManualRelations();
+    return () => { isCancelled = true; };
+  }, []);
+
+  const manualRelationsBySourceNif = useMemo(() => {
+    const map = new Map<string, ManualIrsRelation[]>();
+    manualRelations.forEach((row) => {
+      const sourceNif = normalizeNif(row.sourceNif);
+      const targetNif = normalizeNif(row.targetNif);
+      const relation = normalizeText(row.relation);
+      if (!sourceNif || !targetNif || !relation) return;
+      if (!map.has(sourceNif)) map.set(sourceNif, []);
+      map.get(sourceNif)!.push({
+        sourceNif,
+        targetNif,
+        relation,
+        createdAt: normalizeText(row.createdAt) || new Date().toISOString(),
+      });
+    });
+    return map;
+  }, [manualRelations]);
 
   const handleQuickAddClientToIrsGroup = React.useCallback(async (clientId: string) => {
     if (!clientId) return;
@@ -409,6 +468,170 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups, setGroups }) =
       setIsAddingClientToIrsGroup(false);
     }
   }, [irsGroup, setGroups]);
+
+  const buildAutoCreatedClient = React.useCallback((nif: string, name: string): Client => ({
+    id: crypto.randomUUID(),
+    name: normalizeText(name) || `Cliente ${nif}`,
+    email: '',
+    phone: '',
+    address: '',
+    nif,
+    sector: 'Geral',
+    entityType: 'SOCIEDADE',
+    responsibleStaff: '',
+    monthlyFee: 0,
+    employeeCount: 0,
+    turnover: 0,
+    documentCount: 0,
+    establishments: 1,
+    banks: 1,
+    callTimeBalance: 0,
+    travelCount: 0,
+    deliversOrganizedDocs: true,
+    vatRefunds: false,
+    hasIneReport: false,
+    hasCostCenters: false,
+    hasInternationalOps: false,
+    hasManagementReports: false,
+    supplierCount: 0,
+    customerCount: 0,
+    communicationCount: 0,
+    meetingCount: 0,
+    previousYearProfit: 0,
+    saftCollectEnabled: true,
+    tasks: [],
+    status: 'Ativo',
+    contractRenewalDate: new Date().toISOString().slice(0, 10),
+    aiAnalysisCache: null,
+  }), []);
+
+  const handleApplyPdfSuggestions = React.useCallback(async (payload: ApplyPdfSuggestionsPayload): Promise<ApplyPdfSuggestionsResult> => {
+    const result: ApplyPdfSuggestionsResult = {
+      createdClients: 0,
+      createdRelations: 0,
+      addedToIrsGroup: 0,
+      errors: [],
+    };
+
+    const subjectANif = normalizeNif(payload.subjectANif);
+    const subjectBNif = normalizeNif(payload.subjectBNif);
+    const dependentNifs = Array.from(new Set((payload.dependentNifs || []).map((nif) => normalizeNif(nif)).filter((nif) => nif.length === 9)));
+
+    if (!subjectANif) {
+      result.errors.push('NIF do Sujeito Passivo A não foi detetado.');
+      return result;
+    }
+
+    const clientsByNifSnapshot = new Map(clients.map((client) => [normalizeNif(client.nif), client]).filter(([nif]) => Boolean(nif)));
+    const subjectAClient = clientsByNifSnapshot.get(subjectANif);
+    if (!subjectAClient) {
+      result.errors.push(`Sujeito Passivo A (${subjectANif}) não existe na base de clientes.`);
+      return result;
+    }
+
+    const clientIdsToEnsureInGroup = new Set<string>([subjectAClient.id]);
+    const newClientsToInsert: Client[] = [];
+
+    const ensureClientByNif = async (nif: string, fallbackName: string): Promise<Client | null> => {
+      if (!nif || nif.length !== 9) return null;
+      const existing = clientsByNifSnapshot.get(nif);
+      if (existing) {
+        clientIdsToEnsureInGroup.add(existing.id);
+        return existing;
+      }
+
+      try {
+        const clientToCreate = buildAutoCreatedClient(nif, fallbackName);
+        const savedClient = await clientService.upsert(clientToCreate);
+        clientsByNifSnapshot.set(nif, savedClient);
+        newClientsToInsert.push(savedClient);
+        clientIdsToEnsureInGroup.add(savedClient.id);
+        result.createdClients += 1;
+        return savedClient;
+      } catch (err: any) {
+        const message = err?.message || 'erro desconhecido';
+        result.errors.push(`Falha ao criar ficha para NIF ${nif}: ${message}`);
+        return null;
+      }
+    };
+
+    const subjectBClient = subjectBNif
+      ? await ensureClientByNif(subjectBNif, `Sujeito Passivo B ${subjectBNif}`)
+      : null;
+
+    for (let index = 0; index < dependentNifs.length; index += 1) {
+      const depNif = dependentNifs[index];
+      await ensureClientByNif(depNif, `Dependente ${depNif}`);
+    }
+
+    if (newClientsToInsert.length > 0) {
+      setClients((prev) => {
+        const existingIds = new Set(prev.map((client) => client.id));
+        const toAppend = newClientsToInsert.filter((client) => !existingIds.has(client.id));
+        return [...toAppend, ...prev];
+      });
+    }
+
+    const relationCandidates: ManualIrsRelation[] = [];
+    if (subjectBClient) {
+      relationCandidates.push({
+        sourceNif: subjectANif,
+        targetNif: normalizeNif(subjectBClient.nif),
+        relation: 'cônjuge',
+        createdAt: new Date().toISOString(),
+      });
+    }
+    dependentNifs.forEach((depNif) => {
+      relationCandidates.push({
+        sourceNif: subjectANif,
+        targetNif: depNif,
+        relation: 'filho',
+        createdAt: new Date().toISOString(),
+      });
+    });
+
+    const existingRelationKeys = new Set(
+      manualRelations.map((relation) => (
+        `${normalizeNif(relation.sourceNif)}|${normalizeNif(relation.targetNif)}|${normalizeSearchText(relation.relation)}`
+      ))
+    );
+    const relationsToAdd = relationCandidates.filter((relation) => {
+      const key = `${normalizeNif(relation.sourceNif)}|${normalizeNif(relation.targetNif)}|${normalizeSearchText(relation.relation)}`;
+      if (existingRelationKeys.has(key)) return false;
+      existingRelationKeys.add(key);
+      return true;
+    });
+
+    if (relationsToAdd.length > 0) {
+      try {
+        const merged = [...manualRelations, ...relationsToAdd];
+        await appConfigService.upsertValueByKey(IRS_MANUAL_RELATIONS_APP_CONFIG_KEY, merged);
+        setManualRelations(merged);
+        result.createdRelations = relationsToAdd.length;
+      } catch (err: any) {
+        result.errors.push(`Falha ao gravar relações IRS: ${err?.message || 'erro desconhecido'}`);
+      }
+    }
+
+    if (irsGroup) {
+      const idsToAdd = Array.from(clientIdsToEnsureInGroup).filter((id) => !irsGroup.clientIds.includes(id));
+      if (idsToAdd.length > 0) {
+        try {
+          const updatedGroup: FeeGroup = {
+            ...irsGroup,
+            clientIds: [...irsGroup.clientIds, ...idsToAdd],
+          };
+          const savedGroup = await groupService.upsert(updatedGroup);
+          setGroups((prev) => prev.map((group) => group.id === savedGroup.id ? savedGroup : group));
+          result.addedToIrsGroup = idsToAdd.length;
+        } catch (err: any) {
+          result.errors.push(`Falha ao adicionar clientes ao grupo IRS: ${err?.message || 'erro desconhecido'}`);
+        }
+      }
+    }
+
+    return result;
+  }, [buildAutoCreatedClient, clients, irsGroup, manualRelations, setClients, setGroups]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -518,8 +741,14 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups, setGroups }) =
               ...parseMaybeJsonArray(importMainRow.fichas_relacionadas_json),
             ]
           : [];
+        const manualRelationRows = (manualRelationsBySourceNif.get(normalizedNif) || []).map((relation) => ({
+          relation: relation.relation,
+          customerNif: relation.targetNif,
+          relatedClientNif: relation.targetNif,
+        }));
+        const allRelationRows = [...relationRows, ...manualRelationRows];
 
-        relationRows.forEach((relationRow, index) => {
+        allRelationRows.forEach((relationRow, index) => {
           const relation = normalizeText(
             relationRow.relationType ?? relationRow.relacao ?? relationRow.relationship ?? relationRow.relation ?? relationRow.type
           ) || 'relacao';
@@ -581,7 +810,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups, setGroups }) =
     return () => {
       isCancelled = true;
     };
-  }, [clientsById, clientsByNif, irsGroupClients]);
+  }, [clientsById, clientsByNif, irsGroupClients, manualRelationsBySourceNif]);
 
   const clientFichaInfoMap = useMemo(() => {
     const map = new Map<string, IrsClientFichaInfo>();
@@ -637,6 +866,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups, setGroups }) =
         availableClientsToAdd={availableClientsToAdd}
         isAddingClientToIrsGroup={isAddingClientToIrsGroup}
         onQuickAddClientToIrsGroup={handleQuickAddClientToIrsGroup}
+        onApplyPdfSuggestions={handleApplyPdfSuggestions}
         irsGroupClients={irsGroupClients}
         clientFichaInfoMap={clientFichaInfoMap}
         irsControlMap={irsControlMap}
