@@ -232,27 +232,6 @@ const validateIrsPdfData = (
   return { parsed, notes, suggestions };
 };
 
-const runIrsPdfValidation = async (
-  file: File,
-  currentClient: Client,
-  currentFichaInfo: IrsClientFichaInfo | undefined,
-  allClients: Client[]
-): Promise<IrsPdfValidationResult> => {
-  const localParsed = await parseIrsPdfFirstPage(file);
-  let finalParsed = localParsed;
-
-  if (shouldUseAiFallback(localParsed)) {
-    try {
-      const aiParsed = await parseIrsPdfNifsWithAI(localParsed.firstPageText);
-      finalParsed = mergeParsedWithAi(localParsed, aiParsed);
-    } catch (aiErr) {
-      console.error('Falha no fallback Gemini para IRS:', aiErr);
-    }
-  }
-
-  return validateIrsPdfData(finalParsed, currentClient, currentFichaInfo, allClients);
-};
-
 const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   currentYear,
   setCurrentYear,
@@ -280,11 +259,6 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   const [pdfValidationResult, setPdfValidationResult] = React.useState<IrsPdfValidationResult | null>(null);
   const pdfFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
-  const [rowVerifyingClientId, setRowVerifyingClientId] = React.useState<string | null>(null);
-  const [rowPdfPickerClientId, setRowPdfPickerClientId] = React.useState<string | null>(null);
-  const [rowValidationMap, setRowValidationMap] = React.useState<Record<string, IrsPdfValidationResult>>({});
-  const rowPdfFileInputRef = React.useRef<HTMLInputElement | null>(null);
-
   const floatingClient = floatingClientId
     ? irsGroupClients.find((client) => client.id === floatingClientId) || null
     : null;
@@ -301,29 +275,55 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     }
   }, []);
 
-  React.useEffect(() => {
-    setPdfValidationResult(null);
-    setIsVerifyingPdf(false);
-  }, [floatingClientId]);
-
   const handleVerifyPdfClick = React.useCallback(() => {
     pdfFileInputRef.current?.click();
-  }, []);
-
-  const handleRowVerifyPdfClick = React.useCallback((clientId: string) => {
-    setRowPdfPickerClientId(clientId);
-    rowPdfFileInputRef.current?.click();
   }, []);
 
   const handlePdfSelected = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file || !floatingClient) return;
+    if (!file) return;
 
     setIsVerifyingPdf(true);
     try {
-      const validation = await runIrsPdfValidation(file, floatingClient, floatingFichaInfo, allClients);
-      setPdfValidationResult(validation);
+      const localParsed = await parseIrsPdfFirstPage(file);
+      let finalParsed = localParsed;
+      if (shouldUseAiFallback(localParsed)) {
+        try {
+          const aiParsed = await parseIrsPdfNifsWithAI(localParsed.firstPageText);
+          finalParsed = mergeParsedWithAi(localParsed, aiParsed);
+        } catch (aiErr) {
+          console.error('Falha no fallback Gemini para IRS:', aiErr);
+        }
+      }
+
+      const targetClient = irsGroupClients.find((client) => normalizeNif(client.nif) === finalParsed.subjectANif)
+        || allClients.find((client) => normalizeNif(client.nif) === finalParsed.subjectANif);
+
+      if (targetClient) {
+        const targetFichaInfo = clientFichaInfoMap.get(targetClient.id);
+        const validation = validateIrsPdfData(finalParsed, targetClient, targetFichaInfo, allClients);
+        setPdfValidationResult(validation);
+      } else {
+        const existsNif = (nif: string) => allClients.some((client) => normalizeNif(client.nif) === normalizeNif(nif));
+        const suggestions: string[] = [];
+        if (finalParsed.subjectANif && !existsNif(finalParsed.subjectANif)) {
+          suggestions.push(`Criar ficha para Sujeito Passivo A (NIF ${finalParsed.subjectANif}).`);
+        }
+        if (finalParsed.subjectBNif && !existsNif(finalParsed.subjectBNif)) {
+          suggestions.push(`Criar ficha para Sujeito Passivo B (NIF ${finalParsed.subjectBNif}).`);
+        }
+        finalParsed.dependentNifs.forEach((nif) => {
+          if (!existsNif(nif)) suggestions.push(`Criar ficha para dependente (NIF ${nif}).`);
+        });
+        setPdfValidationResult({
+          parsed: finalParsed,
+          notes: finalParsed.subjectANif
+            ? [`Sujeito Passivo A (${finalParsed.subjectANif}) não encontrado na base atual.`]
+            : ['Não foi possível detetar o NIF do Sujeito Passivo A.'],
+          suggestions,
+        });
+      }
     } catch (err) {
       console.error('Erro ao verificar PDF do IRS:', err);
       setPdfValidationResult({
@@ -342,54 +342,10 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     } finally {
       setIsVerifyingPdf(false);
     }
-  }, [allClients, floatingClient, floatingFichaInfo]);
-
-  const handleRowPdfSelected = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    const clientId = rowPdfPickerClientId;
-    setRowPdfPickerClientId(null);
-    if (!file || !clientId) return;
-
-    const targetClient = irsGroupClients.find((client) => client.id === clientId);
-    if (!targetClient) return;
-    const targetFichaInfo = clientFichaInfoMap.get(clientId);
-
-    setRowVerifyingClientId(clientId);
-    try {
-      const validation = await runIrsPdfValidation(file, targetClient, targetFichaInfo, allClients);
-      setRowValidationMap((prev) => ({ ...prev, [clientId]: validation }));
-    } catch (err) {
-      console.error('Erro ao verificar PDF do IRS na linha:', err);
-      setRowValidationMap((prev) => ({
-        ...prev,
-        [clientId]: {
-          parsed: {
-            subjectANif: '',
-            subjectBNif: '',
-            dependentNifs: [],
-            firstPageText: '',
-            hasBLabel: false,
-            hasDependentLabel: false,
-            source: 'local',
-          },
-          notes: ['Não foi possível ler o PDF para validação desta ficha.'],
-          suggestions: [],
-        },
-      }));
-    } finally {
-      setRowVerifyingClientId((current) => (current === clientId ? null : current));
-    }
-  }, [allClients, clientFichaInfoMap, irsGroupClients, rowPdfPickerClientId]);
+  }, [allClients, clientFichaInfoMap, irsGroupClients]);
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-      <input
-        ref={rowPdfFileInputRef}
-        type="file"
-        accept="application/pdf"
-        className="hidden"
-        onChange={handleRowPdfSelected}
-      />
+      <input ref={pdfFileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfSelected} />
 
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-bold text-slate-800">Control IRS</h3>
@@ -424,6 +380,41 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
             </button>
           </div>
 
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleVerifyPdfClick}
+                disabled={isVerifyingPdf}
+                className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-60"
+              >
+                {isVerifyingPdf ? 'A verificar...' : 'Verificar IRS'}
+              </button>
+              <span className="text-xs text-slate-500">
+                Carrega um PDF e valida NIFs + relações automaticamente.
+              </span>
+            </div>
+            {pdfValidationResult && (
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="text-xs text-slate-600">
+                  <span className="font-bold">Detetado:</span>{' '}
+                  A={pdfValidationResult.parsed.subjectANif || '-'} | B={pdfValidationResult.parsed.subjectBNif || '-'} | Dependentes={pdfValidationResult.parsed.dependentNifs.join(', ') || '-'}
+                </div>
+                {pdfValidationResult.notes.map((note) => (
+                  <p key={`global-note-${note}`} className="text-slate-700">• {note}</p>
+                ))}
+                {pdfValidationResult.suggestions.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                    <p className="text-xs font-bold uppercase text-amber-700 mb-1">Sugestões</p>
+                    {pdfValidationResult.suggestions.map((suggestion) => (
+                      <p key={`global-suggestion-${suggestion}`} className="text-amber-800">• {suggestion}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-xs text-slate-500 uppercase bg-slate-50">
@@ -447,12 +438,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                   const paymentMethod = record?.paymentMethod || 'Numerário';
                   const notes = record?.notes ?? '';
                   const isClosed = Boolean(record?.deliveryCloseId);
-                  const rowValidation = rowValidationMap[client.id];
-                  const isRowVerifying = rowVerifyingClientId === client.id;
-
                   return (
-                    <React.Fragment key={`${client.id}-${currentYear}`}>
-                      <tr className="hover:bg-slate-50">
+                    <tr key={`${client.id}-${currentYear}`} className="hover:bg-slate-50">
                         <td className="px-3 py-2 font-medium text-slate-700">
                           <button
                             type="button"
@@ -461,14 +448,6 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                           >
                             <span className="block">{client.name}</span>
                             <span className="block text-[10px] font-normal text-blue-500">Abrir caixa IRS</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRowVerifyPdfClick(client.id)}
-                            disabled={isRowVerifying}
-                            className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-60"
-                          >
-                            {isRowVerifying ? 'A verificar...' : 'Verificar IRS'}
                           </button>
                         </td>
                         <td className="px-3 py-2 text-slate-600">{client.nif}</td>
@@ -526,29 +505,6 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                           {isClosed ? 'Fechado' : 'Aberto'}
                         </td>
                       </tr>
-                      {rowValidation && (
-                        <tr className="bg-blue-50/40">
-                          <td colSpan={8} className="px-3 py-2">
-                            <div className="text-xs text-slate-700">
-                              <p>
-                                <span className="font-bold">Detetado:</span>{' '}
-                                A={rowValidation.parsed.subjectANif || '-'} | B={rowValidation.parsed.subjectBNif || '-'} | Dependentes={rowValidation.parsed.dependentNifs.join(', ') || '-'}
-                              </p>
-                              {rowValidation.notes.map((note) => (
-                                <p key={`${client.id}-note-${note}`}>• {note}</p>
-                              ))}
-                              {rowValidation.suggestions.length > 0 && (
-                                <div className="mt-1 bg-amber-50 border border-amber-200 rounded p-2 text-amber-800">
-                                  {rowValidation.suggestions.map((suggestion) => (
-                                    <p key={`${client.id}-suggest-${suggestion}`}>• {suggestion}</p>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -606,49 +562,6 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
             </div>
 
             <div className="p-5 space-y-4">
-              <div className="bg-white border border-slate-200 rounded-lg p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleVerifyPdfClick}
-                    disabled={isVerifyingPdf}
-                    className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-60"
-                  >
-                    {isVerifyingPdf ? 'A verificar...' : 'Verificar IRS (PDF)'}
-                  </button>
-                  <span className="text-xs text-slate-500">
-                    Lê a 1ª página: Sujeito Passivo A/B e Dependentes.
-                  </span>
-                </div>
-                <input
-                  ref={pdfFileInputRef}
-                  type="file"
-                  accept="application/pdf"
-                  className="hidden"
-                  onChange={handlePdfSelected}
-                />
-
-                {pdfValidationResult && (
-                  <div className="mt-3 space-y-2 text-sm">
-                    <div className="text-xs text-slate-600">
-                      <span className="font-bold">Detetado:</span>{' '}
-                      A={pdfValidationResult.parsed.subjectANif || '-'} | B={pdfValidationResult.parsed.subjectBNif || '-'} | Dependentes={pdfValidationResult.parsed.dependentNifs.join(', ') || '-'}
-                    </div>
-                    {pdfValidationResult.notes.map((note) => (
-                      <p key={`note-${note}`} className="text-slate-700">• {note}</p>
-                    ))}
-                    {pdfValidationResult.suggestions.length > 0 && (
-                      <div className="bg-amber-50 border border-amber-200 rounded p-3">
-                        <p className="text-xs font-bold uppercase text-amber-700 mb-1">Sugestões</p>
-                        {pdfValidationResult.suggestions.map((suggestion) => (
-                          <p key={`suggestion-${suggestion}`} className="text-amber-800">• {suggestion}</p>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <p className="text-xs font-bold uppercase text-slate-500">Agregado Familiar</p>
