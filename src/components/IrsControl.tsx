@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Client, FeeGroup } from '../types';
 import IrsControlSection from './cashier/IrsControlSection';
 import { useIrsControl } from './cashier/useIrsControl';
-import { importClient } from '../services/supabase';
+import { groupService, importClient } from '../services/supabase';
 
 interface IrsControlProps {
   clients: Client[];
   groups: FeeGroup[];
+  setGroups: React.Dispatch<React.SetStateAction<FeeGroup[]>>;
 }
 
 export interface IrsHouseholdMemberInfo {
@@ -360,9 +361,10 @@ const buildHouseholdSummaryFromMembers = (members: IrsHouseholdMemberInfo[]): st
   return parts.join(' | ');
 };
 
-const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
+const IrsControl: React.FC<IrsControlProps> = ({ clients, groups, setGroups }) => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear() - 1);
   const [importFichaInfoMap, setImportFichaInfoMap] = useState<Map<string, IrsClientFichaInfo>>(new Map());
+  const [isAddingClientToIrsGroup, setIsAddingClientToIrsGroup] = useState(false);
   const irsGroup = useMemo(() => groups.find(g => g.name.toLowerCase().includes('irs')), [groups]);
   const clientsById = useMemo(() => new Map(clients.map(client => [client.id, client])), [clients]);
   const clientsByNif = useMemo(
@@ -375,6 +377,38 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
       .filter(c => irsGroup.clientIds.includes(c.id))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [clients, irsGroup]);
+  const availableClientsToAdd = useMemo(() => {
+    if (!irsGroup) return [];
+    const currentIds = new Set(irsGroup.clientIds || []);
+    return clients
+      .filter((client) => !currentIds.has(client.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [clients, irsGroup]);
+
+  const handleQuickAddClientToIrsGroup = React.useCallback(async (clientId: string) => {
+    if (!clientId) return;
+    if (!irsGroup) {
+      alert('Grupo IRS não encontrado. Crie/renomeie um grupo com \"IRS\" primeiro.');
+      return;
+    }
+    if (irsGroup.clientIds.includes(clientId)) return;
+
+    const updatedGroup: FeeGroup = {
+      ...irsGroup,
+      clientIds: [...irsGroup.clientIds, clientId],
+    };
+
+    setIsAddingClientToIrsGroup(true);
+    try {
+      const savedGroup = await groupService.upsert(updatedGroup);
+      setGroups((prev) => prev.map((group) => group.id === savedGroup.id ? savedGroup : group));
+    } catch (err: any) {
+      console.error('Erro ao adicionar cliente ao grupo IRS:', err);
+      alert('Falha ao adicionar cliente ao grupo IRS: ' + (err?.message || 'erro desconhecido'));
+    } finally {
+      setIsAddingClientToIrsGroup(false);
+    }
+  }, [irsGroup, setGroups]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -600,6 +634,9 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, groups }) => {
         setCurrentYear={setCurrentYear}
         irsGroup={irsGroup}
         allClients={clients}
+        availableClientsToAdd={availableClientsToAdd}
+        isAddingClientToIrsGroup={isAddingClientToIrsGroup}
+        onQuickAddClientToIrsGroup={handleQuickAddClientToIrsGroup}
         irsGroupClients={irsGroupClients}
         clientFichaInfoMap={clientFichaInfoMap}
         irsControlMap={irsControlMap}

@@ -749,6 +749,7 @@ export default function App() {
                 <IrsControl
                   clients={clients}
                   groups={groups}
+                  setGroups={setGroups}
                 />
               )}
               {activeView === 'groups' && (

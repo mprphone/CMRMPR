@@ -11,6 +11,9 @@ interface IrsControlSectionProps {
   setCurrentYear: React.Dispatch<React.SetStateAction<number>>;
   irsGroup?: FeeGroup;
   allClients: Client[];
+  availableClientsToAdd: Client[];
+  isAddingClientToIrsGroup: boolean;
+  onQuickAddClientToIrsGroup: (clientId: string) => Promise<void>;
   irsGroupClients: Client[];
   clientFichaInfoMap: Map<string, IrsClientFichaInfo>;
   irsControlMap: Map<string, IrsControlRecord>;
@@ -237,6 +240,9 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   setCurrentYear,
   irsGroup,
   allClients,
+  availableClientsToAdd,
+  isAddingClientToIrsGroup,
+  onQuickAddClientToIrsGroup,
   irsGroupClients,
   clientFichaInfoMap,
   irsControlMap,
@@ -256,6 +262,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   const [visiblePasswords, setVisiblePasswords] = React.useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = React.useState<string>('');
   const [isVerifyingPdf, setIsVerifyingPdf] = React.useState(false);
+  const [selectedClientIdToAdd, setSelectedClientIdToAdd] = React.useState('');
   const [pdfValidationResult, setPdfValidationResult] = React.useState<IrsPdfValidationResult | null>(null);
   const pdfFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -367,11 +374,46 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
 
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-bold text-slate-800">Control IRS</h3>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="font-bold text-slate-500">Ano:</span>
-          <button onClick={() => setCurrentYear((y) => y - 1)} className="p-1 rounded-full hover:bg-slate-200">{'<'}</button>
-          <span className="font-bold text-slate-700 w-14 text-center">{currentYear}</span>
-          <button onClick={() => setCurrentYear((y) => y + 1)} className="p-1 rounded-full hover:bg-slate-200">{'>'}</button>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="font-bold text-slate-500">Ano:</span>
+            <button onClick={() => setCurrentYear((y) => y - 1)} className="p-1 rounded-full hover:bg-slate-200">{'<'}</button>
+            <span className="font-bold text-slate-700 w-14 text-center">{currentYear}</span>
+            <button onClick={() => setCurrentYear((y) => y + 1)} className="p-1 rounded-full hover:bg-slate-200">{'>'}</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedClientIdToAdd}
+              onChange={(e) => setSelectedClientIdToAdd(e.target.value)}
+              disabled={!irsGroup || availableClientsToAdd.length === 0 || isAddingClientToIrsGroup}
+              className="min-w-[260px] px-2 py-1.5 border rounded-lg text-xs bg-white disabled:bg-slate-100 disabled:text-slate-400"
+            >
+              <option value="">
+                {!irsGroup
+                  ? 'Sem grupo IRS'
+                  : availableClientsToAdd.length === 0
+                    ? 'Sem clientes por adicionar'
+                    : 'Selecionar cliente...'}
+              </option>
+              {availableClientsToAdd.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name} ({client.nif})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={!selectedClientIdToAdd || isAddingClientToIrsGroup || !irsGroup}
+              onClick={async () => {
+                if (!selectedClientIdToAdd) return;
+                await onQuickAddClientToIrsGroup(selectedClientIdToAdd);
+                setSelectedClientIdToAdd('');
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white disabled:opacity-50"
+            >
+              {isAddingClientToIrsGroup ? 'A adicionar...' : 'Adicionar Cliente'}
+            </button>
+          </div>
         </div>
       </div>
 
