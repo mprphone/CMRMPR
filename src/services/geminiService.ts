@@ -19,6 +19,37 @@ async function setFunctionsAuthIfSessionExists(storeClient: any) {
   }
 }
 
+const isJwtError = (message: string): boolean => {
+  const normalized = (message || '').toLowerCase();
+  return normalized.includes('invalid jwt') || normalized.includes('jwt') || normalized.includes('token');
+};
+
+async function invokeWithJwtRefreshRetry<T = any>(
+  storeClient: any,
+  functionName: string,
+  body: Record<string, unknown>
+): Promise<{ data: T | null; error: any }> {
+  await setFunctionsAuthIfSessionExists(storeClient);
+  let response = await storeClient.functions.invoke(functionName, { body });
+
+  const rawMessage = String(response?.error?.message || '');
+  if (!response?.error || !isJwtError(rawMessage)) {
+    return response;
+  }
+
+  try {
+    const { data: refreshed, error: refreshError } = await storeClient.auth.refreshSession();
+    if (!refreshError && refreshed?.session?.access_token) {
+      storeClient.functions.setAuth(refreshed.session.access_token);
+      response = await storeClient.functions.invoke(functionName, { body });
+    }
+  } catch {
+    // ignore and return original error below
+  }
+
+  return response;
+}
+
 export const analyzeClientWithAI = async (
   client: Client,
   analysis: AnalysisResult
@@ -92,12 +123,7 @@ export const parseIrsPdfNifsWithAI = async (
   firstPageText: string
 ): Promise<IrsPdfAiParseResult> => {
   const storeClient = ensureStoreClient();
-
-  await setFunctionsAuthIfSessionExists(storeClient);
-
-  const { data, error } = await storeClient.functions.invoke("parse-irs-pdf", {
-    body: { firstPageText },
-  });
+  const { data, error } = await invokeWithJwtRefreshRetry(storeClient, "parse-irs-pdf", { firstPageText });
 
   if (error) {
     console.error("Erro na Edge Function 'parse-irs-pdf':", error);
@@ -130,7 +156,6 @@ export const parseIrsPdfNifsFromPdfWithAI = async (
   file: File
 ): Promise<IrsPdfAiParseResult> => {
   const storeClient = ensureStoreClient();
-  await setFunctionsAuthIfSessionExists(storeClient);
 
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -140,12 +165,10 @@ export const parseIrsPdfNifsFromPdfWithAI = async (
   }
   const pdfBase64 = btoa(binary);
 
-  const { data, error } = await storeClient.functions.invoke("parse-irs-pdf", {
-    body: {
-      pdfBase64,
-      mimeType: file.type || "application/pdf",
-      fileName: file.name || "",
-    },
+  const { data, error } = await invokeWithJwtRefreshRetry(storeClient, "parse-irs-pdf", {
+    pdfBase64,
+    mimeType: file.type || "application/pdf",
+    fileName: file.name || "",
   });
 
   if (error) {
