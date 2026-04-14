@@ -18,8 +18,10 @@ interface IrsControlSectionProps {
     subjectANif: string;
     subjectBNif: string;
     dependentNifs: string[];
+    namesByNif?: Record<string, string>;
   }) => Promise<{
-    createdClients: number;
+    createdClientsStore: number;
+    createdClientsImport: number;
     createdRelations: number;
     addedToIrsGroup: number;
     errors: string[];
@@ -44,6 +46,7 @@ interface IrsPdfParseResult {
   subjectANif: string;
   subjectBNif: string;
   dependentNifs: string[];
+  namesByNif: Record<string, string>;
   firstPageText: string;
   hasBLabel: boolean;
   hasDependentLabel: boolean;
@@ -88,6 +91,32 @@ const buildLinesFromPdfItems = (items: any[]): string[] => {
     .filter(Boolean);
 };
 
+const sanitizeSuggestedName = (value: string): string => {
+  const cleaned = (value || '')
+    .replace(/sujeito\s+passivo\s*[ab]/gi, ' ')
+    .replace(/dependente/gi, ' ')
+    .replace(/\bnif\b/gi, ' ')
+    .replace(/\d{9}/g, ' ')
+    .replace(/[:;,_\-()[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const words = cleaned.split(' ').filter(Boolean);
+  if (words.length < 2) return '';
+  return cleaned;
+};
+
+const extractNameNearNif = (text: string, nif: string): string => {
+  if (!text || !nif) return '';
+  const idx = text.indexOf(nif);
+  if (idx < 0) return '';
+  const before = text.slice(Math.max(0, idx - 90), idx);
+  const after = text.slice(idx + nif.length, idx + nif.length + 90);
+  const beforeCandidate = sanitizeSuggestedName(before);
+  if (beforeCandidate) return beforeCandidate;
+  return sanitizeSuggestedName(after);
+};
+
 const parseIrsPdfFirstPage = async (file: File): Promise<IrsPdfParseResult> => {
   const pdfjsLib: any = await import('pdfjs-dist');
   const buffer = await file.arrayBuffer();
@@ -105,19 +134,27 @@ const parseIrsPdfFirstPage = async (file: File): Promise<IrsPdfParseResult> => {
   const hasBLabel = normalizedFullText.includes('sujeito passivo b');
   const hasDependentLabel = normalizedFullText.includes('dependente');
 
-  const findFirstByLabel = (labels: string[]): string => {
+  const findFirstByLabel = (labels: string[]): { nif: string; name: string } => {
     for (let index = 0; index < normalizedLines.length; index += 1) {
       const line = normalizedLines[index];
       if (!labels.some((label) => line.includes(label))) continue;
       const candidate = [lines[index], lines[index + 1] || '', lines[index + 2] || ''].join(' ');
       const match = candidate.match(/(\d{9})/);
-      if (match) return match[1];
+      if (match) {
+        return {
+          nif: match[1],
+          name: extractNameNearNif(candidate, match[1]),
+        };
+      }
     }
-    return '';
+    return { nif: '', name: '' };
   };
 
-  const subjectANif = findFirstByLabel(['sujeito passivo a']);
-  const subjectBNif = findFirstByLabel(['sujeito passivo b']);
+  const subjectA = findFirstByLabel(['sujeito passivo a']);
+  const subjectB = findFirstByLabel(['sujeito passivo b']);
+  const namesByNif: Record<string, string> = {};
+  if (subjectA.nif && subjectA.name) namesByNif[normalizeNif(subjectA.nif)] = subjectA.name;
+  if (subjectB.nif && subjectB.name) namesByNif[normalizeNif(subjectB.nif)] = subjectB.name;
 
   const dependentNifSet = new Set<string>();
   const dependentRegex = /dependente[^0-9]{0,80}(\d{9})/gi;
@@ -132,14 +169,29 @@ const parseIrsPdfFirstPage = async (file: File): Promise<IrsPdfParseResult> => {
       if (!line.includes('dependente')) return;
       const candidate = [lines[index], lines[index + 1] || ''].join(' ');
       const matches = candidate.match(/\d{9}/g) || [];
-      matches.forEach((nif) => dependentNifSet.add(nif));
+      matches.forEach((nif) => {
+        dependentNifSet.add(nif);
+        const suggestedName = extractNameNearNif(candidate, nif);
+        if (suggestedName) namesByNif[normalizeNif(nif)] = suggestedName;
+      });
+    });
+  } else {
+    lines.forEach((line) => {
+      const normalized = normalizeSearch(line);
+      if (!normalized.includes('dependente')) return;
+      const matches = line.match(/\d{9}/g) || [];
+      matches.forEach((nif) => {
+        const suggestedName = extractNameNearNif(line, nif);
+        if (suggestedName) namesByNif[normalizeNif(nif)] = suggestedName;
+      });
     });
   }
 
   return {
-    subjectANif: normalizeNif(subjectANif),
-    subjectBNif: normalizeNif(subjectBNif),
+    subjectANif: normalizeNif(subjectA.nif),
+    subjectBNif: normalizeNif(subjectB.nif),
     dependentNifs: Array.from(dependentNifSet).map((nif) => normalizeNif(nif)).filter((nif) => nif.length === 9),
+    namesByNif,
     firstPageText: fullText,
     hasBLabel,
     hasDependentLabel,
@@ -170,6 +222,7 @@ const mergeParsedWithAi = (
     subjectANif: localParsed.subjectANif || normalizeNif(aiParsed.subjectANif),
     subjectBNif: localParsed.subjectBNif || normalizeNif(aiParsed.subjectBNif),
     dependentNifs: mergedDependentNifs,
+    namesByNif: localParsed.namesByNif || {},
     source: 'local+ai',
   };
 };
@@ -326,6 +379,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
           subjectANif: normalizeNif(aiFromPdf.subjectANif),
           subjectBNif: normalizeNif(aiFromPdf.subjectBNif),
           dependentNifs: (aiFromPdf.dependentNifs || []).map((nif) => normalizeNif(nif)).filter((nif) => nif.length === 9),
+          namesByNif: {},
           firstPageText: '',
           hasBLabel: false,
           hasDependentLabel: false,
@@ -370,6 +424,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
           subjectANif: '',
           subjectBNif: '',
           dependentNifs: [],
+          namesByNif: {},
           firstPageText: '',
           hasBLabel: false,
           hasDependentLabel: false,
@@ -388,14 +443,41 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     setIsApplyingSuggestions(true);
     setApplySummary('');
     try {
+      const existingNifs = new Set(allClients.map((client) => normalizeNif(client.nif)).filter(Boolean));
+      const missingNifs = [
+        pdfValidationResult.parsed.subjectANif,
+        pdfValidationResult.parsed.subjectBNif,
+        ...pdfValidationResult.parsed.dependentNifs,
+      ].map((nif) => normalizeNif(nif)).filter((nif) => nif.length === 9 && !existingNifs.has(nif));
+
+      const namesByNif: Record<string, string> = { ...(pdfValidationResult.parsed.namesByNif || {}) };
+      for (const nif of missingNifs) {
+        const suggested = (namesByNif[nif] || '').trim();
+        const typed = window.prompt(`Indica o nome para o NIF ${nif}:`, suggested);
+        if (typed === null) {
+          setApplySummary('Criação automática cancelada (falta confirmar nomes).');
+          setIsApplyingSuggestions(false);
+          return;
+        }
+        const finalName = typed.trim() || suggested.trim();
+        if (!finalName) {
+          setApplySummary(`Nome obrigatório para criar a ficha do NIF ${nif}.`);
+          setIsApplyingSuggestions(false);
+          return;
+        }
+        namesByNif[nif] = finalName;
+      }
+
       const applyResult = await onApplyPdfSuggestions({
         subjectANif: pdfValidationResult.parsed.subjectANif,
         subjectBNif: pdfValidationResult.parsed.subjectBNif,
         dependentNifs: pdfValidationResult.parsed.dependentNifs,
+        namesByNif,
       });
 
       const summaryParts: string[] = [];
-      if (applyResult.createdClients > 0) summaryParts.push(`${applyResult.createdClients} ficha(s) criada(s)`);
+      if (applyResult.createdClientsStore > 0) summaryParts.push(`${applyResult.createdClientsStore} ficha(s) criada(s) na app`);
+      if (applyResult.createdClientsImport > 0) summaryParts.push(`${applyResult.createdClientsImport} ficha(s) criada(s) no Supabase clientes`);
       if (applyResult.createdRelations > 0) summaryParts.push(`${applyResult.createdRelations} relação(ões) criada(s)`);
       if (applyResult.addedToIrsGroup > 0) summaryParts.push(`${applyResult.addedToIrsGroup} cliente(s) adicionado(s) ao grupo IRS`);
       if (summaryParts.length === 0) summaryParts.push('Sem alterações (já estava tudo criado)');
@@ -418,7 +500,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     } finally {
       setIsApplyingSuggestions(false);
     }
-  }, [onApplyPdfSuggestions, pdfValidationResult]);
+  }, [allClients, onApplyPdfSuggestions, pdfValidationResult]);
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">

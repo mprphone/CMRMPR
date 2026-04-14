@@ -55,10 +55,12 @@ interface ApplyPdfSuggestionsPayload {
   subjectANif: string;
   subjectBNif: string;
   dependentNifs: string[];
+  namesByNif?: Record<string, string>;
 }
 
 interface ApplyPdfSuggestionsResult {
-  createdClients: number;
+  createdClientsStore: number;
+  createdClientsImport: number;
   createdRelations: number;
   addedToIrsGroup: number;
   errors: string[];
@@ -341,6 +343,26 @@ const getImportClientRowsByNif = async (nifs: string[]): Promise<ImportClientRow
   return (data || []) as ImportClientRow[];
 };
 
+const ensureImportClientByNif = async (nif: string, name: string): Promise<{ created: boolean }> => {
+  if (!importClient || !nif) return { created: false };
+  const { data: existing, error: existingError } = await importClient
+    .from('clientes')
+    .select('id,nif')
+    .eq('nif', nif)
+    .limit(1);
+
+  if (existingError) throw existingError;
+  if (Array.isArray(existing) && existing.length > 0) return { created: false };
+
+  const payload = {
+    nif,
+    nome: normalizeText(name) || `Cliente ${nif}`,
+  };
+  const { error: insertError } = await importClient.from('clientes').insert([payload]);
+  if (insertError) throw insertError;
+  return { created: true };
+};
+
 const getImportClientRowsByIds = async (ids: string[]): Promise<ImportClientRow[]> => {
   if (!importClient || ids.length === 0) return [];
   const { data, error } = await importClient
@@ -507,7 +529,8 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
 
   const handleApplyPdfSuggestions = React.useCallback(async (payload: ApplyPdfSuggestionsPayload): Promise<ApplyPdfSuggestionsResult> => {
     const result: ApplyPdfSuggestionsResult = {
-      createdClients: 0,
+      createdClientsStore: 0,
+      createdClientsImport: 0,
       createdRelations: 0,
       addedToIrsGroup: 0,
       errors: [],
@@ -516,6 +539,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
     const subjectANif = normalizeNif(payload.subjectANif);
     const subjectBNif = normalizeNif(payload.subjectBNif);
     const dependentNifs = Array.from(new Set((payload.dependentNifs || []).map((nif) => normalizeNif(nif)).filter((nif) => nif.length === 9)));
+    const namesByNif = payload.namesByNif || {};
 
     if (!subjectANif) {
       result.errors.push('NIF do Sujeito Passivo A não foi detetado.');
@@ -534,25 +558,32 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
 
     const ensureClientByNif = async (nif: string, fallbackName: string): Promise<Client | null> => {
       if (!nif || nif.length !== 9) return null;
-      const existing = clientsByNifSnapshot.get(nif);
-      if (existing) {
-        clientIdsToEnsureInGroup.add(existing.id);
-        return existing;
+      const preferredName = normalizeText(namesByNif[nif]) || fallbackName;
+      let appClient = clientsByNifSnapshot.get(nif) || null;
+      if (!appClient) {
+        try {
+          const clientToCreate = buildAutoCreatedClient(nif, preferredName);
+          const savedClient = await clientService.upsert(clientToCreate);
+          clientsByNifSnapshot.set(nif, savedClient);
+          newClientsToInsert.push(savedClient);
+          appClient = savedClient;
+          result.createdClientsStore += 1;
+        } catch (err: any) {
+          const message = err?.message || 'erro desconhecido';
+          result.errors.push(`Falha ao criar ficha (store) para NIF ${nif}: ${message}`);
+        }
       }
 
       try {
-        const clientToCreate = buildAutoCreatedClient(nif, fallbackName);
-        const savedClient = await clientService.upsert(clientToCreate);
-        clientsByNifSnapshot.set(nif, savedClient);
-        newClientsToInsert.push(savedClient);
-        clientIdsToEnsureInGroup.add(savedClient.id);
-        result.createdClients += 1;
-        return savedClient;
+        const importResult = await ensureImportClientByNif(nif, appClient?.name || preferredName);
+        if (importResult.created) result.createdClientsImport += 1;
       } catch (err: any) {
         const message = err?.message || 'erro desconhecido';
-        result.errors.push(`Falha ao criar ficha para NIF ${nif}: ${message}`);
-        return null;
+        result.errors.push(`Falha ao criar ficha (import/clientes) para NIF ${nif}: ${message}`);
       }
+
+      if (appClient) clientIdsToEnsureInGroup.add(appClient.id);
+      return appClient;
     };
 
     const subjectBClient = subjectBNif
