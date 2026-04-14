@@ -119,24 +119,49 @@ export interface IrsPdfAiParseResult {
   dependentNifs: string[];
 }
 
+const getParseIrsFunctionConfig = (): { url: string; key: string } => {
+  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL_CMR || "";
+  const envKey = (import.meta as any).env?.VITE_SUPABASE_KEY_CMR || "";
+  if (envUrl && envKey) return { url: envUrl, key: envKey };
+
+  try {
+    const raw = localStorage.getItem("globalSettings");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const url = String(parsed?.supabaseStoreUrl || "");
+      const key = String(parsed?.supabaseStoreKey || "");
+      if (url && key) return { url, key };
+    }
+  } catch {
+    // ignore
+  }
+
+  throw new Error("Configuração Supabase em falta para chamar parse-irs-pdf.");
+};
+
+const callParseIrsPdfNoAuth = async (body: Record<string, unknown>): Promise<any> => {
+  const { url, key } = getParseIrsFunctionConfig();
+  const endpoint = `${String(url).replace(/\/+$/, "")}/functions/v1/parse-irs-pdf`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: key,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(String(data?.error || data?.message || `HTTP ${response.status}`));
+  }
+  return data;
+};
+
 export const parseIrsPdfNifsWithAI = async (
   firstPageText: string
 ): Promise<IrsPdfAiParseResult> => {
-  const storeClient = ensureStoreClient();
-  const { data, error } = await invokeWithJwtRefreshRetry(storeClient, "parse-irs-pdf", { firstPageText });
-
-  if (error) {
-    console.error("Erro na Edge Function 'parse-irs-pdf':", error);
-
-    if (error.context && typeof (error.context as any).json === "function") {
-      const functionError = await (error.context as any).json().catch(() => null);
-      if (functionError?.error) throw new Error(functionError.error);
-      if (functionError?.message) throw new Error(functionError.message);
-    }
-
-    throw new Error("Falha ao processar o PDF com IA.");
-  }
-
+  const data = await callParseIrsPdfNoAuth({ firstPageText });
   if (!data || typeof data !== "object") {
     throw new Error("A IA devolveu uma resposta vazia para o PDF.");
   }
@@ -155,8 +180,6 @@ export const parseIrsPdfNifsWithAI = async (
 export const parseIrsPdfNifsFromPdfWithAI = async (
   file: File
 ): Promise<IrsPdfAiParseResult> => {
-  const storeClient = ensureStoreClient();
-
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   let binary = "";
@@ -165,23 +188,11 @@ export const parseIrsPdfNifsFromPdfWithAI = async (
   }
   const pdfBase64 = btoa(binary);
 
-  const { data, error } = await invokeWithJwtRefreshRetry(storeClient, "parse-irs-pdf", {
+  const data = await callParseIrsPdfNoAuth({
     pdfBase64,
     mimeType: file.type || "application/pdf",
     fileName: file.name || "",
   });
-
-  if (error) {
-    console.error("Erro na Edge Function 'parse-irs-pdf' (pdf):", error);
-
-    if (error.context && typeof (error.context as any).json === "function") {
-      const functionError = await (error.context as any).json().catch(() => null);
-      if (functionError?.error) throw new Error(functionError.error);
-      if (functionError?.message) throw new Error(functionError.message);
-    }
-
-    throw new Error("Falha ao processar o ficheiro PDF com IA.");
-  }
 
   if (!data || typeof data !== "object") {
     throw new Error("A IA devolveu resposta vazia ao processar o PDF.");
