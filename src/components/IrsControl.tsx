@@ -344,7 +344,7 @@ const getImportClientRowsByNif = async (nifs: string[]): Promise<ImportClientRow
   return (data || []) as ImportClientRow[];
 };
 
-const ensureImportClientByNif = async (nif: string, name: string): Promise<{ created: boolean }> => {
+const ensureImportClientByNif = async (nif: string, name: string): Promise<{ created: boolean; createdId?: string }> => {
   if (!importClient || !nif) return { created: false };
   const { data: existing, error: existingError } = await importClient
     .from('clientes')
@@ -353,19 +353,22 @@ const ensureImportClientByNif = async (nif: string, name: string): Promise<{ cre
     .limit(1);
 
   if (existingError) throw existingError;
-  if (Array.isArray(existing) && existing.length > 0) return { created: false };
+  if (Array.isArray(existing) && existing.length > 0) return { created: false, createdId: normalizeText(existing[0]?.id) || undefined };
 
   const finalName = normalizeText(name) || `Cliente ${nif}`;
   const payloadBase = { nif, nome: finalName };
   let insertError: any = null;
+  let createdId = '';
+  let insertData: any[] | null = null;
 
-  ({ error: insertError } = await importClient.from('clientes').insert([payloadBase]));
+  ({ data: insertData, error: insertError } = await importClient.from('clientes').insert([payloadBase]).select('id').limit(1));
   if (insertError) {
     const payloadWithId = { id: crypto.randomUUID(), ...payloadBase };
-    ({ error: insertError } = await importClient.from('clientes').insert([payloadWithId]));
+    ({ data: insertData, error: insertError } = await importClient.from('clientes').insert([payloadWithId]).select('id').limit(1));
   }
   if (insertError) throw insertError;
-  return { created: true };
+  createdId = normalizeText(insertData?.[0]?.id);
+  return { created: true, createdId: createdId || undefined };
 };
 
 const getImportClientRowsByIds = async (ids: string[]): Promise<ImportClientRow[]> => {
@@ -566,6 +569,19 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
       if (!nif || nif.length !== 9) return null;
       const preferredName = normalizeText(namesByNif[nif]) || fallbackName;
       let appClient = clientsByNifSnapshot.get(nif) || null;
+      let importCreatedNow = false;
+      let importCreatedId = '';
+      try {
+        const importResult = await ensureImportClientByNif(nif, appClient?.name || preferredName);
+        importCreatedNow = Boolean(importResult.created);
+        importCreatedId = normalizeText(importResult.createdId);
+        if (importResult.created) result.createdClientsImport += 1;
+      } catch (err: any) {
+        const message = err?.message || 'erro desconhecido';
+        result.errors.push(`Falha ao criar ficha (import/clientes) para NIF ${nif}: ${message}`);
+        return appClient;
+      }
+
       if (!appClient) {
         try {
           const clientToCreate = buildAutoCreatedClient(nif, preferredName);
@@ -577,15 +593,20 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
         } catch (err: any) {
           const message = err?.message || 'erro desconhecido';
           result.errors.push(`Falha ao criar ficha (store) para NIF ${nif}: ${message}`);
+          if (importCreatedNow && importClient) {
+            try {
+              if (importCreatedId) {
+                await importClient.from('clientes').delete().eq('id', importCreatedId);
+              } else {
+                await importClient.from('clientes').delete().eq('nif', nif).eq('nome', preferredName);
+              }
+              result.createdClientsImport = Math.max(0, result.createdClientsImport - 1);
+            } catch (rollbackErr: any) {
+              result.errors.push(`Rollback falhou para NIF ${nif} no Supabase original: ${rollbackErr?.message || 'erro desconhecido'}`);
+            }
+          }
+          return null;
         }
-      }
-
-      try {
-        const importResult = await ensureImportClientByNif(nif, appClient?.name || preferredName);
-        if (importResult.created) result.createdClientsImport += 1;
-      } catch (err: any) {
-        const message = err?.message || 'erro desconhecido';
-        result.errors.push(`Falha ao criar ficha (import/clientes) para NIF ${nif}: ${message}`);
       }
 
       if (appClient) clientIdsToEnsureInGroup.add(appClient.id);
