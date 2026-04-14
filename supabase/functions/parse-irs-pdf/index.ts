@@ -23,9 +23,11 @@ serve(async (req) => {
   }
 
   try {
-    const { firstPageText } = await req.json().catch(() => ({}));
-    if (!firstPageText || typeof firstPageText !== "string") {
-      throw new Error("firstPageText é obrigatório.");
+    const { firstPageText, pdfBase64, mimeType, fileName } = await req.json().catch(() => ({}));
+    const hasTextInput = typeof firstPageText === "string" && firstPageText.trim().length > 0;
+    const hasPdfInput = typeof pdfBase64 === "string" && pdfBase64.trim().length > 0;
+    if (!hasTextInput && !hasPdfInput) {
+      throw new Error("firstPageText ou pdfBase64 é obrigatório.");
     }
 
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
@@ -42,7 +44,7 @@ serve(async (req) => {
     const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
     const prompt = `
-Extrai os NIFs de um comprovativo de IRS português (texto da 1ª página).
+Extrai os NIFs de um comprovativo de IRS português (primeira página).
 Objetivo:
 - subjectANif = NIF do "Sujeito Passivo A"
 - subjectBNif = NIF do "Sujeito Passivo B" (se existir)
@@ -54,9 +56,6 @@ Regras:
 - Não inventar NIFs.
 - Responder apenas JSON.
 
-Texto:
-${firstPageText.slice(0, 15000)}
-
 Formato de resposta obrigatório:
 {
   "subjectANif": "123456789",
@@ -65,7 +64,23 @@ Formato de resposta obrigatório:
 }
     `.trim();
 
-    const result = await model.generateContent(prompt);
+    const contentParts: any[] = [{ text: prompt }];
+    if (hasTextInput) {
+      contentParts.push({ text: `Texto extraído:\n${String(firstPageText).slice(0, 20000)}` });
+    }
+    if (hasPdfInput) {
+      contentParts.push({
+        inlineData: {
+          mimeType: typeof mimeType === "string" && mimeType ? mimeType : "application/pdf",
+          data: String(pdfBase64),
+        },
+      });
+      if (typeof fileName === "string" && fileName) {
+        contentParts.push({ text: `Nome do ficheiro: ${fileName}` });
+      }
+    }
+
+    const result = await model.generateContent(contentParts);
     const text = result.response.text();
     const parsed = extractFirstJsonObject(text) as any;
 

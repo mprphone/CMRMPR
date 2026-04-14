@@ -4,7 +4,7 @@ import { Check, Copy, Eye, EyeOff, X } from 'lucide-react';
 import { Client, FeeGroup } from '../../types';
 import type { IrsClientFichaInfo } from '../IrsControl';
 import { IrsControlRecord, IrsDeliveryClose } from './useIrsControl';
-import { parseIrsPdfNifsWithAI } from '../../services/geminiService';
+import { parseIrsPdfNifsFromPdfWithAI, parseIrsPdfNifsWithAI } from '../../services/geminiService';
 
 interface IrsControlSectionProps {
   currentYear: number;
@@ -286,15 +286,30 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
 
     setIsVerifyingPdf(true);
     try {
-      const localParsed = await parseIrsPdfFirstPage(file);
-      let finalParsed = localParsed;
-      if (shouldUseAiFallback(localParsed)) {
-        try {
-          const aiParsed = await parseIrsPdfNifsWithAI(localParsed.firstPageText);
-          finalParsed = mergeParsedWithAi(localParsed, aiParsed);
-        } catch (aiErr) {
-          console.error('Falha no fallback Gemini para IRS:', aiErr);
+      let finalParsed: IrsPdfParseResult;
+      try {
+        const localParsed = await parseIrsPdfFirstPage(file);
+        finalParsed = localParsed;
+        if (shouldUseAiFallback(localParsed)) {
+          try {
+            const aiParsed = await parseIrsPdfNifsWithAI(localParsed.firstPageText);
+            finalParsed = mergeParsedWithAi(localParsed, aiParsed);
+          } catch (aiErr) {
+            console.error('Falha no fallback Gemini por texto:', aiErr);
+          }
         }
+      } catch (localErr) {
+        console.error('Falha na leitura local do PDF:', localErr);
+        const aiFromPdf = await parseIrsPdfNifsFromPdfWithAI(file);
+        finalParsed = {
+          subjectANif: normalizeNif(aiFromPdf.subjectANif),
+          subjectBNif: normalizeNif(aiFromPdf.subjectBNif),
+          dependentNifs: (aiFromPdf.dependentNifs || []).map((nif) => normalizeNif(nif)).filter((nif) => nif.length === 9),
+          firstPageText: '',
+          hasBLabel: false,
+          hasDependentLabel: false,
+          source: 'local+ai',
+        };
       }
 
       const targetClient = irsGroupClients.find((client) => normalizeNif(client.nif) === finalParsed.subjectANif)
@@ -326,6 +341,9 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
       }
     } catch (err) {
       console.error('Erro ao verificar PDF do IRS:', err);
+      const errorMessage = err instanceof Error && err.message
+        ? err.message
+        : 'Erro desconhecido ao validar o PDF com IA.';
       setPdfValidationResult({
         parsed: {
           subjectANif: '',
@@ -336,7 +354,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
           hasDependentLabel: false,
           source: 'local',
         },
-        notes: ['Não foi possível ler o PDF. Confirme se é um PDF de texto (não imagem digitalizada).'],
+        notes: [errorMessage],
         suggestions: [],
       });
     } finally {

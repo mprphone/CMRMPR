@@ -125,3 +125,52 @@ export const parseIrsPdfNifsWithAI = async (
       : [],
   };
 };
+
+export const parseIrsPdfNifsFromPdfWithAI = async (
+  file: File
+): Promise<IrsPdfAiParseResult> => {
+  const storeClient = ensureStoreClient();
+  await setFunctionsAuthIfSessionExists(storeClient);
+
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const pdfBase64 = btoa(binary);
+
+  const { data, error } = await storeClient.functions.invoke("parse-irs-pdf", {
+    body: {
+      pdfBase64,
+      mimeType: file.type || "application/pdf",
+      fileName: file.name || "",
+    },
+  });
+
+  if (error) {
+    console.error("Erro na Edge Function 'parse-irs-pdf' (pdf):", error);
+
+    if (error.context && typeof (error.context as any).json === "function") {
+      const functionError = await (error.context as any).json().catch(() => null);
+      if (functionError?.error) throw new Error(functionError.error);
+      if (functionError?.message) throw new Error(functionError.message);
+    }
+
+    throw new Error("Falha ao processar o ficheiro PDF com IA.");
+  }
+
+  if (!data || typeof data !== "object") {
+    throw new Error("A IA devolveu resposta vazia ao processar o PDF.");
+  }
+
+  return {
+    subjectANif: String((data as any).subjectANif || "").replace(/\D/g, ""),
+    subjectBNif: String((data as any).subjectBNif || "").replace(/\D/g, ""),
+    dependentNifs: Array.isArray((data as any).dependentNifs)
+      ? (data as any).dependentNifs
+          .map((value: unknown) => String(value || "").replace(/\D/g, ""))
+          .filter((value: string) => value.length === 9)
+      : [],
+  };
+};
