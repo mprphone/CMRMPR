@@ -147,6 +147,7 @@ const callParseIrsPdfNoAuth = async (body: Record<string, unknown>): Promise<any
     headers: {
       "Content-Type": "application/json",
       apikey: key,
+      Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify(body),
   });
