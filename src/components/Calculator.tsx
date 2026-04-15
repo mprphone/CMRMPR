@@ -28,11 +28,11 @@ const normalizeItem = (item: QuoteItem): QuoteItem => ({
 });
 
 const PDF_PUBLIC_LOGO_CANDIDATES = ['/logo-mpr.png', '/logo.png', '/mpr-logo.png'];
-const MPR_OFFICIAL_ADDRESS = 'Rua Nossa Senhora da Ajuda 107F, 4815-364 Moreira de CÃ³negos';
+const MPR_OFFICIAL_ADDRESS = 'Rua Nossa Senhora da Ajuda 107F, 4815-364 Moreira de Cónegos';
 const MPR_OFFICIAL_EMAIL = 'mpr@mpr.pt';
 const MPR_OFFICIAL_PHONE = '253089591';
 const DEFAULT_MPR_PRESENTATION_TEXT = 'A MPR Negócios assegura acompanhamento por responsável dedicado, resposta célere e reporte regular, combinando rigor técnico com proximidade operacional para garantir previsibilidade e confiança na gestão diária.';
-const DEFAULT_PROPOSAL_CONDITIONS_TEXT = 'Valores acrescidos de IVA Ã  taxa legal em vigor.\nConfidencialidade e proteÃ§Ã£o de dados asseguradas nos termos legais aplicÃ¡veis.\nA proposta Ã© vÃ¡lida por 30 dias.';
+const DEFAULT_PROPOSAL_CONDITIONS_TEXT = 'Valores acrescidos de IVA �  taxa legal em vigor.\nConfidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.\nA proposta é válida por 30 dias.';
 const QUOTE_TEXT_OVERRIDES_STORAGE_KEY = 'quoteTextOverridesV1';
 
 interface QuoteTextOverrides {
@@ -260,51 +260,51 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
       {
         title: 'Contabilidade',
         items: [
-          'OrganizaÃ§Ã£o e tratamento da documentaÃ§Ã£o contabilÃ­stica.',
-          'Registos contabilÃ­sticos, conferÃªncias e reconciliaÃ§Ãµes.',
-          'PreparaÃ§Ã£o de informaÃ§Ã£o para fecho mensal e anual.',
+          'Organização e tratamento da documentação contabilística.',
+          'Registos contabilísticos, conferências e reconciliações.',
+          'Preparação de informação para fecho mensal e anual.',
         ],
       },
       {
         title: 'Fiscalidade',
-        items: ['Cumprimento das obrigaÃ§Ãµes fiscais e declarativas.'],
+        items: ['Cumprimento das obrigações fiscais e declarativas.'],
       },
     ];
 
     if (includesPayroll) {
       groupedIncludedServices.push({
         title: 'Processamento salarial',
-        items: ['Processamento salarial e cumprimento das obrigaÃ§Ãµes laborais.'],
+        items: ['Processamento salarial e cumprimento das obrigações laborais.'],
       });
     }
     if (includesManagement) {
       groupedIncludedServices.push({
-        title: 'Apoio Ã  gestÃ£o',
-        items: ['Apoio Ã  gestÃ£o, acompanhamento de indicadores e suporte Ã  decisÃ£o.'],
+        title: 'Apoio �  gestão',
+        items: ['Apoio �  gestão, acompanhamento de indicadores e suporte �  decisão.'],
       });
     }
     if (includesAdministrative) {
       groupedIncludedServices.push({
         title: 'Apoio administrativo',
-        items: ['Apoio administrativo e acompanhamento documental contÃ­nuo.'],
+        items: ['Apoio administrativo e acompanhamento documental contínuo.'],
       });
     }
     if (includesFiscal && !groupedIncludedServices.some(group => group.title === 'Fiscalidade')) {
       groupedIncludedServices.push({
         title: 'Fiscalidade',
-        items: ['Cumprimento das obrigaÃ§Ãµes fiscais e declarativas.'],
+        items: ['Cumprimento das obrigações fiscais e declarativas.'],
       });
     }
 
     const excludedServices: string[] = [
-      'RecuperaÃ§Ã£o de contabilidade em atraso.',
-      'RepresentaÃ§Ã£o em inspeÃ§Ãµes, contencioso ou procedimentos especiais.',
-      'Candidaturas, estudos econÃ³mico-financeiros e projetos.',
-      'Outros trabalhos extraordinÃ¡rios nÃ£o abrangidos pela avenÃ§a mensal.',
+      'Recuperação de contabilidade em atraso.',
+      'Representação em inspeções, contencioso ou procedimentos especiais.',
+      'Candidaturas, estudos económico-financeiros e projetos.',
+      'Outros trabalhos extraordinários não abrangidos pela avença mensal.',
     ];
 
     if (!includesPayroll) {
-      excludedServices.splice(1, 0, 'Processamento salarial e obrigaÃ§Ãµes laborais.');
+      excludedServices.splice(1, 0, 'Processamento salarial e obrigações laborais.');
     }
 
     return {
@@ -317,7 +317,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
   const handleSaveProposal = async () => {
     if (items.length === 0) {
-      alert('Adicione pelo menos um serviÃ§o para salvar a proposta.');
+      alert('Adicione pelo menos um serviço para salvar a proposta.');
       return;
     }
 
@@ -355,7 +355,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
   };
 
   const handleLoadProposal = (proposal: QuoteHistory) => {
-    if (!confirm('Deseja carregar esta proposta? As alteraÃ§Ãµes atuais serÃ£o perdidas.')) return;
+    if (!confirm('Deseja carregar esta proposta? As alterações atuais serão perdidas.')) return;
 
     setQuoteClientName(proposal.client_name);
     setQuoteClientNif(proposal.client_nif);
@@ -380,7 +380,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
   };
 
   const handleDeleteProposal = async (id: string) => {
-    if (!confirm('Tem a certeza que deseja apagar esta proposta do histÃ³rico?')) return;
+    if (!confirm('Tem a certeza que deseja apagar esta proposta do histórico?')) return;
 
     try {
       await quoteHistoryService.delete(id);
@@ -464,17 +464,17 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
           <div className="mt-5 pb-4 border-b border-slate-200">
             <h2 className="text-[21px] font-semibold tracking-[0.02em] text-slate-900 uppercase">
-              Proposta de ServiÃ§os de Contabilidade
+              Proposta de Serviços de Contabilidade
             </h2>
             <p className="mt-1 text-[10px] text-slate-500">
-              Proposta de prestaÃ§Ã£o de serviÃ§os de contabilidade e apoio Ã  gestÃ£o
+              Proposta de prestação de serviços de contabilidade e apoio �  gestão
             </p>
           </div>
 
           <div className="mt-4 grid grid-cols-12 gap-4 items-start">
             <div className="col-span-8 space-y-3">
               <div className="rounded-2xl border border-slate-200/80 p-4">
-                <p className="text-[10px] uppercase font-semibold tracking-[0.08em] text-slate-400 mb-1">DestinatÃ¡rio</p>
+                <p className="text-[10px] uppercase font-semibold tracking-[0.08em] text-slate-400 mb-1">Destinatário</p>
                 <p className="text-[17px] font-semibold text-slate-900 leading-tight">{quoteClientName || 'Exmo(a). Senhor(a)'}</p>
                 <div className="mt-2 text-[10.5px] text-slate-600">
                   <span className="text-slate-500">NIF:</span> <span className="font-medium text-slate-700">{quoteClientNif || '---'}</span>
@@ -484,7 +484,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               <div className="rounded-2xl border border-slate-200/80 p-4">
                 <div className="text-[10px] font-semibold text-slate-700 uppercase tracking-[0.08em] mb-1">Enquadramento da Entidade</div>
                 <p className="text-[10px] leading-snug text-slate-700">
-                  Considerando a natureza e exigÃªncias de uma instituiÃ§Ã£o social, a presente proposta visa assegurar o cumprimento contabilÃ­stico, fiscal e laboral, bem como disponibilizar informaÃ§Ã£o de apoio Ã  gestÃ£o e acompanhamento regular.
+                  Considerando a natureza e exigências de uma instituição social, a presente proposta visa assegurar o cumprimento contabilístico, fiscal e laboral, bem como disponibilizar informação de apoio �  gestão e acompanhamento regular.
                 </p>
               </div>
 
@@ -497,8 +497,8 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
               <div className="rounded-2xl border border-slate-200/80 p-3.5">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-[11px] font-semibold text-slate-900 uppercase tracking-[0.07em]">ServiÃ§os incluÃ­dos</h3>
-                  <div className="text-[9px] text-slate-400">Ã‚mbito da proposta</div>
+                  <h3 className="text-[11px] font-semibold text-slate-900 uppercase tracking-[0.07em]">Serviços incluídos</h3>
+                  <div className="text-[9px] text-slate-400">�mbito da proposta</div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[7.8px] text-slate-700 leading-tight">
@@ -508,7 +508,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                         <div className="text-[7.5px] font-semibold text-slate-800 uppercase tracking-[0.05em]">{group.title}</div>
                         <div className="space-y-0.5 mt-0.5">
                           {group.items.map((item, idx) => (
-                            <div key={`left-item-${index}-${idx}`} className="leading-snug">â€¢ {item}</div>
+                            <div key={`left-item-${index}-${idx}`} className="leading-snug">• {item}</div>
                           ))}
                         </div>
                       </div>
@@ -520,7 +520,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                         <div className="text-[7.5px] font-semibold text-slate-800 uppercase tracking-[0.05em]">{group.title}</div>
                         <div className="space-y-0.5 mt-0.5">
                           {group.items.map((item, idx) => (
-                            <div key={`right-item-${index}-${idx}`} className="leading-snug">â€¢ {item}</div>
+                            <div key={`right-item-${index}-${idx}`} className="leading-snug">• {item}</div>
                           ))}
                         </div>
                       </div>
@@ -532,20 +532,20 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
             <div className="col-span-4 space-y-3">
               <div className="rounded-2xl border border-slate-200/80 p-4">
-                <p className="text-[10px] uppercase font-semibold tracking-[0.07em] text-slate-400">HonorÃ¡rios Mensais</p>
-                <div className="mt-2 text-[22px] font-semibold text-slate-900 leading-tight">{finalMonthlyFeeLabel} â‚¬ + IVA</div>
+                <p className="text-[10px] uppercase font-semibold tracking-[0.07em] text-slate-400">Honorários Mensais</p>
+                <div className="mt-2 text-[22px] font-semibold text-slate-900 leading-tight">{finalMonthlyFeeLabel} {"\u20AC"} + IVA</div>
                 <p className="mt-2 text-[9px] text-slate-500 leading-snug">
-                  O valor mensal pressupÃµe o volume corrente de atividade atualmente conhecido. AlteraÃ§Ãµes relevantes na estrutura operacional, nÃºmero de colaboradores ou volume documental poderÃ£o determinar revisÃ£o da avenÃ§a.
+                  O valor mensal pressupõe o volume corrente de atividade atualmente conhecido. Alterações relevantes na estrutura operacional, número de colaboradores ou volume documental poderão determinar revisão da avença.
                 </p>
 
                 <div className="mt-4 border-t border-slate-200 pt-3 text-[10px] text-slate-600 space-y-1">
                   <div className="flex justify-between gap-3"><span>Periodicidade</span><span className="font-medium text-slate-700">Mensal</span></div>
-                  <div className="flex justify-between gap-3"><span>Pagamento</span><span className="font-medium text-slate-700">AtÃ© dia 8</span></div>
+                  <div className="flex justify-between gap-3"><span>Pagamento</span><span className="font-medium text-slate-700">Até dia 8</span></div>
                 </div>
               </div>
 
               <div className="rounded-xl border border-slate-200/80 p-2.5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">CondiÃ§Ãµes</div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Condições</div>
                 <div className="text-[8px] text-slate-600 space-y-0.5 leading-tight">
                   {(proposalConditionLines.length > 0 ? proposalConditionLines : DEFAULT_PROPOSAL_CONDITIONS_TEXT.split('\n')).map((line, index) => (
                     <div key={`condition-${index}`}>• {line.replace(/^•\s*/, '')}</div>
@@ -555,7 +555,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
               <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.07em] text-emerald-800 mb-1">Proposta apresentada por</p>
-                <p className="text-[12px] font-semibold text-slate-900">{(globalSettings as any)?.companyName || (globalSettings as any)?.company_name || 'MPR NegÃ³cios'}</p>
+                <p className="text-[12px] font-semibold text-slate-900">{(globalSettings as any)?.companyName || (globalSettings as any)?.company_name || 'MPR Negócios'}</p>
                 <p className="mt-1 text-[9px] text-slate-600 leading-snug">
                   {MPR_OFFICIAL_ADDRESS}
                   <br />
@@ -570,28 +570,28 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
           <div className="mt-1.5 grid grid-cols-12 gap-2.5">
             <div className="col-span-7 space-y-2">
               <div className="rounded-xl border border-slate-200/80 p-2.5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">ServiÃ§os nÃ£o incluÃ­dos</div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Serviços não incluídos</div>
                 <div className="text-[7.2px] text-slate-600 space-y-0.5 leading-tight">
                   {proposalScope.excludedServices.map((item, index) => (
-                    <div key={`ex-${index}`}>â€¢ {item}</div>
+                    <div key={`ex-${index}`}>• {item}</div>
                   ))}
                 </div>
               </div>
 
               <div className="rounded-xl border border-slate-200/80 p-2.5">
                 <div className="text-[10px] font-semibold text-slate-700">Com os melhores cumprimentos,</div>
-                <div className="text-[11px] font-semibold text-slate-900 mt-1">MPR NegÃ³cios</div>
+                <div className="text-[11px] font-semibold text-slate-900 mt-1">MPR Negócios</div>
                 <p className="mt-1.5 text-[8px] text-slate-600 leading-snug">
-                  Permanecemos inteiramente disponÃ­veis para esclarecer qualquer ponto e ajustar a proposta Ã s necessidades especÃ­ficas da instituiÃ§Ã£o.
+                  Permanecemos inteiramente disponíveis para esclarecer qualquer ponto e ajustar a proposta � s necessidades específicas da instituição.
                 </p>
               </div>
             </div>
 
             <div className="col-span-5 space-y-2">
               <div className="rounded-xl border border-slate-200/80 p-2.5">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">AceitaÃ§Ã£o da proposta</div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.07em] text-slate-700 mb-1">Aceitação da proposta</div>
                 <p className="text-[8px] text-slate-600 leading-snug mb-1.5">
-                  Em nome de {quoteClientName || '________________________________'}, declara-se a aceitaÃ§Ã£o da presente proposta de prestaÃ§Ã£o de serviÃ§os.
+                  Em nome de {quoteClientName || '________________________________'}, declara-se a aceitação da presente proposta de prestação de serviços.
                 </p>
                 <div className="text-[8px] text-slate-700 space-y-1.5">
                   <div>Local e data: ______________________________</div>
@@ -625,7 +625,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 <input type="text" value={quoteClientNif} onChange={(e) => setQuoteClientNif(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Volume NegÃ³cios Anual (â‚¬)</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Volume Negócios Anual (EUR)</label>
                 <input type="number" value={clientVolume} onChange={(e) => setClientVolume(parseFloat(e.target.value) || 0)} className="w-full px-3 py-2 border rounded-lg text-sm font-bold text-blue-600" />
               </div>
               <div>
@@ -668,7 +668,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
             <div className="flex items-center justify-between mb-4 gap-3">
               <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <FileText size={20} className="text-indigo-600" /> 2. SeleÃ§Ã£o de ServiÃ§os Contratados
+                <FileText size={20} className="text-indigo-600" /> 2. Seleção de Serviços Contratados
               </h2>
               <button onClick={addCustomItem} className="inline-flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700">
                 <Plus size={14} /> Acrescentar Outra Tarefa
@@ -706,7 +706,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 sticky top-6 space-y-6">
             <div className="flex items-center gap-2 border-b pb-4">
               <CalcIcon className="text-blue-600" size={24} />
-              <h3 className="text-lg font-bold text-slate-800 uppercase tracking-tighter">SimulaÃ§Ã£o de Valor</h3>
+              <h3 className="text-lg font-bold text-slate-800 uppercase tracking-tighter">Simulação de Valor</h3>
             </div>
 
             <div className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
@@ -744,7 +744,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                           />
                         </div>
                         <div>
-                          <label className="text-[9px] font-bold text-slate-400 uppercase">Custo/hora (â‚¬)</label>
+                          <label className="text-[9px] font-bold text-slate-400 uppercase">Custo/hora (EUR)</label>
                           <input
                             type="number"
                             min="1"
@@ -791,16 +791,16 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
               {fairValue && (
                 <div className="p-3 bg-green-50 rounded-lg border border-green-100">
-                  <p className="text-[10px] font-bold text-green-600 uppercase mb-1">Intervalo de ReferÃªncia (Fair Value)</p>
-                  <p className="text-sm font-bold text-green-800">{fairValue.min.toFixed(0)}â‚¬ - {fairValue.max.toFixed(0)}â‚¬</p>
-                  <p className="text-[9px] text-green-500 mt-1">Baseado no Volume de NegÃ³cios e Patamares definidos.</p>
+                  <p className="text-[10px] font-bold text-green-600 uppercase mb-1">Intervalo de Referência (Fair Value)</p>
+                  <p className="text-sm font-bold text-green-800">{fairValue.min.toFixed(0)}{"\u20AC"} - {fairValue.max.toFixed(0)}{"\u20AC"}</p>
+                  <p className="text-[9px] text-green-500 mt-1">Baseado no Volume de Negócios e Patamares definidos.</p>
                 </div>
               )}
 
               <div className="bg-blue-600 p-5 rounded-xl text-center shadow-lg shadow-blue-100">
-                <p className="text-[10px] text-blue-100 uppercase font-black tracking-widest mb-1">AvenÃ§a Mensal Sugerida</p>
-                <p className="text-4xl font-black text-white">{suggestedMonthlyFee.toFixed(2)}â‚¬</p>
-                <p className="text-[10px] text-blue-200 mt-1">+ IVA / MÃŠS</p>
+                <p className="text-[10px] text-blue-100 uppercase font-black tracking-widest mb-1">Avença Mensal Sugerida</p>
+                <p className="text-4xl font-black text-white">{suggestedMonthlyFee.toFixed(2)}{"\u20AC"}</p>
+                <p className="text-[10px] text-blue-200 mt-1">+ IVA / M�`S</p>
               </div>
 
               <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 space-y-2">
@@ -843,7 +843,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                   disabled={items.length === 0}
                   className="w-full bg-slate-200 text-slate-800 py-3 rounded-xl font-bold hover:bg-slate-300 transition-all flex justify-center items-center gap-2 disabled:opacity-50"
                 >
-                  <FileText size={18} /> PrÃ©-visualizar
+                  <FileText size={18} /> Pré-visualizar
                 </button>
               </div>
             </div>
@@ -853,7 +853,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
 
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <History size={18} /> HistÃ³rico de Propostas Salvas
+          <History size={18} /> Histórico de Propostas Salvas
         </h3>
         <div className="overflow-x-auto max-h-96 custom-scrollbar">
           <table className="w-full text-sm text-left">
@@ -861,8 +861,8 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               <tr>
                 <th className="px-4 py-3">Data</th>
                 <th className="px-4 py-3">Cliente</th>
-                <th className="px-4 py-3 text-right">AvenÃ§a Final</th>
-                <th className="px-4 py-3 text-right">AÃ§Ãµes</th>
+                <th className="px-4 py-3 text-right">Avença Final</th>
+                <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -870,7 +870,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 <tr key={item.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3 text-xs text-slate-500">{new Date(item.created_at).toLocaleDateString('pt-PT')}</td>
                   <td className="px-4 py-3 font-medium text-slate-700">{item.client_name || 'Sem nome'}</td>
-                  <td className="px-4 py-3 text-right font-bold text-blue-600">{item.recommended_monthly_fee.toFixed(2)}â‚¬</td>
+                  <td className="px-4 py-3 text-right font-bold text-blue-600">{item.recommended_monthly_fee.toFixed(2)}{"\u20AC"}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => handleLoadProposal(item)} className="text-xs text-blue-600 hover:underline">Carregar</button>
