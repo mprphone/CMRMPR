@@ -32,7 +32,7 @@ const MPR_OFFICIAL_ADDRESS = 'Rua Nossa Senhora da Ajuda 107F, 4815-364 Moreira 
 const MPR_OFFICIAL_EMAIL = 'mpr@mpr.pt';
 const MPR_OFFICIAL_PHONE = '253089591';
 const DEFAULT_MPR_PRESENTATION_TEXT = 'A MPR Negócios assegura acompanhamento por responsável dedicado, resposta célere e reporte regular, combinando rigor técnico com proximidade operacional para garantir previsibilidade e confiança na gestão diária.';
-const DEFAULT_PROPOSAL_CONDITIONS_TEXT = 'Valores acrescidos de IVA �  taxa legal em vigor.\nConfidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.\nA proposta é válida por 30 dias.';
+const DEFAULT_PROPOSAL_CONDITIONS_TEXT = 'Valores acrescidos de IVA à taxa legal em vigor.\nConfidencialidade e proteção de dados asseguradas nos termos legais aplicáveis.\nA proposta é válida por 30 dias.';
 const QUOTE_TEXT_OVERRIDES_STORAGE_KEY = 'quoteTextOverridesV1';
 
 interface QuoteTextOverrides {
@@ -279,8 +279,8 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
     }
     if (includesManagement) {
       groupedIncludedServices.push({
-        title: 'Apoio �  gestão',
-        items: ['Apoio �  gestão, acompanhamento de indicadores e suporte �  decisão.'],
+        title: 'Apoio à gestão',
+        items: ['Apoio à gestão, acompanhamento de indicadores e suporte à decisão.'],
       });
     }
     if (includesAdministrative) {
@@ -467,7 +467,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               Proposta de Serviços de Contabilidade
             </h2>
             <p className="mt-1 text-[10px] text-slate-500">
-              Proposta de prestação de serviços de contabilidade e apoio �  gestão
+              Proposta de prestação de serviços de contabilidade e apoio à gestão
             </p>
           </div>
 
@@ -484,7 +484,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               <div className="rounded-2xl border border-slate-200/80 p-4">
                 <div className="text-[10px] font-semibold text-slate-700 uppercase tracking-[0.08em] mb-1">Enquadramento da Entidade</div>
                 <p className="text-[10px] leading-snug text-slate-700">
-                  Considerando a natureza e exigências de uma instituição social, a presente proposta visa assegurar o cumprimento contabilístico, fiscal e laboral, bem como disponibilizar informação de apoio �  gestão e acompanhamento regular.
+                  Considerando a natureza e exigências de uma instituição social, a presente proposta visa assegurar o cumprimento contabilístico, fiscal e laboral, bem como disponibilizar informação de apoio à gestão e acompanhamento regular.
                 </p>
               </div>
 
@@ -498,7 +498,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               <div className="rounded-2xl border border-slate-200/80 p-3.5">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-[11px] font-semibold text-slate-900 uppercase tracking-[0.07em]">Serviços incluídos</h3>
-                  <div className="text-[9px] text-slate-400">�mbito da proposta</div>
+                  <div className="text-[9px] text-slate-400">Âmbito da proposta</div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[7.8px] text-slate-700 leading-tight">
@@ -582,7 +582,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
                 <div className="text-[10px] font-semibold text-slate-700">Com os melhores cumprimentos,</div>
                 <div className="text-[11px] font-semibold text-slate-900 mt-1">MPR Negócios</div>
                 <p className="mt-1.5 text-[8px] text-slate-600 leading-snug">
-                  Permanecemos inteiramente disponíveis para esclarecer qualquer ponto e ajustar a proposta � s necessidades específicas da instituição.
+                  Permanecemos inteiramente disponíveis para esclarecer qualquer ponto e ajustar a proposta às necessidades específicas da instituição.
                 </p>
               </div>
             </div>
@@ -800,7 +800,7 @@ const Calculator: React.FC<CalculatorProps> = ({ tasks, areaCosts, logo, turnove
               <div className="bg-blue-600 p-5 rounded-xl text-center shadow-lg shadow-blue-100">
                 <p className="text-[10px] text-blue-100 uppercase font-black tracking-widest mb-1">Avença Mensal Sugerida</p>
                 <p className="text-4xl font-black text-white">{suggestedMonthlyFee.toFixed(2)}{"\u20AC"}</p>
-                <p className="text-[10px] text-blue-200 mt-1">+ IVA / M�`S</p>
+                <p className="text-[10px] text-blue-200 mt-1">+ IVA / MÊS</p>
               </div>
 
               <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 space-y-2">
