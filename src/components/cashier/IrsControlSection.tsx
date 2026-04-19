@@ -67,6 +67,7 @@ const normalizeSearch = (value: string): string => (
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
 );
+type StatusFilter = 'all' | 'yes' | 'no';
 
 const resolveMemberNifForCopy = (member: IrsClientFichaInfo['householdMembers'][number]): string => (
   member.nif || member.atUsername || ''
@@ -331,6 +332,9 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   const [selectedClientIdToAdd, setSelectedClientIdToAdd] = React.useState('');
   const [pdfValidationResult, setPdfValidationResult] = React.useState<IrsPdfValidationResult | null>(null);
   const [applySummary, setApplySummary] = React.useState<string>('');
+  const [searchTerm, setSearchTerm] = React.useState('');
+  const [paidFilter, setPaidFilter] = React.useState<StatusFilter>('all');
+  const [deliveredFilter, setDeliveredFilter] = React.useState<StatusFilter>('all');
   const pdfFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const floatingClient = floatingClientId
@@ -504,6 +508,37 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     }
   }, [allClients, onApplyPdfSuggestions, pdfValidationResult]);
 
+  const filteredIrsGroupClients = React.useMemo(() => {
+    const normalizedQuery = normalizeSearch(searchTerm.trim());
+    const normalizedQueryNif = normalizeNif(searchTerm);
+
+    return irsGroupClients.filter((client) => {
+      const record = irsControlMap.get(`${client.id}-${currentYear}`);
+      const delivered = Boolean(record?.delivered);
+      const paid = Boolean(record?.paid);
+
+      const matchesPaid = (
+        paidFilter === 'all'
+        || (paidFilter === 'yes' && paid)
+        || (paidFilter === 'no' && !paid)
+      );
+      const matchesDelivered = (
+        deliveredFilter === 'all'
+        || (deliveredFilter === 'yes' && delivered)
+        || (deliveredFilter === 'no' && !delivered)
+      );
+
+      const nameMatches = normalizeSearch(client.name || '').includes(normalizedQuery);
+      const nifDigits = normalizeNif(client.nif || '');
+      const nifMatches = normalizedQueryNif
+        ? nifDigits.includes(normalizedQueryNif)
+        : nifDigits.includes(normalizedQuery);
+      const matchesSearch = !normalizedQuery || nameMatches || nifMatches;
+
+      return matchesPaid && matchesDelivered && matchesSearch;
+    });
+  }, [currentYear, deliveredFilter, irsControlMap, irsGroupClients, paidFilter, searchTerm]);
+
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
       <input ref={pdfFileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfSelected} />
@@ -624,7 +659,46 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
             )}
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="bg-white border border-slate-200 rounded-lg p-3">
+            <div className="flex flex-wrap items-end gap-3 mb-3">
+              <div className="min-w-[240px] flex-1">
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Pesquisar</label>
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Nome ou NIF..."
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Pago</label>
+                <select
+                  value={paidFilter}
+                  onChange={(e) => setPaidFilter(e.target.value as StatusFilter)}
+                  className="px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  <option value="all">Todos</option>
+                  <option value="yes">Pago</option>
+                  <option value="no">Não pago</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Entregue</label>
+                <select
+                  value={deliveredFilter}
+                  onChange={(e) => setDeliveredFilter(e.target.value as StatusFilter)}
+                  className="px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  <option value="all">Todos</option>
+                  <option value="yes">Entregue</option>
+                  <option value="no">Não entregue</option>
+                </select>
+              </div>
+              <p className="text-xs text-slate-500 ml-auto">{filteredIrsGroupClients.length} registo(s)</p>
+            </div>
+
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-xs text-slate-500 uppercase bg-slate-50">
                 <tr>
@@ -639,7 +713,13 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {irsGroupClients.map((client) => {
+                {filteredIrsGroupClients.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-4 text-center text-slate-400 italic">
+                      Sem resultados para os filtros aplicados.
+                    </td>
+                  </tr>
+                ) : filteredIrsGroupClients.map((client) => {
                   const record = irsControlMap.get(`${client.id}-${currentYear}`);
                   const delivered = Boolean(record?.delivered);
                   const paid = Boolean(record?.paid);
@@ -718,6 +798,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
