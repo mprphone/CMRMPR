@@ -704,6 +704,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                 <tr>
                   <th className="px-3 py-2 text-left">Cliente</th>
                   <th className="px-3 py-2 text-left">NIF</th>
+                  <th className="px-3 py-2 text-left">IRS</th>
                   <th className="px-3 py-2 text-center">Entregue</th>
                   <th className="px-3 py-2 text-center">Pago</th>
                   <th className="px-3 py-2 text-left">Método</th>
@@ -715,7 +716,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {filteredIrsGroupClients.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-3 py-4 text-center text-slate-400 italic">
+                    <td colSpan={9} className="px-3 py-4 text-center text-slate-400 italic">
                       Sem resultados para os filtros aplicados.
                     </td>
                   </tr>
@@ -727,6 +728,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                   const paymentMethod = record?.paymentMethod || 'Numerário';
                   const notes = record?.notes ?? '';
                   const isClosed = Boolean(record?.deliveryCloseId);
+                  const settlementAmount = Number(record?.irsSettlementAmount || 0);
+                  const settlementDirection = settlementAmount < 0 ? 'A pagar' : 'A receber';
                   return (
                     <tr key={`${client.id}-${currentYear}`} className="hover:bg-slate-50">
                         <td className="px-3 py-2 font-medium text-slate-700">
@@ -740,6 +743,37 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                           </button>
                         </td>
                         <td className="px-3 py-2 text-slate-600">{client.nif}</td>
+                        <td className="px-3 py-2 min-w-[230px]">
+                          <div className="grid grid-cols-[95px_minmax(96px,1fr)] gap-2">
+                            <select
+                              value={settlementDirection}
+                              onChange={(e) => {
+                                const currentAbsolute = Math.abs(settlementAmount);
+                                const signedAmount = e.target.value === 'A pagar' ? -currentAbsolute : currentAbsolute;
+                                onSettlementAmountChange(client.id, signedAmount);
+                              }}
+                              className={`w-full px-2 py-1.5 border rounded-lg text-xs font-bold bg-white ${
+                                settlementDirection === 'A pagar' ? 'text-red-700 border-red-200' : 'text-emerald-700 border-emerald-200'
+                              }`}
+                            >
+                              <option value="A pagar">A pagar</option>
+                              <option value="A receber">A receber</option>
+                            </select>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={Math.abs(settlementAmount) || ''}
+                              onChange={(e) => {
+                                const nextAbsolute = Math.max(0, Number((e.target.value || '').replace(',', '.')) || 0);
+                                const direction = settlementAmount < 0 ? -1 : 1;
+                                onSettlementAmountChange(client.id, nextAbsolute * direction);
+                              }}
+                              className="w-full px-2 py-1.5 border rounded-lg text-sm text-right"
+                              placeholder="0.00"
+                            />
+                          </div>
+                        </td>
                         <td className="px-3 py-2 text-center">
                           <button
                             type="button"
