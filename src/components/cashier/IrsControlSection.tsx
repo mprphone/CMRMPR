@@ -3,7 +3,7 @@ import React from 'react';
 import { Check, Copy, Eye, EyeOff, X } from 'lucide-react';
 import { Client, FeeGroup } from '../../types';
 import type { IrsClientFichaInfo } from '../IrsControl';
-import { IrsControlRecord, IrsDeliveryClose } from './useIrsControl';
+import { IrsControlRecord, IrsDeliveryClose, IrsSettlementDirection } from './useIrsControl';
 import { parseIrsPdfNifsFromPdfWithAI, parseIrsPdfNifsWithAI } from '../../services/geminiService';
 
 interface IrsControlSectionProps {
@@ -41,6 +41,7 @@ interface IrsControlSectionProps {
   onAmountChange: (clientId: string, value: string) => void;
   onNotesChange: (clientId: string, notes: string) => void;
   onSettlementAmountChange: (clientId: string, amount: number) => void;
+  onSettlementDirectionChange: (clientId: string, direction: IrsSettlementDirection) => void;
 }
 
 interface IrsPdfParseResult {
@@ -68,6 +69,14 @@ const normalizeSearch = (value: string): string => (
     .toLowerCase()
 );
 type StatusFilter = 'all' | 'yes' | 'no';
+
+const resolveSettlementDirection = (record: IrsControlRecord | undefined): IrsSettlementDirection => {
+  if (record?.irsSettlementDirection) return record.irsSettlementDirection;
+  const amount = Number(record?.irsSettlementAmount || 0);
+  if (amount < 0) return 'A pagar';
+  if (amount > 0) return 'A receber';
+  return 'Nulo';
+};
 
 const resolveMemberNifForCopy = (member: IrsClientFichaInfo['householdMembers'][number]): string => (
   member.nif || member.atUsername || ''
@@ -323,6 +332,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   onAmountChange,
   onNotesChange,
   onSettlementAmountChange,
+  onSettlementDirectionChange,
 }) => {
   const [floatingClientId, setFloatingClientId] = React.useState<string | null>(null);
   const [visiblePasswords, setVisiblePasswords] = React.useState<Record<string, boolean>>({});
@@ -342,6 +352,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     : null;
   const floatingFichaInfo = floatingClient ? clientFichaInfoMap.get(floatingClient.id) : undefined;
   const floatingRecord = floatingClient ? irsControlMap.get(`${floatingClient.id}-${currentYear}`) : undefined;
+  const floatingSettlementDirection = resolveSettlementDirection(floatingRecord);
 
   const copyText = React.useCallback(async (value: string, key: string) => {
     try {
@@ -729,7 +740,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                   const notes = record?.notes ?? '';
                   const isClosed = Boolean(record?.deliveryCloseId);
                   const settlementAmount = Number(record?.irsSettlementAmount || 0);
-                  const settlementDirection = settlementAmount < 0 ? 'A pagar' : 'A receber';
+                  const settlementDirection = resolveSettlementDirection(record);
                   return (
                     <tr key={`${client.id}-${currentYear}`} className="hover:bg-slate-50">
                         <td className="px-3 py-2 font-medium text-slate-700">
@@ -748,15 +759,18 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                             <select
                               value={settlementDirection}
                               onChange={(e) => {
-                                const currentAbsolute = Math.abs(settlementAmount);
-                                const signedAmount = e.target.value === 'A pagar' ? -currentAbsolute : currentAbsolute;
-                                onSettlementAmountChange(client.id, signedAmount);
+                                onSettlementDirectionChange(client.id, e.target.value as IrsSettlementDirection);
                               }}
                               className={`w-full px-2 py-1.5 border rounded-lg text-xs font-bold bg-white ${
-                                settlementDirection === 'A pagar' ? 'text-red-700 border-red-200' : 'text-emerald-700 border-emerald-200'
+                                settlementDirection === 'A pagar'
+                                  ? 'text-red-700 border-red-200'
+                                  : settlementDirection === 'Nulo'
+                                    ? 'text-slate-600 border-slate-200'
+                                    : 'text-emerald-700 border-emerald-200'
                               }`}
                             >
                               <option value="A pagar">A pagar</option>
+                              <option value="Nulo">Nulo</option>
                               <option value="A receber">A receber</option>
                             </select>
                             <input
@@ -764,12 +778,12 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                               min="0"
                               step="0.01"
                               value={Math.abs(settlementAmount) || ''}
+                              disabled={settlementDirection === 'Nulo'}
                               onChange={(e) => {
                                 const nextAbsolute = Math.max(0, Number((e.target.value || '').replace(',', '.')) || 0);
-                                const direction = settlementAmount < 0 ? -1 : 1;
-                                onSettlementAmountChange(client.id, nextAbsolute * direction);
+                                onSettlementAmountChange(client.id, nextAbsolute);
                               }}
-                              className="w-full px-2 py-1.5 border rounded-lg text-sm text-right"
+                              className="w-full px-2 py-1.5 border rounded-lg text-sm text-right disabled:bg-slate-100 disabled:text-slate-400"
                               placeholder="0.00"
                             />
                           </div>
@@ -976,18 +990,17 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase">Valor IRS (Pagar/Receber)</label>
+                <label className="text-[11px] font-bold text-slate-500 uppercase">Valor IRS (Pagar/Receber/Nulo)</label>
                 <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-2">
                   <select
-                    value={(Number(floatingRecord?.irsSettlementAmount || 0) < 0) ? 'A pagar' : 'A receber'}
+                    value={floatingSettlementDirection}
                     onChange={(e) => {
-                      const currentAbsolute = Math.abs(Number(floatingRecord?.irsSettlementAmount || 0));
-                      const signedAmount = e.target.value === 'A pagar' ? -currentAbsolute : currentAbsolute;
-                      onSettlementAmountChange(floatingClient.id, signedAmount);
+                      onSettlementDirectionChange(floatingClient.id, e.target.value as IrsSettlementDirection);
                     }}
                     className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
                   >
                     <option value="A pagar">A pagar</option>
+                    <option value="Nulo">Nulo</option>
                     <option value="A receber">A receber</option>
                   </select>
                   <input
@@ -995,12 +1008,12 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                     min="0"
                     step="0.01"
                     value={Math.abs(Number(floatingRecord?.irsSettlementAmount || 0)) || ''}
+                    disabled={floatingSettlementDirection === 'Nulo'}
                     onChange={(e) => {
                       const nextAbsolute = Math.max(0, Number((e.target.value || '').replace(',', '.')) || 0);
-                      const direction = Number(floatingRecord?.irsSettlementAmount || 0) < 0 ? -1 : 1;
-                      onSettlementAmountChange(floatingClient.id, nextAbsolute * direction);
+                      onSettlementAmountChange(floatingClient.id, nextAbsolute);
                     }}
-                    className="w-full px-3 py-2 border rounded-lg text-sm text-right bg-white"
+                    className="w-full px-3 py-2 border rounded-lg text-sm text-right bg-white disabled:bg-slate-100 disabled:text-slate-400"
                     placeholder="0.00"
                   />
                 </div>

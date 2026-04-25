@@ -968,6 +968,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
     handleIrsAmountChange,
     handleIrsNotesChange,
     handleIrsSettlementAmountChange,
+    handleIrsSettlementDirectionChange,
   } = useIrsControl(currentYear);
 
   return (
@@ -995,6 +996,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
         onAmountChange={handleIrsAmountChange}
         onNotesChange={handleIrsNotesChange}
         onSettlementAmountChange={handleIrsSettlementAmountChange}
+        onSettlementDirectionChange={handleIrsSettlementDirectionChange}
       />
     </div>
   );

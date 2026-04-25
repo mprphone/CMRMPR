@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { appConfigService } from '../../services/supabase';
 
+export type IrsSettlementDirection = 'A pagar' | 'A receber' | 'Nulo';
+
 export interface IrsControlRecord {
   clientId: string;
   year: number;
@@ -10,6 +12,7 @@ export interface IrsControlRecord {
   paymentMethod: 'Numerário' | 'MB Way';
   notes: string;
   irsSettlementAmount: number;
+  irsSettlementDirection: IrsSettlementDirection;
   deliveryCloseId?: string | null;
   updatedAt: string;
 }
@@ -33,6 +36,18 @@ interface IrsControlPersistedState {
   closes?: unknown;
 }
 
+const resolveIrsSettlementDirection = (value: unknown, amount: number): IrsSettlementDirection => {
+  if (value === 'A pagar' || value === 'A receber' || value === 'Nulo') return value;
+  if (amount < 0) return 'A pagar';
+  if (amount > 0) return 'A receber';
+  return 'Nulo';
+};
+
+const signIrsSettlementAmount = (absoluteAmount: number, direction: IrsSettlementDirection): number => {
+  if (direction === 'Nulo') return 0;
+  return direction === 'A pagar' ? -absoluteAmount : absoluteAmount;
+};
+
 const normalizeIrsControlRecords = (parsedValue: unknown): IrsControlRecord[] => {
   if (!Array.isArray(parsedValue)) return [];
 
@@ -42,6 +57,8 @@ const normalizeIrsControlRecords = (parsedValue: unknown): IrsControlRecord[] =>
     if (!clientId || !Number.isFinite(year)) return acc;
 
     const irsSettlementAmountRaw = Number(item?.irsSettlementAmount);
+    const irsSettlementAmount = Number.isFinite(irsSettlementAmountRaw) ? irsSettlementAmountRaw : 0;
+    const irsSettlementDirection = resolveIrsSettlementDirection(item?.irsSettlementDirection, irsSettlementAmount);
 
     acc.push({
       clientId,
@@ -51,7 +68,8 @@ const normalizeIrsControlRecords = (parsedValue: unknown): IrsControlRecord[] =>
       amount: Number.isFinite(Number(item?.amount)) ? Number(item.amount) : 0,
       paymentMethod: item?.paymentMethod === 'MB Way' ? 'MB Way' : 'Numerário',
       notes: typeof item?.notes === 'string' ? item.notes : '',
-      irsSettlementAmount: Number.isFinite(irsSettlementAmountRaw) ? irsSettlementAmountRaw : 0,
+      irsSettlementAmount: signIrsSettlementAmount(Math.abs(irsSettlementAmount), irsSettlementDirection),
+      irsSettlementDirection,
       deliveryCloseId: typeof item?.deliveryCloseId === 'string' ? item.deliveryCloseId : null,
       updatedAt: typeof item?.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
     });
@@ -245,6 +263,7 @@ export const useIrsControl = (currentYear: number) => {
         paymentMethod: 'Numerário',
         notes: '',
         irsSettlementAmount: latestForClient?.irsSettlementAmount || 0,
+        irsSettlementDirection: latestForClient?.irsSettlementDirection || resolveIrsSettlementDirection(null, latestForClient?.irsSettlementAmount || 0),
         deliveryCloseId: null,
         updatedAt: new Date().toISOString(),
       };
@@ -314,7 +333,18 @@ export const useIrsControl = (currentYear: number) => {
   const handleIrsSettlementAmountChange = useCallback((clientId: string, amount: number) => {
     upsertIrsRecord(clientId, previous => ({
       ...previous,
-      irsSettlementAmount: Number.isFinite(amount) ? amount : 0,
+      irsSettlementAmount: signIrsSettlementAmount(
+        Math.abs(Number.isFinite(amount) ? amount : 0),
+        previous.irsSettlementDirection
+      ),
+    }));
+  }, [upsertIrsRecord]);
+
+  const handleIrsSettlementDirectionChange = useCallback((clientId: string, direction: IrsSettlementDirection) => {
+    upsertIrsRecord(clientId, previous => ({
+      ...previous,
+      irsSettlementDirection: direction,
+      irsSettlementAmount: signIrsSettlementAmount(Math.abs(previous.irsSettlementAmount || 0), direction),
     }));
   }, [upsertIrsRecord]);
 
@@ -373,5 +403,6 @@ export const useIrsControl = (currentYear: number) => {
     handleIrsAmountChange,
     handleIrsNotesChange,
     handleIrsSettlementAmountChange,
+    handleIrsSettlementDirectionChange,
   };
 };
