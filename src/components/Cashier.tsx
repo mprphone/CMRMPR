@@ -16,6 +16,13 @@ interface CashierProps {
 
 const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 const vatMultiplier = 1.23;
+const AGREEMENT_PAYMENT_MONTH_START = 100;
+
+const isAgreementPaymentMonth = (month: number | undefined) => Number(month || 0) >= AGREEMENT_PAYMENT_MONTH_START;
+const getPaymentReferenceLabel = (month: number) => (
+  isAgreementPaymentMonth(month) ? 'Acordo divida antiga' : months[month - 1] || `Ref. ${month}`
+);
+
 interface ClientPaymentPlan {
   id?: string;
   clientId: string;
@@ -346,12 +353,28 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
       let paidTotal = 0;
 
-      for (let month = 1; month <= agreement.paidUntilMonth; month++) {
-        const payment = consolidatedPayments.get(`${client.id}-${currentYear}-${month}`);
-        if (payment && payment.amountPaid !== -1) {
+      consolidatedPayments.forEach(payment => {
+        if (
+          payment.clientId !== client.id ||
+          payment.paymentYear !== currentYear ||
+          payment.amountPaid === -1
+        ) {
+          return;
+        }
+
+        const paymentMonth = Number(payment.paymentMonth || 0);
+        const isLegacyAgreementPayment =
+          paymentMonth >= 1 &&
+          paymentMonth <= agreement.paidUntilMonth &&
+          (
+            agreement.year === currentYear ||
+            Number(payment.amountPaid || 0) <= agreement.monthlyAmount
+          );
+
+        if (isAgreementPaymentMonth(paymentMonth) || isLegacyAgreementPayment) {
           paidTotal += payment.amountPaid || 0;
         }
-      }
+      });
 
       debtMap.set(client.id, {
         debtConfigured: agreement.debtAmount,
@@ -585,6 +608,23 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     }
   };
 
+  const getNextAgreementPaymentMonth = (clientId: string) => {
+    const usedAgreementMonths = Array.from(consolidatedPayments.values())
+      .filter(payment =>
+        payment.clientId === clientId &&
+        payment.paymentYear === currentYear &&
+        payment.amountPaid !== -1 &&
+        isAgreementPaymentMonth(payment.paymentMonth)
+      )
+      .map(payment => Number(payment.paymentMonth || 0));
+
+    const latestAgreementMonth = usedAgreementMonths.length > 0
+      ? Math.max(...usedAgreementMonths)
+      : AGREEMENT_PAYMENT_MONTH_START - 1;
+
+    return latestAgreementMonth + 1;
+  };
+
   const handlePayInstallment = (client: Client, method: 'Numerário' | 'MB Way') => {
     const agreement = getClientPlan(client.id);
     if (!agreement) {
@@ -622,23 +662,10 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       alert(`O valor excede a dívida em aberto. Será registado apenas ${amountToPay.toFixed(2)} EUR.`);
     }
 
-    let targetMonth: number | null = null;
-    for (let month = 1; month <= agreement.paidUntilMonth; month++) {
-      const payment = paymentsMap.get(client.id)?.get(month);
-      if (!payment || payment.amountPaid === -1) {
-        targetMonth = month;
-        break;
-      }
-    }
-
-    if (!targetMonth) {
-      alert('Nao existem meses disponiveis dentro do periodo do acordo. Altere o mes/ano do acordo para continuar.');
-      return;
-    }
-
+    const targetMonth = getNextAgreementPaymentMonth(client.id);
     const currentPaymentState = paymentsMap.get(client.id)?.get(targetMonth);
     if (currentPaymentState?.cashOperationId) {
-      alert('O mês selecionado já foi processado em caixa.');
+      alert('Esta prestacao do acordo ja foi processada em caixa.');
       return;
     }
 
@@ -801,7 +828,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
           reportDetailsMap.set(key, { clientName: client.name, months: [], total: 0, method: p.paymentMethod });
         }
         const entry = reportDetailsMap.get(key)!;
-        entry.months.push(months[p.paymentMonth - 1]);
+        entry.months.push(getPaymentReferenceLabel(p.paymentMonth));
         entry.total += p.amountPaid;
       }
     });
@@ -876,7 +903,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
               <tr>
                 <th className="px-2 py-1">Cliente</th>
                 <th className="px-2 py-1">Método</th>
-                <th className="px-2 py-1">Meses Pagos</th>
+                <th className="px-2 py-1">Referência</th>
                 <th className="px-2 py-1 text-right">Total (€)</th>
               </tr>
             </thead>
@@ -1006,9 +1033,11 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                       );
                       const agreementCancelled = clientPlan?.status === 'Anulado';
                       let status: 'pending' | 'agreement' | 'agreement_cancelled' | 'paid_cash' | 'paid_mbway' | 'processed' = 'pending';
-                      if (payment) {
+                      if (hasAgreementForMonth) {
+                        status = agreementCancelled ? 'agreement_cancelled' : 'agreement';
+                      } else if (payment) {
                         if (payment.amountPaid === -1) {
-                          status = hasAgreementForMonth ? (agreementCancelled ? 'agreement_cancelled' : 'agreement') : 'pending';
+                          status = 'pending';
                         } else if (payment.cashOperationId) {
                           status = 'processed';
                         } else if (payment.paymentMethod === 'MB Way') {
@@ -1016,8 +1045,6 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                         } else {
                           status = 'paid_cash';
                         }
-                      } else if (hasAgreementForMonth) {
-                        status = agreementCancelled ? 'agreement_cancelled' : 'agreement';
                       }
 
                       const isPendingChange = pendingChanges.has(`${client.id}-${currentYear}-${monthNumber}`);
