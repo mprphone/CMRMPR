@@ -651,6 +651,32 @@ export const saftDossierService = {
       return acc;
     }, {} as Record<string, { hasData: boolean; syncedAt: string }>);
   },
+  async getAttachmentCountsByClientNifs(clientNifs: string[]): Promise<Record<string, number>> {
+    const normalized = Array.from(
+      new Set(
+        clientNifs
+          .map(nif => (nif || '').replace(/\D/g, ''))
+          .filter(nif => nif.length === 9)
+      )
+    );
+
+    if (normalized.length === 0) return {};
+
+    const storeClient = ensureStoreClient();
+    const { data, error } = await storeClient
+      .from('saft_dossier_data')
+      .select('client_nif, attachments')
+      .in('client_nif', normalized);
+
+    if (error) throw error;
+
+    return (data || []).reduce((acc, row: any) => {
+      const nif = (row.client_nif || '').replace(/\D/g, '');
+      if (!nif) return acc;
+      acc[nif] = Array.isArray(row.attachments) ? row.attachments.length : 0;
+      return acc;
+    }, {} as Record<string, number>);
+  },
   async enqueueSyncRequests(clientNifs: string[], requestedBy?: string): Promise<number> {
     const normalized = Array.from(
       new Set(

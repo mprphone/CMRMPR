@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Client, FeeGroup } from '../types';
 import IrsControlSection from './cashier/IrsControlSection';
 import { useIrsControl } from './cashier/useIrsControl';
-import { appConfigService, clientService, groupService, importClient } from '../services/supabase';
+import { appConfigService, clientService, groupService, importClient, saftDossierService } from '../services/supabase';
 
 interface IrsControlProps {
   clients: Client[];
@@ -417,6 +417,7 @@ const buildHouseholdSummaryFromMembers = (members: IrsHouseholdMemberInfo[]): st
 const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, setGroups }) => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear() - 1);
   const [importFichaInfoMap, setImportFichaInfoMap] = useState<Map<string, IrsClientFichaInfo>>(new Map());
+  const [saftAttachmentCountByNif, setSaftAttachmentCountByNif] = useState<Record<string, number>>({});
   const [manualRelations, setManualRelations] = useState<ManualIrsRelation[]>([]);
   const [isAddingClientToIrsGroup, setIsAddingClientToIrsGroup] = useState(false);
   const irsGroup = useMemo(() => groups.find(g => g.name.toLowerCase().includes('irs')), [groups]);
@@ -926,6 +927,39 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
     };
   }, [clientsById, clientsByNif, irsGroupClients, manualRelationsBySourceNif]);
 
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadAttachmentCounts = async () => {
+      const targetNifs = Array.from(
+        new Set(
+          irsGroupClients
+            .map((client) => normalizeNif(client.nif))
+            .filter((nif) => nif.length === 9)
+        )
+      );
+
+      if (targetNifs.length === 0) {
+        setSaftAttachmentCountByNif({});
+        return;
+      }
+
+      try {
+        const counts = await saftDossierService.getAttachmentCountsByClientNifs(targetNifs);
+        if (!isCancelled) setSaftAttachmentCountByNif(counts);
+      } catch (err) {
+        console.error('Erro ao carregar contagem de anexos SAFT para IRS:', err);
+        if (!isCancelled) setSaftAttachmentCountByNif({});
+      }
+    };
+
+    loadAttachmentCounts();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [irsGroupClients]);
+
   const clientFichaInfoMap = useMemo(() => {
     const map = new Map<string, IrsClientFichaInfo>();
 
@@ -983,6 +1017,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
         onQuickAddClientToIrsGroup={handleQuickAddClientToIrsGroup}
         onApplyPdfSuggestions={handleApplyPdfSuggestions}
         irsGroupClients={irsGroupClients}
+        attachmentCountByNif={saftAttachmentCountByNif}
         clientFichaInfoMap={clientFichaInfoMap}
         irsControlMap={irsControlMap}
         pendingDeliveryTotal={pendingDeliveryTotal}

@@ -28,6 +28,7 @@ interface IrsControlSectionProps {
     errors: string[];
   }>;
   irsGroupClients: Client[];
+  attachmentCountByNif: Record<string, number>;
   clientFichaInfoMap: Map<string, IrsClientFichaInfo>;
   irsControlMap: Map<string, IrsControlRecord>;
   pendingDeliveryTotal: number;
@@ -319,6 +320,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   onQuickAddClientToIrsGroup,
   onApplyPdfSuggestions,
   irsGroupClients,
+  attachmentCountByNif,
   clientFichaInfoMap,
   irsControlMap,
   pendingDeliveryTotal,
@@ -715,6 +717,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                 <tr>
                   <th className="px-3 py-2 text-left">Cliente</th>
                   <th className="px-3 py-2 text-left">NIF</th>
+                  <th className="px-3 py-2 text-center">Nº Anexos</th>
                   <th className="px-3 py-2 text-left">IRS</th>
                   <th className="px-3 py-2 text-center">Entregue</th>
                   <th className="px-3 py-2 text-center">Pago</th>
@@ -727,7 +730,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {filteredIrsGroupClients.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-3 py-4 text-center text-slate-400 italic">
+                    <td colSpan={10} className="px-3 py-4 text-center text-slate-400 italic">
                       Sem resultados para os filtros aplicados.
                     </td>
                   </tr>
@@ -741,6 +744,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                   const isClosed = Boolean(record?.deliveryCloseId);
                   const settlementAmount = Number(record?.irsSettlementAmount || 0);
                   const settlementDirection = resolveSettlementDirection(record);
+                  const attachmentCount = attachmentCountByNif[normalizeNif(client.nif)] ?? 0;
                   return (
                     <tr key={`${client.id}-${currentYear}`} className="hover:bg-slate-50">
                         <td className="px-3 py-2 font-medium text-slate-700">
@@ -754,6 +758,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                           </button>
                         </td>
                         <td className="px-3 py-2 text-slate-600">{client.nif}</td>
+                        <td className="px-3 py-2 text-center font-semibold text-slate-700">{attachmentCount}</td>
                         <td className="px-3 py-2 min-w-[230px]">
                           <div className="grid grid-cols-[95px_minmax(96px,1fr)] gap-2">
                             <select
