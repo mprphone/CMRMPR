@@ -9,6 +9,7 @@ export interface IrsControlRecord {
   delivered: boolean;
   paid: boolean;
   amount: number;
+  attachmentCount: number;
   paymentMethod: 'Numerário' | 'MB Way';
   notes: string;
   irsSettlementAmount: number;
@@ -66,6 +67,7 @@ const normalizeIrsControlRecords = (parsedValue: unknown): IrsControlRecord[] =>
       delivered: Boolean(item?.delivered),
       paid: Boolean(item?.paid),
       amount: Number.isFinite(Number(item?.amount)) ? Number(item.amount) : 0,
+      attachmentCount: Number.isFinite(Number(item?.attachmentCount)) ? Math.max(0, Math.trunc(Number(item.attachmentCount))) : 0,
       paymentMethod: item?.paymentMethod === 'MB Way' ? 'MB Way' : 'Numerário',
       notes: typeof item?.notes === 'string' ? item.notes : '',
       irsSettlementAmount: signIrsSettlementAmount(Math.abs(irsSettlementAmount), irsSettlementDirection),
@@ -260,6 +262,7 @@ export const useIrsControl = (currentYear: number) => {
         delivered: false,
         paid: false,
         amount: 0,
+        attachmentCount: latestForClient?.attachmentCount || 0,
         paymentMethod: 'Numerário',
         notes: '',
         irsSettlementAmount: latestForClient?.irsSettlementAmount || 0,
@@ -322,6 +325,14 @@ export const useIrsControl = (currentYear: number) => {
       amount: Number.isFinite(parsedAmount) ? parsedAmount : 0,
     }));
   }, [currentYear, irsControlMap, upsertIrsRecord]);
+
+  const handleIrsAttachmentCountChange = useCallback((clientId: string, value: string) => {
+    const parsedCount = Number(value.replace(',', '.'));
+    upsertIrsRecord(clientId, previous => ({
+      ...previous,
+      attachmentCount: Number.isFinite(parsedCount) ? Math.max(0, Math.trunc(parsedCount)) : 0,
+    }));
+  }, [upsertIrsRecord]);
 
   const handleIrsNotesChange = useCallback((clientId: string, notes: string) => {
     upsertIrsRecord(clientId, previous => ({
@@ -401,6 +412,7 @@ export const useIrsControl = (currentYear: number) => {
     handleIrsPaidToggle,
     handleIrsPaymentMethodChange,
     handleIrsAmountChange,
+    handleIrsAttachmentCountChange,
     handleIrsNotesChange,
     handleIrsSettlementAmountChange,
     handleIrsSettlementDirectionChange,

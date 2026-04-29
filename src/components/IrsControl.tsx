@@ -1000,6 +1000,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
     handleIrsPaidToggle,
     handleIrsPaymentMethodChange,
     handleIrsAmountChange,
+    handleIrsAttachmentCountChange,
     handleIrsNotesChange,
     handleIrsSettlementAmountChange,
     handleIrsSettlementDirectionChange,
@@ -1029,6 +1030,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
         onTogglePaid={handleIrsPaidToggle}
         onPaymentMethodChange={handleIrsPaymentMethodChange}
         onAmountChange={handleIrsAmountChange}
+        onAttachmentCountChange={handleIrsAttachmentCountChange}
         onNotesChange={handleIrsNotesChange}
         onSettlementAmountChange={handleIrsSettlementAmountChange}
         onSettlementDirectionChange={handleIrsSettlementDirectionChange}

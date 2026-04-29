@@ -40,6 +40,7 @@ interface IrsControlSectionProps {
   onTogglePaid: (clientId: string) => void;
   onPaymentMethodChange: (clientId: string, method: 'Numerário' | 'MB Way') => void;
   onAmountChange: (clientId: string, value: string) => void;
+  onAttachmentCountChange: (clientId: string, value: string) => void;
   onNotesChange: (clientId: string, notes: string) => void;
   onSettlementAmountChange: (clientId: string, amount: number) => void;
   onSettlementDirectionChange: (clientId: string, direction: IrsSettlementDirection) => void;
@@ -332,6 +333,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
   onTogglePaid,
   onPaymentMethodChange,
   onAmountChange,
+  onAttachmentCountChange,
   onNotesChange,
   onSettlementAmountChange,
   onSettlementDirectionChange,
@@ -744,7 +746,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                   const isClosed = Boolean(record?.deliveryCloseId);
                   const settlementAmount = Number(record?.irsSettlementAmount || 0);
                   const settlementDirection = resolveSettlementDirection(record);
-                  const attachmentCount = attachmentCountByNif[normalizeNif(client.nif)] ?? 0;
+                  const attachmentCount = record?.attachmentCount ?? 0;
+                  const suggestedAttachmentCount = attachmentCountByNif[normalizeNif(client.nif)] ?? 0;
                   return (
                     <tr key={`${client.id}-${currentYear}`} className="hover:bg-slate-50">
                         <td className="px-3 py-2 font-medium text-slate-700">
@@ -758,7 +761,17 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                           </button>
                         </td>
                         <td className="px-3 py-2 text-slate-600">{client.nif}</td>
-                        <td className="px-3 py-2 text-center font-semibold text-slate-700">{attachmentCount}</td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={attachmentCount > 0 ? attachmentCount.toString() : ''}
+                            onChange={(e) => onAttachmentCountChange(client.id, e.target.value)}
+                            className="w-20 px-2 py-1.5 border rounded-lg text-sm text-center"
+                            placeholder={suggestedAttachmentCount > 0 ? suggestedAttachmentCount.toString() : '0'}
+                          />
+                        </td>
                         <td className="px-3 py-2 min-w-[230px]">
                           <div className="grid grid-cols-[95px_minmax(96px,1fr)] gap-2">
                             <select
