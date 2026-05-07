@@ -17,3 +17,6 @@
 .env
 .env.*
 !.env.example
+
+# local data backups
+scripts/irs-import-backups/

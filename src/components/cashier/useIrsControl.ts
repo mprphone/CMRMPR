@@ -116,6 +116,41 @@ const parseStoredIrsDeliveryCloses = (rawValue: string | null): IrsDeliveryClose
   }
 };
 
+const isNewerRecord = (candidate: IrsControlRecord, current: IrsControlRecord | undefined): boolean => {
+  if (!current) return true;
+  return (candidate.updatedAt || '').localeCompare(current.updatedAt || '') >= 0;
+};
+
+const mergeIrsControlRecords = (remoteRecords: IrsControlRecord[], localRecords: IrsControlRecord[]): IrsControlRecord[] => {
+  const byKey = new Map<string, IrsControlRecord>();
+
+  [...remoteRecords, ...localRecords].forEach((record) => {
+    const key = `${record.clientId}-${record.year}`;
+    if (isNewerRecord(record, byKey.get(key))) {
+      byKey.set(key, record);
+    }
+  });
+
+  return Array.from(byKey.values());
+};
+
+const mergeIrsDeliveryCloses = (remoteCloses: IrsDeliveryClose[], localCloses: IrsDeliveryClose[]): IrsDeliveryClose[] => {
+  const byId = new Map<string, IrsDeliveryClose>();
+
+  [...remoteCloses, ...localCloses].forEach((close) => {
+    const current = byId.get(close.id);
+    if (!current || (close.createdAt || '').localeCompare(current.createdAt || '') >= 0) {
+      byId.set(close.id, close);
+    }
+  });
+
+  return Array.from(byId.values());
+};
+
+const hasSamePersistedItems = <T,>(currentItems: T[], nextItems: T[]): boolean => (
+  JSON.stringify(currentItems) === JSON.stringify(nextItems)
+);
+
 export const useIrsControl = (currentYear: number) => {
   const [irsControlRecords, setIrsControlRecords] = useState<IrsControlRecord[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -202,10 +237,25 @@ export const useIrsControl = (currentYear: number) => {
 
     const timer = window.setTimeout(async () => {
       try {
+        const remoteValue = await appConfigService.getValueByKey<IrsControlPersistedState>(IRS_CONTROL_APP_CONFIG_KEY);
+        const remoteRecords = normalizeIrsControlRecords(remoteValue?.records);
+        const remoteCloses = normalizeIrsDeliveryCloses(remoteValue?.deliveryCloses ?? remoteValue?.closes);
+        const mergedRecords = mergeIrsControlRecords(remoteRecords, irsControlRecords);
+        const mergedCloses = mergeIrsDeliveryCloses(remoteCloses, deliveryCloses);
+
         await appConfigService.upsertValueByKey(IRS_CONTROL_APP_CONFIG_KEY, {
-          records: irsControlRecords,
-          deliveryCloses,
+          records: mergedRecords,
+          deliveryCloses: mergedCloses,
         });
+
+        if (isMounted) {
+          if (!hasSamePersistedItems(irsControlRecords, mergedRecords)) {
+            setIrsControlRecords(mergedRecords);
+          }
+          if (!hasSamePersistedItems(deliveryCloses, mergedCloses)) {
+            setDeliveryCloses(mergedCloses);
+          }
+        }
       } catch (err) {
         console.error('Erro ao gravar controlo IRS no servidor:', err);
         if (isMounted) {

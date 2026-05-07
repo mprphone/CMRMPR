@@ -553,6 +553,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
       return matchesPaid && matchesDelivered && matchesSearch;
     });
   }, [currentYear, deliveredFilter, irsControlMap, irsGroupClients, paidFilter, searchTerm]);
+  const hasActiveFilters = searchTerm.trim().length > 0 || paidFilter !== 'all' || deliveredFilter !== 'all';
 
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
@@ -710,7 +711,24 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                   <option value="no">Não entregue</option>
                 </select>
               </div>
-              <p className="text-xs text-slate-500 ml-auto">{filteredIrsGroupClients.length} registo(s)</p>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setPaidFilter('all');
+                    setDeliveredFilter('all');
+                  }}
+                  className="px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50"
+                >
+                  Limpar filtros
+                </button>
+              )}
+              <p className={`text-xs ml-auto ${hasActiveFilters ? 'font-bold text-amber-700' : 'text-slate-500'}`}>
+                {hasActiveFilters
+                  ? `${filteredIrsGroupClients.length} de ${irsGroupClients.length} registo(s) visíveis`
+                  : `${filteredIrsGroupClients.length} registo(s)`}
+              </p>
             </div>
 
             <div className="overflow-x-auto">
