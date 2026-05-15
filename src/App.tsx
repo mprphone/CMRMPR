@@ -64,6 +64,7 @@ const readJsonStorage = <T,>(key: string, fallback: T): T => {
 
 export default function App() {
   const { canInstall, isInstalled, install } = usePwaInstall();
+  const [showInstallTip, setShowInstallTip] = useState(false);
   const [currentView, setCurrentView] = useState('dashboard');
   const [session, setSession] = useState<Session | null>(null);
   const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
@@ -654,18 +655,27 @@ export default function App() {
           {!isPaulaInsuranceOnlyUser && (
             <div className="flex justify-end mb-6 gap-2">
               {!isInstalled && (
-                <button
-                  onClick={async () => {
-                    if (canInstall) {
-                      await install();
-                      return;
-                    }
-                    alert('Para instalar: abra o menu do browser e escolha “Instalar aplicação” ou “Adicionar ao ambiente de trabalho”.');
-                  }}
-                  className="flex items-center gap-2 text-[10px] font-black text-slate-700 bg-white px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 uppercase shadow-sm"
-                >
-                  Instalar aplicação
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={async () => {
+                      if (canInstall) {
+                        await install();
+                        return;
+                      }
+                      setShowInstallTip(true);
+                      setTimeout(() => setShowInstallTip(false), 6000);
+                    }}
+                    className="flex items-center gap-2 text-[10px] font-black text-slate-700 bg-white px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 uppercase shadow-sm"
+                  >
+                    Instalar aplicação
+                  </button>
+                  {showInstallTip && (
+                    <div className="absolute right-0 top-10 z-50 w-72 bg-slate-800 text-white text-xs rounded-xl px-4 py-3 shadow-xl">
+                      <p className="font-bold mb-1">Para instalar como app:</p>
+                      <p className="text-slate-300 mt-1">{'Abra o menu do browser e escolha "Instalar aplicacao", ou clique no icone de instalacao na barra de enderecos.'}</p>
+                    </div>
+                  )}
+                </div>
               )}
               <button 
                 onClick={handleFullSync}
