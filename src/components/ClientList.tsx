@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Client, Staff, Task, FeeGroup } from '../types';
-import { clientService, saftDossierService } from '../services/supabase';
+import { clientService, saftDossierService } from '../services';
 import { Search, Plus, X, CloudCheck, RefreshCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ClientListProps {
@@ -111,41 +111,6 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
   useEffect(() => {
     setPage(1);
   }, [groupFilter, statusFilter, entityTypeFilter, responsibleFilter, pageSize, sortConfig.key, sortConfig.direction]);
-
-  const buildLocalFallbackPage = () => {
-    const groupClientIds = groupFilter === 'all' ? null : (selectedGroup?.clientIds || []);
-    let filtered = clients.filter(client => {
-      if (groupClientIds && !groupClientIds.includes(client.id)) return false;
-      if (statusFilter !== 'all' && client.status !== statusFilter) return false;
-      if (entityTypeFilter !== 'all' && client.entityType !== entityTypeFilter) return false;
-      if (responsibleFilter !== 'all' && client.responsibleStaff !== responsibleFilter) return false;
-      if (!searchTerm) return true;
-
-      const haystack = [
-        client.name,
-        client.nif,
-        client.email,
-        client.phone,
-      ].join(' ').toLowerCase();
-
-      return haystack.includes(searchTerm.toLowerCase());
-    });
-
-    filtered = filtered.sort((a, b) => {
-      const aValue = (a as any)[sortConfig.key];
-      const bValue = (b as any)[sortConfig.key];
-      if (aValue < bValue) return sortConfig.direction === 'ascending' ? -1 : 1;
-      if (aValue > bValue) return sortConfig.direction === 'ascending' ? 1 : -1;
-      return 0;
-    });
-
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize;
-    return {
-      clients: filtered.slice(from, to),
-      total: filtered.length,
-    };
-  };
 
   useEffect(() => {
     let isMounted = true;

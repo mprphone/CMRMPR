@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ensureStoreClient } from '../services/supabase';
+import { ensureStoreClient } from '../services';
 import { Eye, EyeOff } from 'lucide-react';
 
 const Login: React.FC = () => {

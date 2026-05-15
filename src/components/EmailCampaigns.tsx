@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Client, FeeGroup, Staff, EmailTemplate, CampaignHistory, GlobalSettings, CampaignRecipientResult } from '../types';
 import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2, Search, CheckCircle, AlertCircle, Clock, Bold, FileText, Eye, RotateCcw } from 'lucide-react';
 import { generateTemplateWithAI } from '../services/geminiService';
-import { templateService, campaignHistoryService, storeClient } from '../services/supabase';
+import { templateService, campaignHistoryService, storeClient } from '../services';
 
 const clientVariables: (keyof Client)[] = [
   'name', 'nif', 'email', 'phone', 'address', 'sector', 'entityType', 'monthlyFee', 'turnover', 'status', 'contractRenewalDate'
@@ -306,7 +306,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff,
 
   
   const getFailureCountFromStatus = (status: string) => {
-    const m = status.match(/(\d+)\s*falhas?/i);
+    const m = status.match(/(\d+)\s*(?:falhas?|erros?)/i);
     return m ? parseInt(m[1], 10) : 0;
   };
 
@@ -565,6 +565,12 @@ const handleTemplateChange = (templateId: string) => {
 
     const group = groups.find(g => g.id === groupIdForContext);
     const groupName = groupIdForContext === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
+    const statusText = successCount === 0
+      ? `Falhou (0 enviados, ${errorCount} ${errorCount === 1 ? 'erro' : 'erros'})`
+      : errorCount === 0
+        ? `Enviada (${successCount} ${successCount === 1 ? 'sucesso' : 'sucessos'})`
+        : `Enviada (${successCount} ${successCount === 1 ? 'sucesso' : 'sucessos'}, ${errorCount} ${errorCount === 1 ? 'falha' : 'falhas'})`;
+
     const newHistoryRecord: Partial<CampaignHistory> = {
       subject: subjectTemplate,
       body: bodyTemplate,
@@ -572,7 +578,7 @@ const handleTemplateChange = (templateId: string) => {
       recipient_ids: recipients.map(r => r.id),
       recipient_results: campaignLogs,
       group_name: groupName,
-      status: `Enviada (${successCount} sucesso, ${errorCount} falhas)`,
+      status: statusText,
     };
 
     try {
@@ -1078,7 +1084,10 @@ const handleTemplateChange = (templateId: string) => {
                 const displayDate = isScheduled ? new Date(item.scheduled_at) : new Date(item.sent_at);
                 const failureCount = getFailureCountFromStatus(item.status);
                 const hasFailures = failureCount > 0;
-                const isSentCampaign = !isScheduled && item.status.toLowerCase().includes('enviada');
+                const isSentCampaign = !isScheduled && (
+                  item.status.toLowerCase().includes('enviada') ||
+                  item.status.toLowerCase().startsWith('falhou')
+                );
                 const recipientResults = getRecipientResults(item);
                 const hasDetails = recipientResults.length > 0;
 

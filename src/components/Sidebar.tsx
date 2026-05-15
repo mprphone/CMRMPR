@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { LayoutDashboard, Users, Calculator, Settings, ListTodo, Briefcase, Upload, FolderTree, Mail, Shield, HeartPulse, LogOut, Landmark } from 'lucide-react';
-import { ensureStoreClient } from '../services/supabase';
+import { ensureStoreClient } from '../services';
 
 interface SidebarProps {
   currentView: string;

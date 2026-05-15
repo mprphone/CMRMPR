@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { FeeGroup, Client, Task, Staff, TaskArea, TurnoverBracket } from '../types';
 import { calculateClientProfitability } from '../services/calculator';
-import { clientService, groupService, ensureStoreClient } from '../services/supabase';
+import { clientService, groupService, ensureStoreClient } from '../services';
 import { analyzeClientWithAI } from '../services/geminiService';
 import { 
   Plus, Users, FolderOpen, Trash2, ChevronRight, Save, Printer, ChevronUp, ChevronDown, CheckCircle, Filter,

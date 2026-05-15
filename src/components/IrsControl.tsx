@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Client, FeeGroup } from '../types';
 import IrsControlSection from './cashier/IrsControlSection';
 import { useIrsControl } from './cashier/useIrsControl';
-import { appConfigService, clientService, groupService, importClient, saftDossierService } from '../services/supabase';
+import { appConfigService, clientService, groupService, importClient, saftDossierService } from '../services';
 
 interface IrsControlProps {
   clients: Client[];

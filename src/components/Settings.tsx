@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { GlobalSettings, TurnoverBracket, TaskArea } from '../types';
 import { Database, Mail, DollarSign, TrendingUp, Trash2, Save, RefreshCcw } from 'lucide-react';
-import { turnoverBracketService } from '../services/supabase';
+import { turnoverBracketService } from '../services';
 
 interface SettingsProps {
   areaCosts: Record<string, number>;

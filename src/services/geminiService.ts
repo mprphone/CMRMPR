@@ -1,5 +1,5 @@
 import { Client, AnalysisResult, AiAnalysis, AiTemplateAnalysis } from "../types";
-import { ensureStoreClient } from "./supabase";
+import { ensureStoreClient } from "./supabaseClient";
 
 /**
  * Sets the Authorization token for Supabase Edge Functions IF a session exists.

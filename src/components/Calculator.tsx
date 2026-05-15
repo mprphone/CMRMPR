@@ -1,7 +1,7 @@
 ﻿import React, { useState, useMemo, useEffect } from 'react';
 import { Task, TaskArea, TaskType, TurnoverBracket, GlobalSettings, QuoteItem, QuoteHistory } from '../types';
 import { Plus, Trash2, FileText, Check, Printer, ArrowLeft, BadgeEuro, Calculator as CalcIcon, Save, RefreshCcw, History } from 'lucide-react';
-import { quoteHistoryService } from '../services/supabase';
+import { quoteHistoryService } from '../services';
 
 interface CalculatorProps {
   tasks: Task[];

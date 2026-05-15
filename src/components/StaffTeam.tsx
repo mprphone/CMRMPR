@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Staff, Client, Task, TaskArea } from '../types';
 import { calculateStaffStats } from '../services/calculator';
-import { staffService } from '../services/supabase';
+import { staffService } from '../services';
 import { Plus, Trash2, Save, X, Calculator, DownloadCloud, RefreshCcw, Activity } from 'lucide-react';
 
 interface StaffTeamProps {

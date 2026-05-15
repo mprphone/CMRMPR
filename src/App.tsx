@@ -17,13 +17,15 @@ import {
   Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation
 } from './types';
 import { 
-  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService, appConfigService, taskCatalogService, APP_CONFIG_GLOBAL_SETTINGS_KEY
-} from './services/supabase';
+  clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService, appConfigService, taskCatalogService, APP_CONFIG_GLOBAL_SETTINGS_KEY,
+  atomicSyncImportedData
+} from './services';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Insurance from './components/Insurance';
 import WorkSafety from './components/WorkSafety';
 import Cashier from './components/Cashier';
 import IrsControl from './components/IrsControl';
+import { usePwaInstall } from './hooks/usePwaInstall';
 
 // Polyfill for crypto.randomUUID for non-secure contexts or older browsers
 const generateUUID = () => {
@@ -50,8 +52,18 @@ const mergeRemoteGlobalSettings = (localSettings: GlobalSettings, remoteSettings
 });
 
 const PAULA_INSURANCE_ONLY_EMAIL = 'paula.ernestina@hotmail.com';
+const readJsonStorage = <T,>(key: string, fallback: T): T => {
+  try {
+    const rawValue = localStorage.getItem(key);
+    return rawValue ? JSON.parse(rawValue) as T : fallback;
+  } catch (error) {
+    console.error(`Valor inválido em localStorage["${key}"]; a usar fallback:`, error);
+    return fallback;
+  }
+};
 
 export default function App() {
+  const { canInstall, isInstalled, install } = usePwaInstall();
   const [currentView, setCurrentView] = useState('dashboard');
   const [session, setSession] = useState<Session | null>(null);
   const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
@@ -60,10 +72,7 @@ export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [groups, setGroups] = useState<FeeGroup[]>([]);
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    const saved = localStorage.getItem('appTasks');
-    return saved ? JSON.parse(saved) : DEFAULT_TASKS;
-  });
+  const [tasks, setTasks] = useState<Task[]>(() => readJsonStorage('appTasks', DEFAULT_TASKS));
   const [areaCosts, setAreaCosts] = useState<Record<string, number>>(DEFAULT_AREA_COSTS);
   const [turnoverBrackets, setTurnoverBrackets] = useState<TurnoverBracket[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -107,8 +116,7 @@ export default function App() {
   };
 
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>(() => {
-    const saved = localStorage.getItem('globalSettings');
-    return saved ? JSON.parse(saved) : {
+    return readJsonStorage('globalSettings', {
       supabaseImportUrl: import.meta.env.VITE_SUPABASE_URL_IMPORT || '',
       supabaseImportKey: import.meta.env.VITE_SUPABASE_KEY_IMPORT || '',
       supabaseStoreUrl: import.meta.env.VITE_SUPABASE_URL_CMR || '',
@@ -119,7 +127,7 @@ export default function App() {
       fromEmail: '',
       fromName: '',
       emailSignature: ''
-    };
+    });
   });
   const [isGlobalSettingsHydrated, setIsGlobalSettingsHydrated] = useState(false);
   const [isGlobalSettingsDbAvailable, setIsGlobalSettingsDbAvailable] = useState(true);
@@ -541,52 +549,66 @@ export default function App() {
       // 1. Staff
       const externalStaff = await staffService.importExternalStaff();
       console.log("DEBUG: Staff importado (primeiros 3):", externalStaff.slice(0, 3));
-      if (externalStaff.length > 0) await staffService.bulkUpsert(externalStaff);
-
       // 2. Clientes
       const externalClients = await clientService.importExternalClients();
       console.log("DEBUG: Clientes importados (primeiros 3):", externalClients.slice(0, 3));
+      const unmatchedRefs = new Set<string>();
+      const clientsWithStaffId = externalClients.map(client => {
+        const rawResponsible = (client.responsibleStaff || '').trim();
+
+        let responsibleStaffAction: 'set' | 'clear' | 'keep' = 'keep';
+        let responsibleStaff: string = client.responsibleStaff || '';
+
+        if (!rawResponsible) {
+          responsibleStaffAction = 'clear';
+          responsibleStaff = '';
+        } else {
+          const responsible = externalStaff.find(s => s.id === rawResponsible);
+          if (responsible) {
+            responsibleStaffAction = 'set';
+            responsibleStaff = responsible.id;
+          } else {
+            responsibleStaffAction = 'keep';
+            unmatchedRefs.add(rawResponsible);
+            responsibleStaff = rawResponsible;
+          }
+        }
+
+        return {
+          ...client,
+          responsibleStaff,
+          responsibleStaffAction
+        } as any;
+      });
+
+      await atomicSyncImportedData(
+        externalStaff.map(member => ({
+          id: member.id,
+          name: member.name,
+          email: member.email,
+          phone: member.phone,
+          role: member.role,
+        })),
+        clientsWithStaffId.map(client => ({
+          nif: client.nif,
+          name: client.name,
+          email: client.email || '',
+          phone: client.phone || '',
+          address: client.address || '',
+          entity_type: client.entityType || 'SOCIEDADE',
+          sector: client.sector || 'Geral',
+          status: client.status || 'Ativo',
+          responsavel_interno_id: client.responsibleStaff || null,
+          responsavel_action: client.responsibleStaffAction || 'keep',
+        }))
+      );
+
       if (externalClients.length > 0) {
         // Map responsible staff from import to staff ID (ONLY when it's a valid staff UUID).
         // Rules:
         // - If import has empty responsible -> CLEAR (null)
         // - If import has a valid staff UUID that exists -> SET (uuid)
         // - If import has something else (name/code) -> KEEP existing (do not overwrite)
-        const unmatchedRefs = new Set<string>();
-        const clientsWithStaffId = externalClients.map(client => {
-          const rawResponsible = (client.responsibleStaff || '').trim();
-
-          // Decide action
-          let responsibleStaffAction: 'set' | 'clear' | 'keep' = 'keep';
-          let responsibleStaff: string = client.responsibleStaff || '';
-
-          if (!rawResponsible) {
-            responsibleStaffAction = 'clear';
-            responsibleStaff = '';
-          } else {
-            // Import provides an ID; only accept if it matches a staff member we imported
-            const responsible = externalStaff.find(s => s.id === rawResponsible);
-            if (responsible) {
-              responsibleStaffAction = 'set';
-              responsibleStaff = responsible.id;
-            } else {
-              // Non-empty but not a known UUID -> do not overwrite
-              responsibleStaffAction = 'keep';
-              unmatchedRefs.add(rawResponsible);
-              // Keep whatever was there, but action 'keep' ensures DB won't overwrite
-              responsibleStaff = rawResponsible;
-            }
-          }
-
-          return {
-            ...client,
-            responsibleStaff,
-            // Extra field consumed by clientService.bulkUpsert (not used elsewhere)
-            responsibleStaffAction
-          } as any;
-        });
-        await clientService.bulkUpsert(clientsWithStaffId);
-
         let successMessage = `Sucesso! ${externalClients.length} clientes processados.`;
         if (unmatchedRefs.size > 0) {
           successMessage += ` AtenÃ§Ã£o: os seguintes responsÃ¡veis vindos da origem nÃ£o foram reconhecidos e foram ignorados (mantive o responsÃ¡vel atual no CRM): ${Array.from(unmatchedRefs).join(', ')}`;
@@ -598,8 +620,7 @@ export default function App() {
         setTimeout(() => setSyncSuccess(null), 5000);
       }
       
-      // 3. AGUARDAR E RECARREGAR
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // 3. RECARREGAR APÓS O COMMIT ATÓMICO
       console.log("--- FIM DA SINCROZINAÃ‡ÃƒO, A RECARREGAR DADOS ---");
       await fetchData();
     } catch (err: any) {
@@ -632,6 +653,20 @@ export default function App() {
         <div className="max-w-7xl mx-auto">
           {!isPaulaInsuranceOnlyUser && (
             <div className="flex justify-end mb-6 gap-2">
+              {!isInstalled && (
+                <button
+                  onClick={async () => {
+                    if (canInstall) {
+                      await install();
+                      return;
+                    }
+                    alert('Para instalar: abra o menu do browser e escolha “Instalar aplicação” ou “Adicionar ao ambiente de trabalho”.');
+                  }}
+                  className="flex items-center gap-2 text-[10px] font-black text-slate-700 bg-white px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 uppercase shadow-sm"
+                >
+                  Instalar aplicação
+                </button>
+              )}
               <button 
                 onClick={handleFullSync}
                 disabled={isSyncing}

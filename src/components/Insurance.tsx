@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { InsurancePolicy, Client } from '../types';
-import { insuranceService } from '../services/supabase';
+import { insuranceService } from '../services';
 import { Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, FileCheck, FileClock, Paperclip, ChevronUp, ChevronDown, PieChart } from 'lucide-react';
 
 interface InsuranceProps {

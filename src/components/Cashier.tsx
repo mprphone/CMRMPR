@@ -1,7 +1,13 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Client, FeeGroup, CashPayment, CashAgreement, CashOperation, CashSessionExpense } from '../types';
-import { cashPaymentService, cashAgreementService, cashOperationService, cashSessionExpenseService } from '../services/supabase';
-import { Landmark, Check, X, Save, RefreshCcw, Printer, ArrowLeft, DollarSign, Banknote, Download, History, CreditCard, Plus } from 'lucide-react';
+import { Client, FeeGroup, CashPayment, CashAgreement, CashOperation } from '../types';
+import { cashPaymentService, cashAgreementService, cashOperationService } from '../services';
+import { Landmark, Check, X, Save, RefreshCcw, DollarSign, Banknote, Download, History, CreditCard, Plus } from 'lucide-react';
+import { ClientPaymentPlan, PlanFormState } from '../types/cashier';
+import { useCashierExpenses } from '../hooks/useCashierExpenses';
+import CashierReport from './cashier/CashierReport';
+import CashierHistory from './cashier/CashierHistory';
+import PlanModal from './cashier/PlanModal';
+import ExpenseModal from './cashier/ExpenseModal';
 
 interface CashierProps {
   clients: Client[];
@@ -23,108 +29,7 @@ const getPaymentReferenceLabel = (month: number) => (
   isAgreementPaymentMonth(month) ? 'Acordo divida antiga' : months[month - 1] || `Ref. ${month}`
 );
 
-interface ClientPaymentPlan {
-  id?: string;
-  clientId: string;
-  year: number;
-  paidUntilMonth: number;
-  monthlyAmount: number;
-  debtAmount: number;
-  status: 'Ativo' | 'Anulado' | 'Concluido';
-  notes: string;
-  called: boolean;
-  letterSent: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-interface PlanFormState {
-  monthlyAmount: string;
-  debtAmount: string;
-  payUntilMonth: number;
-  payUntilYear: number;
-  notes: string;
-  called: boolean;
-  letterSent: boolean;
-}
-
 const buildPlanKey = (clientId: string, year: number) => `${clientId}-${year}`;
-
-interface SessionExpense {
-  id: string;
-  amount: number;
-  description: string;
-}
-
-const LEGACY_SESSION_EXPENSES_STORAGE_KEY = 'cashier-session-expenses-open-register';
-const LEGACY_SESSION_EXPENSES_STORAGE_PREFIX = 'cashier-session-expenses-';
-
-const parseStoredSessionExpenses = (rawValue: string | null): SessionExpense[] => {
-  if (!rawValue) return [];
-  try {
-    const parsedValue = JSON.parse(rawValue);
-    if (!Array.isArray(parsedValue)) return [];
-
-    return parsedValue.reduce<SessionExpense[]>((acc, item: any) => {
-      const amount = typeof item?.amount === 'number' ? item.amount : Number(item?.amount);
-      const description = typeof item?.description === 'string' ? item.description.trim() : '';
-      if (!Number.isFinite(amount) || amount <= 0 || description.length === 0) {
-        return acc;
-      }
-
-      acc.push({
-        id: typeof item?.id === 'string' && item.id ? item.id : crypto.randomUUID(),
-        amount,
-        description,
-      });
-      return acc;
-    }, []);
-  } catch {
-    return [];
-  }
-};
-
-const getLegacySessionExpenseKeys = (): string[] => {
-  if (typeof window === 'undefined') return [];
-  const keys = new Set<string>([LEGACY_SESSION_EXPENSES_STORAGE_KEY]);
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (key && key.startsWith(LEGACY_SESSION_EXPENSES_STORAGE_PREFIX)) {
-      keys.add(key);
-    }
-  }
-  return Array.from(keys);
-};
-
-const loadLegacySessionExpenses = (): SessionExpense[] => {
-  const keys = getLegacySessionExpenseKeys();
-  if (keys.length === 0) return [];
-  return keys.flatMap((key) => parseStoredSessionExpenses(localStorage.getItem(key)));
-};
-
-const clearLegacySessionExpenses = () => {
-  if (typeof window === 'undefined') return;
-  getLegacySessionExpenseKeys().forEach((key) => localStorage.removeItem(key));
-};
-
-const persistLegacySessionExpenses = (expenses: SessionExpense[]) => {
-  if (typeof window === 'undefined') return;
-  try {
-    if (expenses.length === 0) {
-      localStorage.removeItem(LEGACY_SESSION_EXPENSES_STORAGE_KEY);
-      return;
-    }
-    localStorage.setItem(LEGACY_SESSION_EXPENSES_STORAGE_KEY, JSON.stringify(expenses));
-  } catch (err) {
-    console.error('Erro ao guardar saídas de caixa localmente:', err);
-  }
-};
-
-const mapDbExpenseToSessionExpense = (expense: CashSessionExpense): SessionExpense => ({
-  id: expense.id,
-  amount: expense.amount,
-  description: expense.description,
-});
 
 const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCashPayments, cashAgreements, setCashAgreements, cashOperations, setCashOperations }) => {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -134,11 +39,17 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const [paymentMode, setPaymentMode] = useState<'Numerário' | 'MB Way'>('Numerário');
   const [activeReport, setActiveReport] = useState<CashOperation | null>(null);
 
-  // New state for session expenses
-  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-  const [newExpense, setNewExpense] = useState<{ amount: string; description: string }>({ amount: '', description: '' });
-  const [sessionExpenses, setSessionExpenses] = useState<SessionExpense[]>([]);
-  const [isSessionExpensesDbAvailable, setIsSessionExpensesDbAvailable] = useState(true);
+  const {
+    isExpenseModalOpen,
+    setIsExpenseModalOpen,
+    newExpense,
+    setNewExpense,
+    sessionExpenses,
+    totalSessionExpenses,
+    handleAddExpense,
+    handleRemoveExpense,
+    resetSessionExpenses,
+  } = useCashierExpenses();
 
   // Form state for closing the register
   const [depositAmount, setDepositAmount] = useState('');
@@ -273,10 +184,6 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     return { cashInHand: cashTotal, mbWayInHand: mbWayTotal };
   }, [consolidatedPayments]);
 
-  const totalSessionExpenses = useMemo(() => {
-    return sessionExpenses.reduce((sum, exp) => sum + exp.amount, 0);
-  }, [sessionExpenses]);
-
   useEffect(() => {
     if (!isDepositAmountEdited) {
       const parsedAdjustment = parseFloat(adjustmentAmount) || 0;
@@ -290,59 +197,6 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setMbWayDepositAmount(mbWayInHand.toFixed(2));
     }
   }, [mbWayInHand, isMbWayDepositAmountEdited]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadOpenSessionExpenses = async () => {
-      try {
-        const openExpenses = await cashSessionExpenseService.getOpen();
-        if (!isMounted) return;
-        setIsSessionExpensesDbAvailable(true);
-
-        if (openExpenses.length > 0) {
-          setSessionExpenses(openExpenses.map(mapDbExpenseToSessionExpense));
-          return;
-        }
-
-        const legacyExpenses = loadLegacySessionExpenses();
-        if (legacyExpenses.length === 0) {
-          setSessionExpenses([]);
-          return;
-        }
-
-        try {
-          const migratedExpenses = await cashSessionExpenseService.bulkCreate(
-            legacyExpenses.map((expense) => ({
-              amount: expense.amount,
-              description: expense.description,
-            }))
-          );
-
-          if (!isMounted) return;
-          setSessionExpenses(migratedExpenses.map(mapDbExpenseToSessionExpense));
-          clearLegacySessionExpenses();
-        } catch (migrationError) {
-          console.error('Erro ao migrar saídas locais para SQL:', migrationError);
-          if (!isMounted) return;
-          setIsSessionExpensesDbAvailable(false);
-          setSessionExpenses(legacyExpenses);
-        }
-      } catch (err) {
-        console.error('Erro ao carregar saídas de caixa:', err);
-        if (isMounted) {
-          setIsSessionExpensesDbAvailable(false);
-          setSessionExpenses(loadLegacySessionExpenses());
-        }
-      }
-    };
-
-    loadOpenSessionExpenses();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   const agreementDebtByClient = useMemo(() => {
     const debtMap = new Map<string, { debtConfigured: number; paidTotal: number; debt: number }>();
@@ -726,64 +580,6 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     };
   }, [pendingChanges, handleSaveChanges]);
 
-  const handleAddExpense = async () => {
-    const amount = parseFloat(newExpense.amount);
-    const description = newExpense.description.trim();
-    if (!amount || amount <= 0 || !description) {
-      alert("Por favor, preencha um valor e uma descrição válidos para a saída de caixa.");
-      return;
-    }
-    const fallbackExpense: SessionExpense = { id: crypto.randomUUID(), amount, description };
-    const saveFallbackExpense = () => {
-      const nextExpenses = [...sessionExpenses, fallbackExpense];
-      setSessionExpenses(nextExpenses);
-      persistLegacySessionExpenses(nextExpenses);
-    };
-
-    if (!isSessionExpensesDbAvailable) {
-      saveFallbackExpense();
-      setIsExpenseModalOpen(false);
-      setNewExpense({ amount: '', description: '' });
-      return;
-    }
-
-    try {
-      const createdExpense = await cashSessionExpenseService.create({ amount, description });
-      setSessionExpenses(prev => [...prev, mapDbExpenseToSessionExpense(createdExpense)]);
-      clearLegacySessionExpenses();
-      setIsExpenseModalOpen(false);
-      setNewExpense({ amount: '', description: '' });
-    } catch (err) {
-      console.error('Erro ao gravar saídas de caixa em SQL:', err);
-      setIsSessionExpensesDbAvailable(false);
-      saveFallbackExpense();
-      setIsExpenseModalOpen(false);
-      setNewExpense({ amount: '', description: '' });
-      alert('Saídas guardadas localmente porque a tabela SQL ainda não está disponível.');
-    }
-  };
-
-  const handleRemoveExpense = async (id: string) => {
-    if (!isSessionExpensesDbAvailable) {
-      const nextExpenses = sessionExpenses.filter(exp => exp.id !== id);
-      setSessionExpenses(nextExpenses);
-      persistLegacySessionExpenses(nextExpenses);
-      return;
-    }
-
-    try {
-      await cashSessionExpenseService.delete(id);
-      setSessionExpenses(prev => prev.filter(exp => exp.id !== id));
-    } catch (err) {
-      console.error('Erro ao remover saídas de caixa em SQL:', err);
-      setIsSessionExpensesDbAvailable(false);
-      const nextExpenses = sessionExpenses.filter(exp => exp.id !== id);
-      setSessionExpenses(nextExpenses);
-      persistLegacySessionExpenses(nextExpenses);
-      alert('Saídas removidas localmente porque a tabela SQL ainda não está disponível.');
-    }
-  };
-
   const handleCloseRegister = async () => {
     let paymentsForProcessing = cashPayments;
     if (pendingChanges.size > 0) {
@@ -862,8 +658,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setIsDepositAmountEdited(false);
       setIsMbWayDepositAmountEdited(false);
       setAdjustmentAmount('');
-      setSessionExpenses([]); // Clear session expenses
-      clearLegacySessionExpenses();
+      resetSessionExpenses();
     } catch (err: any) {
       alert('Erro ao fechar a caixa: ' + err.message);
     } finally {
@@ -876,74 +671,22 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   }
 
   if (view === 'report' && activeReport) {
-    return (
-      <div className="animate-fade-in bg-white min-h-screen absolute top-0 left-0 w-full z-50 p-6 print:p-0">
-        <style>{`@page { size: A4; margin: 1cm; } @media print { .no-print { display: none !important; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}</style>
-        <div className="max-w-4xl mx-auto flex justify-between items-center mb-6 no-print border-b pb-4">
-          <button onClick={() => setView('main')} className="flex items-center gap-2 text-slate-500 hover:text-slate-800"><ArrowLeft size={20}/> Voltar</button>
-          <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold"><Printer size={20}/> Imprimir Relatório</button>
-        </div>
-        <div className="max-w-4xl mx-auto bg-white p-4 print:p-2">
-          <h2 className="text-xl font-bold text-slate-800">Relatório de Caixa</h2>
-          <p className="text-sm text-slate-500 mb-6">Operação de {new Date(activeReport.createdAt).toLocaleString('pt-PT')}</p>
-          
-          <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-            <div className="bg-green-50 p-2 rounded-lg"><p className="text-[10px] font-bold uppercase text-green-700">Recebido (Numerário)</p><p className="text-lg font-bold">{(activeReport.reportDetails.filter(d=>d.method==='Numerário').reduce((s,d)=>s+d.total,0)).toFixed(2)}€</p></div>
-            <div className="bg-blue-50 p-2 rounded-lg"><p className="text-[10px] font-bold uppercase text-blue-700">Recebido (MB Way)</p><p className="text-lg font-bold">{(activeReport.reportDetails.filter(d=>d.method==='MB Way').reduce((s,d)=>s+d.total,0)).toFixed(2)}€</p></div>
-            <div className="bg-green-100 p-2 rounded-lg"><p className="text-[10px] font-bold uppercase text-green-800">Depósito (Numerário)</p><p className="text-lg font-bold">{activeReport.depositedAmount.toFixed(2)}€</p></div>
-            <div className="bg-orange-50 p-2 rounded-lg"><p className="text-[10px] font-bold uppercase text-orange-700">Gastos de Caixa</p><p className="text-lg font-bold">{activeReport.spentAmount.toFixed(2)}€</p></div>
-            <div className="bg-yellow-50 p-2 rounded-lg"><p className="text-[10px] font-bold uppercase text-yellow-700">Acertos</p><p className="text-lg font-bold">{(activeReport.adjustmentAmount || 0).toFixed(2)}€</p></div>
-            <div className="bg-blue-100 p-2 rounded-lg"><p className="text-[10px] font-bold uppercase text-blue-800">Depósito (MB Way)</p><p className="text-lg font-bold">{(activeReport.mbWayDepositedAmount || 0).toFixed(2)}€</p></div>
-          </div>
-          {activeReport.spentDescription && <p className="text-xs italic mb-6"><b>Descrição dos Gastos/Acertos:</b> {activeReport.spentDescription}</p>}
-
-          <h3 className="font-bold text-slate-700 mb-1 text-base">Detalhe dos Recebimentos</h3>
-          <table className="w-full text-xs text-left">
-            <thead className="text-[10px] text-slate-500 uppercase bg-slate-50">
-              <tr>
-                <th className="px-2 py-1">Cliente</th>
-                <th className="px-2 py-1">Método</th>
-                <th className="px-2 py-1">Referência</th>
-                <th className="px-2 py-1 text-right">Total (€)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {activeReport.reportDetails.map((item, index) => (
-                <tr key={index}><td className="px-2 py-1 font-medium">{item.clientName}</td><td className={`px-2 py-1 font-bold ${item.method === 'MB Way' ? 'text-blue-600' : 'text-green-600'}`}>{item.method}</td><td className="px-2 py-1">{item.months.join(', ')}</td><td className="px-2 py-1 text-right font-bold">{item.total.toFixed(2)}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
+    return <CashierReport report={activeReport} onBack={() => setView('main')} />;
   }
 
   if (view === 'history') {
     return (
-      <div className="space-y-6 animate-fade-in">
-        <div className="flex justify-between items-center">
-          <div><h2 className="text-2xl font-bold text-slate-800">Histórico de Operações de Caixa</h2></div>
-          <button onClick={() => setView('main')} className="flex items-center gap-2 text-slate-500 hover:text-slate-800 text-sm"><ArrowLeft size={16}/> Voltar</button>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 uppercase bg-slate-50"><tr><th className="px-4 py-3">Data</th><th className="px-4 py-3 text-right">Valor Depositado</th><th className="px-4 py-3 text-right">Valor Gasto</th><th className="px-4 py-3">Descrição Gastos</th><th className="px-4 py-3 text-right">Ações</th></tr></thead>
-            <tbody className="divide-y divide-slate-50">
-              {cashOperations.map(op => (
-                <tr key={op.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-xs">{new Date(op.createdAt).toLocaleString('pt-PT')}</td>
-                  <td className="px-4 py-3 text-right font-bold text-blue-600">{op.depositedAmount.toFixed(2)}€</td>
-                  <td className="px-4 py-3 text-right font-bold text-orange-600">{op.spentAmount.toFixed(2)}€</td>
-                  <td className="px-4 py-3 text-xs italic">{op.spentDescription}</td>
-                  <td className="px-4 py-3 text-right"><button onClick={() => { setActiveReport(op); setView('report'); }} className="text-xs font-bold text-blue-600 hover:underline">Ver Relatório</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <CashierHistory
+        operations={cashOperations}
+        onBack={() => setView('main')}
+        onSelectReport={(operation) => {
+          setActiveReport(operation);
+          setView('report');
+        }}
+      />
     );
   }
+
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -1257,208 +1000,35 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         </div>
       </div>
 
-      {isPlanModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h3 className="text-xl font-bold">Acordo de Pagamento e Notas</h3>
-                <p className="text-xs text-slate-500">{selectedPlanClient ? selectedPlanClient.name : 'Selecionar cliente'}</p>
-                {selectedClientPlan && selectedPlanClient && (
-                  <p className="text-xs text-slate-500">
-                    Estado: {getDisplayedPlanStatus(selectedClientPlan, agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0)} | Divida em aberto: {(agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0).toFixed(2)} EUR
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsPlanModalOpen(false);
-                  resetPlanFormSelection();
-                }}
-              >
-                <X size={20} />
-              </button>
-            </div>
+      <PlanModal
+        isOpen={isPlanModalOpen}
+        selectedPlanClient={selectedPlanClient}
+        selectedClientPlan={selectedClientPlan}
+        displayedStatus={selectedClientPlan && selectedPlanClient ? getDisplayedPlanStatus(selectedClientPlan, agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0) : null}
+        openDebt={selectedPlanClient ? agreementDebtByClient.get(selectedPlanClient.id)?.debt || 0 : 0}
+        groupClients={groupClients}
+        planForm={planForm}
+        months={months}
+        isSavingPlan={isSavingPlan}
+        onClose={() => {
+          setIsPlanModalOpen(false);
+          resetPlanFormSelection();
+        }}
+        onClientChange={handlePlanClientChange}
+        onPlanFormChange={setPlanForm}
+        onRemove={handleRemovePlan}
+        onSave={handleSavePlan}
+      />
 
-            <div className="mb-4">
-              <label className="block text-xs font-bold text-slate-500 mb-1">Cliente</label>
-              <select
-                value={selectedPlanClient?.id || ''}
-                onChange={e => handlePlanClientChange(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
-              >
-                <option value="">Selecionar cliente</option>
-                {groupClients.map(client => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Valor mensal do acordo (EUR)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={planForm.monthlyAmount}
-                  onChange={e => setPlanForm(prev => ({ ...prev, monthlyAmount: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm"
-                  placeholder="0.00"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Valor da divida do acordo (EUR)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={planForm.debtAmount}
-                  onChange={e => setPlanForm(prev => ({ ...prev, debtAmount: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm"
-                  placeholder="0.00"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Acordo ate ao mes</label>
-                <select
-                  value={planForm.payUntilMonth}
-                  onChange={e => setPlanForm(prev => ({ ...prev, payUntilMonth: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
-                >
-                  {months.map((month, index) => (
-                    <option key={month} value={index + 1}>
-                      {month}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Acordo ate ao ano</label>
-                <input
-                  type="number"
-                  min="2000"
-                  max="3000"
-                  step="1"
-                  value={planForm.payUntilYear}
-                  onChange={e => setPlanForm(prev => ({ ...prev, payUntilYear: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={planForm.called}
-                  onChange={e => setPlanForm(prev => ({ ...prev, called: e.target.checked }))}
-                />
-                Ligamos ao cliente
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={planForm.letterSent}
-                  onChange={e => setPlanForm(prev => ({ ...prev, letterSent: e.target.checked }))}
-                />
-                Carta enviada
-              </label>
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-xs font-bold text-slate-500 mb-1">Notas</label>
-              <textarea
-                value={planForm.notes}
-                onChange={e => setPlanForm(prev => ({ ...prev, notes: e.target.value }))}
-                className="w-full min-h-[110px] px-3 py-2 border rounded-lg text-sm"
-                placeholder="Ex: ligacao em 05/02, cliente pediu nova chamada na proxima semana..."
-              />
-            </div>
-
-            <div className="flex justify-between items-center pt-6">
-              <div>
-                {selectedClientPlan && (
-                  <button
-                    type="button"
-                    onClick={handleRemovePlan}
-                    disabled={isSavingPlan}
-                    className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg font-bold"
-                  >
-                    {isSavingPlan ? 'A remover...' : 'Remover acordo'}
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsPlanModalOpen(false);
-                    resetPlanFormSelection();
-                  }}
-                  disabled={isSavingPlan}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSavePlan}
-                  disabled={isSavingPlan}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50"
-                >
-                  {isSavingPlan ? <RefreshCcw size={16} className="animate-spin" /> : <Save size={16} />}
-                  {isSavingPlan ? 'A guardar...' : 'Guardar acordo'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Expense Modal */}
-      {isExpenseModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Nova Saída de Caixa</h3>
-              <button type="button" onClick={() => setIsExpenseModalOpen(false)}><X size={20} /></button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Valor (€)</label>
-                <input 
-                  type="number" 
-                  value={newExpense.amount} 
-                  onChange={e => setNewExpense(prev => ({ ...prev, amount: e.target.value }))} 
-                  className="w-full px-3 py-2 border rounded-lg text-sm" 
-                  placeholder="0.00" 
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Descrição</label>
-                <input 
-                  type="text" 
-                  value={newExpense.description} 
-                  onChange={e => setNewExpense(prev => ({ ...prev, description: e.target.value }))} 
-                  className="w-full px-3 py-2 border rounded-lg text-sm" 
-                  placeholder="Ex: Material de escritório" 
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 pt-6">
-              <button type="button" onClick={() => setIsExpenseModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">Cancelar</button>
-              <button onClick={handleAddExpense} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
-                <Save size={16} /> Adicionar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ExpenseModal
+        isOpen={isExpenseModalOpen}
+        amount={newExpense.amount}
+        description={newExpense.description}
+        onClose={() => setIsExpenseModalOpen(false)}
+        onAmountChange={(value) => setNewExpense(prev => ({ ...prev, amount: value }))}
+        onDescriptionChange={(value) => setNewExpense(prev => ({ ...prev, description: value }))}
+        onAdd={handleAddExpense}
+      />
     </div>
   );
 };

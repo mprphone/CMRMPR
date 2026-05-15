@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Client, Staff, Task, TurnoverBracket, ClientTaskOverride, TaskArea, AiAnalysis, InsurancePolicy, SaftDossierData } from '../types';
 import { calculateClientProfitability } from '../services/calculator';
 import { analyzeClientWithAI } from '../services/geminiService';
-import { saftDossierService } from '../services/supabase';
+import { saftDossierService } from '../services';
 import { 
   ArrowLeft, BrainCircuit, Activity, Building, University, Wallet, AlertCircle, CheckCircle, Phone, MapPin, FileText, Plus, Trash2, Save, User, Clock, Users, RefreshCcw, BadgeEuro, Shield,
   FileCheck, Receipt, BarChart3, Building2, Target, Globe, MessageSquare, PieChart, Presentation, TrendingUp

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { WorkSafetyService, WorkSafetyProfileData, Client } from '../types';
-import { workSafetyService } from '../services/supabase';
+import { workSafetyService } from '../services';
 import { generateTemplateWithAI } from '../services/geminiService';
 import { Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, CheckCircle, Circle, FileCheck, FileClock, FileX, Paperclip, AlertTriangle, BellRing, Sparkles, Mail } from 'lucide-react';
 

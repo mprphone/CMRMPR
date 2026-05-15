@@ -1,0 +1,14 @@
+{
+  "name": "AccounTech - Gestão de Rentabilidade",
+  "short_name": "AccounTech",
+  "description": "Gestão de rentabilidade, clientes, equipa e operações.",
+  "lang": "pt-PT",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/icone.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any" }
+  ]
+}

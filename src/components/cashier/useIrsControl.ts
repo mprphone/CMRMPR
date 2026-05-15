@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { appConfigService } from '../../services/supabase';
+import { appConfigService } from '../../services';
 
 export type IrsSettlementDirection = 'A pagar' | 'A receber' | 'Nulo';
 
