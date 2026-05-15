@@ -217,13 +217,12 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         }
 
         const paymentMonth = Number(payment.paymentMonth || 0);
+        // Legacy: same-year agreements may have installments stored as months 1–12
+        // For previous-year agreements only count explicit agreement months (≥100)
         const isLegacyAgreementPayment =
+          agreement.year === currentYear &&
           paymentMonth >= 1 &&
-          paymentMonth <= agreement.paidUntilMonth &&
-          (
-            agreement.year === currentYear ||
-            Number(payment.amountPaid || 0) <= agreement.monthlyAmount
-          );
+          paymentMonth <= agreement.paidUntilMonth;
 
         if (isAgreementPaymentMonth(paymentMonth) || isLegacyAgreementPayment) {
           paidTotal += payment.amountPaid || 0;
