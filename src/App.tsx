@@ -27,6 +27,15 @@ import Cashier from './components/Cashier';
 import IrsControl from './components/IrsControl';
 import { usePwaInstall } from './hooks/usePwaInstall';
 
+const isMissingAtomicSyncRpcError = (error: unknown) => {
+  const err = error as { code?: string; message?: string } | null;
+  return Boolean(
+    err &&
+    (err.code === 'PGRST202' ||
+      (err.message || '').includes('sync_imported_staff_and_clients_atomic'))
+  );
+};
+
 // Polyfill for crypto.randomUUID for non-secure contexts or older browsers
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -582,15 +591,14 @@ export default function App() {
         } as any;
       });
 
-      await atomicSyncImportedData(
-        externalStaff.map(member => ({
+      const staffPayload = externalStaff.map(member => ({
           id: member.id,
           name: member.name,
           email: member.email,
           phone: member.phone,
           role: member.role,
-        })),
-        clientsWithStaffId.map(client => ({
+        }));
+      const clientPayload = clientsWithStaffId.map(client => ({
           nif: client.nif,
           name: client.name,
           email: client.email || '',
@@ -601,8 +609,17 @@ export default function App() {
           status: client.status || 'Ativo',
           responsavel_interno_id: client.responsibleStaff || null,
           responsavel_action: client.responsibleStaffAction || 'keep',
-        }))
-      );
+        }));
+
+      try {
+        await atomicSyncImportedData(staffPayload, clientPayload);
+      } catch (syncError) {
+        if (!isMissingAtomicSyncRpcError(syncError)) throw syncError;
+
+        console.warn('RPC de sincronizacao atomica em falta; a usar fallback nao atomico.', syncError);
+        await staffService.bulkUpsert(externalStaff);
+        await clientService.bulkUpsert(clientsWithStaffId);
+      }
 
       if (externalClients.length > 0) {
         // Map responsible staff from import to staff ID (ONLY when it's a valid staff UUID).
@@ -852,4 +869,3 @@ export default function App() {
     </div>
   );
 }
-
