@@ -150,7 +150,6 @@ export default function App() {
 
   useEffect(() => {
     initSupabase(globalSettings);
-    fetchData();
   }, [
     globalSettings.supabaseImportUrl,
     globalSettings.supabaseImportKey,
@@ -182,6 +181,11 @@ export default function App() {
 
     const { data: { subscription } } = storeClient.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      if (session) {
+        void fetchData();
+      } else {
+        setIsLoadingData(false);
+      }
       if (session?.user?.email === 'mpr@mpr.pt') {
         setUserRole('admin');
       } else if (session) {
@@ -194,6 +198,11 @@ export default function App() {
     // Check for initial session
     storeClient.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      if (session) {
+        void fetchData();
+      } else {
+        setIsLoadingData(false);
+      }
     });
 
     return () => subscription.unsubscribe();
