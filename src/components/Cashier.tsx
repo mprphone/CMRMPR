@@ -4,10 +4,17 @@ import { cashPaymentService, cashAgreementService, cashOperationService } from '
 import { Landmark, Check, X, Save, RefreshCcw, DollarSign, Banknote, Download, History, CreditCard, Plus } from 'lucide-react';
 import { ClientPaymentPlan, PlanFormState } from '../types/cashier';
 import { useCashierExpenses } from '../hooks/useCashierExpenses';
+import { useToast } from '../hooks/useToast';
+import { useConfirm } from '../hooks/useConfirm';
+import { useInputModal } from '../hooks/useInputModal';
 import CashierReport from './cashier/CashierReport';
 import CashierHistory from './cashier/CashierHistory';
 import PlanModal from './cashier/PlanModal';
 import ExpenseModal from './cashier/ExpenseModal';
+import CloseRegisterModal, { CloseRegisterSummary } from './cashier/CloseRegisterModal';
+import ToastContainer from './ui/ToastContainer';
+import ConfirmModal from './ui/ConfirmModal';
+import InputModal from './ui/InputModal';
 
 interface CashierProps {
   clients: Client[];
@@ -38,6 +45,13 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const [view, setView] = useState<'main' | 'report' | 'history'>('main');
   const [paymentMode, setPaymentMode] = useState<'Numerário' | 'MB Way'>('Numerário');
   const [activeReport, setActiveReport] = useState<CashOperation | null>(null);
+
+  const { toast, toasts, dismiss } = useToast();
+  const { confirm, confirmState, handleConfirmClose } = useConfirm();
+  const { prompt, inputModalState, inputModalValue, setInputModalValue, handleInputModalClose } = useInputModal();
+  const [closeRegisterSummary, setCloseRegisterSummary] = useState<CloseRegisterSummary | null>(null);
+  const [closeRegisterPayments, setCloseRegisterPayments] = useState<CashPayment[]>([]);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   const {
     isExpenseModalOpen,
@@ -310,18 +324,18 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
   const handleSavePlan = async () => {
     if (!selectedPlanClient) {
-      alert('Selecione um cliente para criar o acordo.');
+      toast.warning('Selecione um cliente para criar o acordo.');
       return;
     }
 
     const monthlyAmount = parseFloat(planForm.monthlyAmount);
     const debtAmount = parseFloat(planForm.debtAmount);
     if (!Number.isFinite(monthlyAmount) || monthlyAmount <= 0) {
-      alert('Indique um valor mensal valido para o acordo.');
+      toast.warning('Indique um valor mensal valido para o acordo.');
       return;
     }
     if (!Number.isFinite(debtAmount) || debtAmount < 0) {
-      alert('Indique um valor de divida valido para o acordo.');
+      toast.warning('Indique um valor de divida valido para o acordo.');
       return;
     }
 
@@ -373,7 +387,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setIsPlanModalOpen(false);
       resetPlanFormSelection();
     } catch (err: any) {
-      alert('Erro ao guardar acordo: ' + err.message);
+      toast.error('Erro ao guardar acordo: ' + err.message);
     } finally {
       setIsSavingPlan(false);
     }
@@ -402,7 +416,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         prev.map(agreement => (agreement.id === savedAgreement.id ? savedAgreement : agreement))
       );
     } catch (err: any) {
-      alert('Erro ao atualizar estado do acordo: ' + err.message);
+      toast.error('Erro ao atualizar estado do acordo: ' + err.message);
     } finally {
       setIsSavingPlan(false);
     }
@@ -420,7 +434,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setIsPlanModalOpen(false);
       resetPlanFormSelection();
     } catch (err: any) {
-      alert('Erro ao remover acordo: ' + err.message);
+      toast.error('Erro ao remover acordo: ' + err.message);
     } finally {
       setIsSavingPlan(false);
     }
@@ -430,7 +444,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     const monthNumber = month + 1;
     const plan = getClientPlan(client.id);
     if (plan && currentYear === plan.year && monthNumber <= plan.paidUntilMonth) {
-      alert('Este mes esta dentro do acordo. Use os botoes "Pagar Numerario" ou "Pagar MB Way" na tabela de acordos.');
+      toast.info('Este mes esta dentro do acordo. Use os botoes "Pagar Numerario" ou "Pagar MB Way" na tabela de acordos.');
       return;
     }
 
@@ -478,47 +492,47 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     return latestAgreementMonth + 1;
   };
 
-  const handlePayInstallment = (client: Client, method: 'Numerário' | 'MB Way') => {
+  const handlePayInstallment = async (client: Client, method: 'Numerário' | 'MB Way') => {
     const agreement = getClientPlan(client.id);
     if (!agreement) {
-      alert('Este cliente não tem acordo definido.');
+      toast.warning('Este cliente não tem acordo definido.');
       return;
     }
 
     if (agreement.status === 'Anulado') {
-      alert('Este acordo está anulado. Reative o acordo para registar novas prestações.');
+      toast.warning('Este acordo está anulado. Reative o acordo para registar novas prestações.');
       return;
     }
 
     const debtInfo = agreementDebtByClient.get(client.id);
     if (!debtInfo || debtInfo.debt <= 0) {
-      alert('Não existe dívida pendente para este acordo.');
+      toast.info('Não existe dívida pendente para este acordo.');
       return;
     }
 
     const defaultAmount = Math.min(agreement.monthlyAmount, debtInfo.debt);
-    const amountInput = window.prompt(
-      `Valor a registar (${method}) para ${client.name}:`,
-      defaultAmount.toFixed(2).replace('.', ',')
+    const amountInput = await prompt(
+      defaultAmount.toFixed(2).replace('.', ','),
+      { title: `Pagar ${method} — ${client.name}`, label: `Valor a registar (máx. ${debtInfo.debt.toFixed(2)} €):` }
     );
 
     if (amountInput === null) return;
 
     const parsedAmount = Number(amountInput.replace(',', '.').trim());
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      alert('Indique um valor válido superior a zero.');
+      toast.warning('Indique um valor válido superior a zero.');
       return;
     }
 
     const amountToPay = Math.min(parsedAmount, debtInfo.debt);
     if (parsedAmount > debtInfo.debt) {
-      alert(`O valor excede a dívida em aberto. Será registado apenas ${amountToPay.toFixed(2)} EUR.`);
+      toast.warning(`O valor excede a dívida. Será registado apenas ${amountToPay.toFixed(2)} €.`);
     }
 
     const targetMonth = getNextAgreementPaymentMonth(client.id);
     const currentPaymentState = paymentsMap.get(client.id)?.get(targetMonth);
     if (currentPaymentState?.cashOperationId) {
-      alert('Esta prestacao do acordo ja foi processada em caixa.');
+      toast.info('Esta prestação do acordo já foi processada em caixa.');
       return;
     }
 
@@ -553,13 +567,13 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       const updatedPayments = await cashPaymentService.getAll();
       setCashPayments(updatedPayments);
       setPendingChanges(new Map());
-      if (!silent) {
-        alert('Pagamentos gravados com sucesso!');
-      }
+      setSaveFailed(false);
+      if (!silent) toast.success('Pagamentos gravados com sucesso!');
       return updatedPayments;
     } catch (err: any) {
+      setSaveFailed(true);
       if (!silent) {
-        alert('Erro ao gravar pagamentos: ' + err.message);
+        toast.error('Erro ao gravar pagamentos: ' + err.message);
       } else {
         console.error('Erro ao gravar pagamentos ao sair:', err.message);
       }
@@ -567,7 +581,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     } finally {
       setIsSaving(false);
     }
-  }, [pendingChanges, setCashPayments]);
+  }, [pendingChanges, setCashPayments, toast]);
 
   useEffect(() => {
     // Auto-save on unmount
@@ -579,46 +593,69 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     };
   }, [pendingChanges, handleSaveChanges]);
 
-  const handleCloseRegister = async () => {
+  const handleReloadFromServer = async () => {
+    try {
+      const fresh = await cashPaymentService.getAll();
+      setCashPayments(fresh);
+      setPendingChanges(new Map());
+      setSaveFailed(false);
+      toast.success('Dados recarregados do servidor.');
+    } catch (err: any) {
+      toast.error('Erro ao recarregar: ' + err.message);
+    }
+  };
+
+  const handleCloseRegisterClick = async () => {
     let paymentsForProcessing = cashPayments;
     if (pendingChanges.size > 0) {
-      const updatedPayments = await handleSaveChanges(true); // Save silently
+      const updatedPayments = await handleSaveChanges(true);
       if (updatedPayments) {
         paymentsForProcessing = updatedPayments;
       } else {
-        alert("Falha ao gravar alterações pendentes. Não é possível fechar a caixa.");
+        toast.error('Falha ao gravar alterações pendentes. Não é possível fechar a caixa.');
         return;
       }
     }
-    // Collect ALL payments that are not yet processed, regardless of method
+
     const allPaymentsToProcess = paymentsForProcessing.filter(p => !p.cashOperationId);
     if (allPaymentsToProcess.length === 0 && sessionExpenses.length === 0) {
-      alert('Não há pagamentos ou saídas de caixa pendentes para processar.');
+      toast.info('Não há pagamentos ou saídas de caixa pendentes para processar.');
       return;
     }
 
-    const numerarioPaymentsToProcess = allPaymentsToProcess.filter(p => p.paymentMethod === 'Numerário');
-    const totalNumerarioToProcess = numerarioPaymentsToProcess.reduce((sum, p) => sum + p.amountPaid, 0);
-
+    const numerarioPayments = allPaymentsToProcess.filter(p => p.paymentMethod === 'Numerário');
+    const mbWayPayments = allPaymentsToProcess.filter(p => p.paymentMethod === 'MB Way');
+    const numerarioTotal = numerarioPayments.reduce((sum, p) => sum + p.amountPaid, 0);
+    const mbWayTotal = mbWayPayments.reduce((sum, p) => sum + p.amountPaid, 0);
     const deposit = parseFloat(depositAmount) || 0;
-    const spent = totalSessionExpenses;
     const adjustment = parseFloat(adjustmentAmount) || 0;
     const mbWayDeposit = parseFloat(mbWayDepositAmount) || 0;
 
-    // Only check balance for Numerário
-    if (Math.abs(totalNumerarioToProcess - (deposit + spent + adjustment)) > 0.01) {
-      if (!confirm(`Atenção: O total em caixa (Numerário: ${totalNumerarioToProcess.toFixed(2)}€) não corresponde à soma do depósito, gastos e acertos (${(deposit + spent + adjustment).toFixed(2)}€). Deseja continuar mesmo assim?`)) {
-        return;
-      }
-    }
+    setCloseRegisterPayments(allPaymentsToProcess);
+    setCloseRegisterSummary({
+      numerarioTotal,
+      mbWayTotal,
+      numerarioCount: numerarioPayments.length,
+      mbWayCount: mbWayPayments.length,
+      sessionExpensesTotal: totalSessionExpenses,
+      deposit,
+      mbWayDeposit,
+      adjustment,
+      hasBalanceMismatch: Math.abs(numerarioTotal - (deposit + totalSessionExpenses + adjustment)) > 0.01,
+    });
+  };
 
+  const doCloseRegister = async () => {
+    if (!closeRegisterSummary) return;
+    const summary = closeRegisterSummary;
+    setCloseRegisterSummary(null);
     setIsSaving(true);
 
-    const reportDetailsMap = new Map<string, { clientName: string, months: string[], total: number, method: 'Numerário' | 'MB Way' }>();
-    allPaymentsToProcess.forEach(p => {
+    const reportDetailsMap = new Map<string, { clientName: string; months: string[]; total: number; method: 'Numerário' | 'MB Way' }>();
+    closeRegisterPayments.forEach((p: CashPayment) => {
       const client = clients.find(c => c.id === p.clientId);
       if (client) {
-        const key = `${client.id}-${p.paymentMethod}`; // Group by client and method
+        const key = `${client.id}-${p.paymentMethod}`;
         if (!reportDetailsMap.has(key)) {
           reportDetailsMap.set(key, { clientName: client.name, months: [], total: 0, method: p.paymentMethod });
         }
@@ -629,29 +666,25 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     });
 
     const newOperation: Partial<CashOperation> = {
-      depositedAmount: deposit,
-      spentAmount: spent, // Use calculated total
-      spentDescription: sessionExpenses.map(e => `${e.description}: ${e.amount.toFixed(2)}€`).join('; '), // Generate description
-      mbWayDepositedAmount: mbWayDeposit,
-      adjustmentAmount: adjustment,
+      depositedAmount: summary.deposit,
+      spentAmount: summary.sessionExpensesTotal,
+      spentDescription: sessionExpenses.map(e => `${e.description}: ${e.amount.toFixed(2)}€`).join('; '),
+      mbWayDepositedAmount: summary.mbWayDeposit,
+      adjustmentAmount: summary.adjustment,
       reportDetails: Array.from(reportDetailsMap.values()),
     };
 
     try {
-      // Pass ALL payment IDs to be marked as processed
       const createdOperation = await cashOperationService.create(
         newOperation,
-        allPaymentsToProcess.map(p => p.id),
+        closeRegisterPayments.map((p: CashPayment) => p.id),
         sessionExpenses.map(exp => exp.id)
       );
       setCashOperations([createdOperation, ...cashOperations]);
-      
       const updatedPayments = await cashPaymentService.getAll();
       setCashPayments(updatedPayments);
-
       setActiveReport(createdOperation);
       setView('report');
-      // Reset form
       setDepositAmount('');
       setMbWayDepositAmount('');
       setIsDepositAmountEdited(false);
@@ -659,7 +692,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       setAdjustmentAmount('');
       resetSessionExpenses();
     } catch (err: any) {
-      alert('Erro ao fechar a caixa: ' + err.message);
+      toast.error('Erro ao fechar a caixa: ' + err.message);
     } finally {
       setIsSaving(false);
     }
@@ -907,10 +940,9 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                           ) : (
                             <button
                               type="button"
-                              onClick={() => {
-                                if (window.confirm('Marcar este acordo como anulado?')) {
-                                  handleSetPlanStatus(client, 'Anulado');
-                                }
+                              onClick={async () => {
+                                const ok = await confirm('Marcar este acordo como anulado?', { title: 'Anular Acordo', variant: 'danger', confirmLabel: 'Anular' });
+                                if (ok) handleSetPlanStatus(client, 'Anulado');
                               }}
                               disabled={isSavingPlan}
                               className="text-[11px] px-2 py-1 rounded-md bg-red-100 text-red-700 font-bold hover:bg-red-200 disabled:opacity-40"
@@ -991,8 +1023,13 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">Acertos (+/- €)</label>
             <input type="number" value={adjustmentAmount} onChange={e => setAdjustmentAmount(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
           </div>
-          <div className="md:col-span-4 text-right">
-            <button onClick={handleCloseRegister} disabled={isSaving || (cashInHand + mbWayInHand === 0 && sessionExpenses.length === 0)} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50 ml-auto">
+          <div className="md:col-span-4 flex justify-end items-center gap-3">
+            {saveFailed && (
+              <button onClick={handleReloadFromServer} className="flex items-center gap-2 text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg hover:bg-red-100">
+                <RefreshCcw size={14} /> Recarregar dados
+              </button>
+            )}
+            <button onClick={handleCloseRegisterClick} disabled={isSaving || (cashInHand + mbWayInHand === 0 && sessionExpenses.length === 0)} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50">
               {isSaving ? <RefreshCcw size={18} className="animate-spin" /> : <Check size={18} />} Finalizar e Gerar Relatório
             </button>
           </div>
@@ -1028,6 +1065,23 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         onDescriptionChange={(value) => setNewExpense(prev => ({ ...prev, description: value }))}
         onAdd={handleAddExpense}
       />
+
+      <CloseRegisterModal
+        summary={closeRegisterSummary}
+        onConfirm={doCloseRegister}
+        onCancel={() => setCloseRegisterSummary(null)}
+      />
+
+      <ConfirmModal state={confirmState} onClose={handleConfirmClose} />
+
+      <InputModal
+        state={inputModalState}
+        value={inputModalValue}
+        onChange={setInputModalValue}
+        onClose={handleInputModalClose}
+      />
+
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 };
