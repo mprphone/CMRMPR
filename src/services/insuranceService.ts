@@ -1,20 +1,30 @@
 import { InsurancePolicy, InsuranceCommissionSettlement } from '../types';
 import { ensureStoreClient } from './supabaseClient';
 
+const LEGACY_MEDIATOR_PARTNERS = ['Finiconde', 'Nepseguros', 'Neoseguros'];
+
+const normalizeMediatorPartner = (value?: string | null) => {
+  if (!value) return undefined;
+  return value === 'Nepseguros' ? 'Neoseguros' : value;
+};
+
+const isLegacyMediatorPartner = (value?: string | null) =>
+  Boolean(value && LEGACY_MEDIATOR_PARTNERS.includes(value));
+
 const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
   id: p.id,
   clientId: p.client_id,
   clientName: p.clients?.name || p.policy_holder || 'Cliente Desconhecido',
   policyHolder: p.policy_holder || p.clients?.name || '',
   agent: (p.internal_responsible || p.agent || undefined) as InsurancePolicy['agent'],
-  mediatorPartner: p.mediator_partner || undefined,
+  mediatorPartner: p.mediator_partner || normalizeMediatorPartner(isLegacyMediatorPartner(p.company) ? p.company : p.insurance_provider),
   internalResponsible: (p.internal_responsible || p.agent || undefined) as InsurancePolicy['internalResponsible'],
   policyDate: p.policy_date,
   renewalDate: p.renewal_date || p.policy_date,
   policyNumber: p.policy_number,
-  company: p.company || p.insurance_provider,
+  company: isLegacyMediatorPartner(p.company) || isLegacyMediatorPartner(p.insurance_provider) ? undefined : p.company || p.insurance_provider,
   branch: p.branch || p.policy_type,
-  insuranceProvider: p.company || p.insurance_provider,
+  insuranceProvider: isLegacyMediatorPartner(p.company) || isLegacyMediatorPartner(p.insurance_provider) ? undefined : p.company || p.insurance_provider,
   paymentFrequency: p.payment_frequency,
   policyType: p.branch || p.policy_type,
   premiumValue: Number(p.premium_value ?? p.net_premium_value ?? 0),

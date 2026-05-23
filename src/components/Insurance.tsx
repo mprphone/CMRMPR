@@ -39,10 +39,21 @@ interface PaidCommissionHistoryRow {
   amount: number;
 }
 
-const getCompany = (policy: Partial<InsurancePolicy>) => policy.company || policy.insuranceProvider || '';
+const LEGACY_MEDIATOR_PARTNERS = ['Finiconde', 'Nepseguros', 'Neoseguros'];
+const normalizeMediatorPartner = (value: string) => value === 'Nepseguros' ? 'Neoseguros' : value;
+const isLegacyMediatorPartner = (value?: string) => Boolean(value && LEGACY_MEDIATOR_PARTNERS.includes(value));
+
+const getCompany = (policy: Partial<InsurancePolicy>) => {
+  const company = policy.company || policy.insuranceProvider || '';
+  return isLegacyMediatorPartner(company) ? '' : company;
+};
 const getBranch = (policy: Partial<InsurancePolicy>) => policy.branch || policy.policyType || '';
 const getPolicyHolder = (policy: Partial<InsurancePolicy>) => policy.policyHolder || policy.clientName || '';
-const getMediatorPartner = (policy: Partial<InsurancePolicy>) => policy.mediatorPartner || '';
+const getMediatorPartner = (policy: Partial<InsurancePolicy>) => {
+  if (policy.mediatorPartner) return policy.mediatorPartner;
+  const legacyCompany = policy.company || policy.insuranceProvider || '';
+  return isLegacyMediatorPartner(legacyCompany) ? normalizeMediatorPartner(legacyCompany) : '';
+};
 const getInternalResponsible = (policy: Partial<InsurancePolicy>) => policy.internalResponsible || policy.agent || '';
 const getTotalPremium = (policy: Partial<InsurancePolicy>) => Number(policy.premiumValue ?? policy.netPremiumValue ?? 0);
 const getNetPremium = (policy: Partial<InsurancePolicy>) => {
@@ -935,7 +946,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 <SortableHeader sortKey="branch">Ramo</SortableHeader>
                 <SortableHeader sortKey="status">Estado</SortableHeader>
                 <th className="px-4 py-3 text-center">Comissao</th>
-                <th className="px-4 py-3 text-right">Acoes</th>
+                <th className="px-4 py-3 text-right sticky right-0 bg-slate-50 z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">Acoes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -963,8 +974,8 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                         {p.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-center text-xs font-bold">{Number(p.commissionRate || 0).toFixed(1)}%</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-center text-xs font-bold whitespace-nowrap">{Number(p.commissionRate || 0).toFixed(1)}%</td>
+                    <td className="px-4 py-3 text-right sticky right-0 bg-white z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
                       {p.attachment_url && (
                         <a href={p.attachment_url} target="_blank" rel="noopener noreferrer" title="Ver Anexo" className="p-2 text-slate-400 hover:text-blue-600 inline-block">
                           <Paperclip size={14}/>
