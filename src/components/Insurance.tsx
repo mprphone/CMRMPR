@@ -937,7 +937,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
             </select>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1560px] text-sm text-left table-fixed">
+          <table className="w-full min-w-[1480px] text-sm text-left table-fixed">
             <colgroup>
               <col className="w-[270px]" />
               <col className="w-[220px]" />
@@ -948,7 +948,6 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               <col className="w-[135px]" />
               <col className="w-[150px]" />
               <col className="w-[120px]" />
-              <col className="w-[80px]" />
               <col className="w-[105px]" />
             </colgroup>
             <thead className="text-xs text-slate-500 uppercase bg-slate-50">
@@ -962,7 +961,6 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 <SortableHeader sortKey="branch">Ramo</SortableHeader>
                 <SortableHeader sortKey="communicationType">Comunicacao</SortableHeader>
                 <SortableHeader sortKey="status" className="text-center">Estado</SortableHeader>
-                <th className="px-4 py-3 text-center">Comissao</th>
                 <th className="px-4 py-3 text-center sticky right-0 bg-slate-50 z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">Acoes</th>
               </tr>
             </thead>
@@ -993,7 +991,6 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                         {p.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-center text-xs font-bold whitespace-nowrap">{Number(p.commissionRate || 0).toFixed(1)}%</td>
                     <td className="px-3 py-3 sticky right-0 bg-white z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
                       <div className="flex items-center justify-center gap-1">
                         {p.attachment_url && (
@@ -1010,7 +1007,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               })}
               {sortedPolicies.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="text-center italic text-slate-400 py-10">Nenhuma apolice encontrada.</td>
+                  <td colSpan={10} className="text-center italic text-slate-400 py-10">Nenhuma apolice encontrada.</td>
                 </tr>
               )}
             </tbody>
