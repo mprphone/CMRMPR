@@ -11,7 +11,7 @@ interface InsuranceProps {
   viewerEmail?: string;
 }
 
-type SortableKeys = 'policyHolder' | 'policyNumber' | 'company' | 'mediatorPartner' | 'internalResponsible' | 'renewalDate' | 'branch' | 'status' | 'premiumValue' | 'netPremiumValue';
+type SortableKeys = 'policyHolder' | 'policyNumber' | 'company' | 'mediatorPartner' | 'internalResponsible' | 'renewalDate' | 'branch' | 'communicationType' | 'status' | 'premiumValue' | 'netPremiumValue';
 
 interface CommissionPeriodRow {
   key: string;
@@ -167,6 +167,8 @@ const getSortValue = (policy: InsurancePolicy, sortKey: SortableKeys): string | 
       return policy.renewalDate || '';
     case 'branch':
       return getBranch(policy);
+    case 'communicationType':
+      return policy.communicationType || '';
     case 'status':
       return policy.status || '';
     case 'premiumValue':
@@ -248,6 +250,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
         p.policyNumber?.toLowerCase().includes(search) ||
         getCompany(p).toLowerCase().includes(search) ||
         getBranch(p).toLowerCase().includes(search) ||
+        (p.communicationType || '').toLowerCase().includes(search) ||
         getMediatorPartner(p).toLowerCase().includes(search) ||
         getInternalResponsible(p).toLowerCase().includes(search);
       
@@ -934,17 +937,18 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
             </select>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1360px] text-sm text-left table-fixed">
+          <table className="w-full min-w-[1560px] text-sm text-left table-fixed">
             <colgroup>
-              <col className="w-[260px]" />
-              <col className="w-[210px]" />
+              <col className="w-[270px]" />
+              <col className="w-[220px]" />
               <col className="w-[140px]" />
-              <col className="w-[140px]" />
+              <col className="w-[145px]" />
               <col className="w-[125px]" />
               <col className="w-[130px]" />
-              <col className="w-[140px]" />
+              <col className="w-[135px]" />
+              <col className="w-[150px]" />
               <col className="w-[120px]" />
-              <col className="w-[95px]" />
+              <col className="w-[80px]" />
               <col className="w-[105px]" />
             </colgroup>
             <thead className="text-xs text-slate-500 uppercase bg-slate-50">
@@ -956,6 +960,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 <SortableHeader sortKey="internalResponsible">Responsavel</SortableHeader>
                 <SortableHeader sortKey="renewalDate">Renovacao</SortableHeader>
                 <SortableHeader sortKey="branch">Ramo</SortableHeader>
+                <SortableHeader sortKey="communicationType">Comunicacao</SortableHeader>
                 <SortableHeader sortKey="status" className="text-center">Estado</SortableHeader>
                 <th className="px-4 py-3 text-center">Comissao</th>
                 <th className="px-4 py-3 text-center sticky right-0 bg-slate-50 z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">Acoes</th>
@@ -968,6 +973,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 const company = getCompany(p);
                 const mediatorPartner = getMediatorPartner(p);
                 const internalResponsible = getInternalResponsible(p);
+                const communicationType = p.communicationType || '';
                 return (
                   <tr key={p.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-xs truncate" title={policyHolder || '-'}>{policyHolder || '-'}</td>
@@ -980,6 +986,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                     <td className="px-4 py-3 text-xs font-bold text-slate-700 whitespace-nowrap">{internalResponsible || '-'}</td>
                     <td className="px-4 py-3 text-xs whitespace-nowrap">{p.renewalDate ? new Date(p.renewalDate).toLocaleDateString('pt-PT') : '-'}</td>
                     <td className="px-4 py-3 text-xs truncate" title={branch || '-'}>{branch || '-'}</td>
+                    <td className="px-4 py-3 text-xs truncate" title={communicationType || '-'}>{communicationType || '-'}</td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${p.status === 'Aceite' ? 'bg-green-100 text-green-700' : p.status === 'Cancelada' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
                         {p.status === 'Aceite' ? <FileCheck size={14}/> : <FileClock size={14}/>}
@@ -1003,7 +1010,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               })}
               {sortedPolicies.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="text-center italic text-slate-400 py-10">Nenhuma apolice encontrada.</td>
+                  <td colSpan={11} className="text-center italic text-slate-400 py-10">Nenhuma apolice encontrada.</td>
                 </tr>
               )}
             </tbody>

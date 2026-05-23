@@ -677,7 +677,7 @@ export default function App() {
       />
 
       <main className="flex-1 ml-64 p-8">
-        <div className="max-w-7xl mx-auto">
+        <div className={`${activeView === 'insurance' ? 'w-full' : 'max-w-7xl mx-auto'}`}>
           {!isPaulaInsuranceOnlyUser && (
             <div className="flex justify-end mb-6 gap-2">
               {!isInstalled && (
