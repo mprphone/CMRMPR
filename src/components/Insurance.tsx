@@ -644,8 +644,8 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     setSortConfig({ key, direction });
   };
 
-  const SortableHeader = ({ children, sortKey }: { children: React.ReactNode, sortKey: SortableKeys }) => (
-    <th className="px-4 py-3 cursor-pointer hover:bg-slate-100" onClick={() => requestSort(sortKey)}>
+  const SortableHeader = ({ children, sortKey, className = '' }: { children: React.ReactNode, sortKey: SortableKeys, className?: string }) => (
+    <th className={`px-4 py-3 cursor-pointer hover:bg-slate-100 ${className}`} onClick={() => requestSort(sortKey)}>
       <div className="flex items-center gap-1">
         {children}
         {sortConfig?.key === sortKey ? (sortConfig.direction === 'ascending' ? <ChevronUp size={14} /> : <ChevronDown size={14} />) : <ChevronUp size={14} className="text-slate-300" />}
@@ -904,37 +904,49 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="p-4 border-b grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
-            <div className="relative">
+        <div className="p-4 border-b flex flex-wrap gap-3">
+            <div className="relative flex-[1_1_260px] min-w-[220px]">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
                 <input type="text" placeholder="Pesquisar tomador, companhia, mediador, responsavel ou apolice..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm" />
             </div>
-            <select value={mediatorPartnerFilter} onChange={e => setMediatorPartnerFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+            <select value={mediatorPartnerFilter} onChange={e => setMediatorPartnerFilter(e.target.value)} className="flex-[1_1_190px] min-w-[180px] px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
                 <option value="all">Todos os Mediadores</option>
                 {uniqueMediatorPartners.map(mediator => <option key={mediator} value={mediator}>{mediator}</option>)}
             </select>
-            <select value={internalResponsibleFilter} onChange={e => setInternalResponsibleFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+            <select value={internalResponsibleFilter} onChange={e => setInternalResponsibleFilter(e.target.value)} className="flex-[1_1_190px] min-w-[180px] px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
                 <option value="all">Todos os Responsaveis</option>
                 {uniqueInternalResponsibles.map(responsible => <option key={responsible} value={responsible}>{responsible}</option>)}
             </select>
-            <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+            <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} className="flex-[1_1_190px] min-w-[180px] px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
                 <option value="all">Todas as Companhias</option>
                 {uniqueCompanies.map(company => <option key={company} value={company}>{company}</option>)}
             </select>
-            <select value={policyStatusFilter} onChange={e => setPolicyStatusFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+            <select value={policyStatusFilter} onChange={e => setPolicyStatusFilter(e.target.value)} className="flex-[1_1_190px] min-w-[180px] px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
                 <option value="all">Todos os Estados da Apolice</option>
                 <option value="Proposta">Proposta</option>
                 <option value="Aceite">Aceite</option>
                 <option value="Cancelada">Cancelada</option>
             </select>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="flex-[1_1_190px] min-w-[180px] px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
                 <option value="all">Com recibo e sem recibo</option>
                 <option value="paid">Com recibo</option>
                 <option value="pending">Sem recibo</option>
             </select>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+          <table className="w-full min-w-[1360px] text-sm text-left table-fixed">
+            <colgroup>
+              <col className="w-[260px]" />
+              <col className="w-[210px]" />
+              <col className="w-[140px]" />
+              <col className="w-[140px]" />
+              <col className="w-[125px]" />
+              <col className="w-[130px]" />
+              <col className="w-[140px]" />
+              <col className="w-[120px]" />
+              <col className="w-[95px]" />
+              <col className="w-[105px]" />
+            </colgroup>
             <thead className="text-xs text-slate-500 uppercase bg-slate-50">
               <tr>
                 <SortableHeader sortKey="policyHolder">Tomador</SortableHeader>
@@ -944,9 +956,9 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 <SortableHeader sortKey="internalResponsible">Responsavel</SortableHeader>
                 <SortableHeader sortKey="renewalDate">Renovacao</SortableHeader>
                 <SortableHeader sortKey="branch">Ramo</SortableHeader>
-                <SortableHeader sortKey="status">Estado</SortableHeader>
+                <SortableHeader sortKey="status" className="text-center">Estado</SortableHeader>
                 <th className="px-4 py-3 text-center">Comissao</th>
-                <th className="px-4 py-3 text-right sticky right-0 bg-slate-50 z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">Acoes</th>
+                <th className="px-4 py-3 text-center sticky right-0 bg-slate-50 z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">Acoes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -958,16 +970,16 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 const internalResponsible = getInternalResponsible(p);
                 return (
                   <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-xs whitespace-nowrap">{policyHolder || '-'}</td>
+                    <td className="px-4 py-3 text-xs truncate" title={policyHolder || '-'}>{policyHolder || '-'}</td>
                     <td className="px-4 py-3">
                       <div className="font-semibold text-slate-800 font-mono text-xs">{p.policyNumber || '-'}</div>
-                      <div className="text-[11px] text-slate-400">{p.clientName || '-'}</div>
+                      <div className="text-[11px] text-slate-400 truncate" title={p.clientName || '-'}>{p.clientName || '-'}</div>
                     </td>
-                    <td className="px-4 py-3 text-xs whitespace-nowrap">{company || '-'}</td>
-                    <td className="px-4 py-3 text-xs whitespace-nowrap">{mediatorPartner || '-'}</td>
+                    <td className="px-4 py-3 text-xs truncate" title={company || '-'}>{company || '-'}</td>
+                    <td className="px-4 py-3 text-xs truncate" title={mediatorPartner || '-'}>{mediatorPartner || '-'}</td>
                     <td className="px-4 py-3 text-xs font-bold text-slate-700 whitespace-nowrap">{internalResponsible || '-'}</td>
-                    <td className="px-4 py-3 text-xs">{p.renewalDate ? new Date(p.renewalDate).toLocaleDateString('pt-PT') : '-'}</td>
-                    <td className="px-4 py-3 text-xs whitespace-nowrap">{branch || '-'}</td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">{p.renewalDate ? new Date(p.renewalDate).toLocaleDateString('pt-PT') : '-'}</td>
+                    <td className="px-4 py-3 text-xs truncate" title={branch || '-'}>{branch || '-'}</td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${p.status === 'Aceite' ? 'bg-green-100 text-green-700' : p.status === 'Cancelada' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
                         {p.status === 'Aceite' ? <FileCheck size={14}/> : <FileClock size={14}/>}
@@ -975,14 +987,16 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                       </span>
                     </td>
                     <td className="px-4 py-3 text-center text-xs font-bold whitespace-nowrap">{Number(p.commissionRate || 0).toFixed(1)}%</td>
-                    <td className="px-4 py-3 text-right sticky right-0 bg-white z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
-                      {p.attachment_url && (
-                        <a href={p.attachment_url} target="_blank" rel="noopener noreferrer" title="Ver Anexo" className="p-2 text-slate-400 hover:text-blue-600 inline-block">
-                          <Paperclip size={14}/>
-                        </a>
-                      )}
-                      <button onClick={() => handleOpenModal(p)} className="p-2 text-slate-400 hover:text-blue-600"><Edit2 size={14}/></button>
-                      <button onClick={() => handleDelete(p.id)} className="p-2 text-slate-400 hover:text-red-600"><Trash2 size={14}/></button>
+                    <td className="px-3 py-3 sticky right-0 bg-white z-10 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
+                      <div className="flex items-center justify-center gap-1">
+                        {p.attachment_url && (
+                          <a href={p.attachment_url} target="_blank" rel="noopener noreferrer" title="Ver Anexo" className="p-2 text-slate-400 hover:text-blue-600 inline-flex">
+                            <Paperclip size={14}/>
+                          </a>
+                        )}
+                        <button type="button" title="Editar" onClick={() => handleOpenModal(p)} className="p-2 text-slate-400 hover:text-blue-600"><Edit2 size={14}/></button>
+                        <button type="button" title="Apagar" onClick={() => handleDelete(p.id)} className="p-2 text-slate-400 hover:text-red-600"><Trash2 size={14}/></button>
+                      </div>
                     </td>
                   </tr>
                 );
