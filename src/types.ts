@@ -229,6 +229,8 @@ export interface InsurancePolicy {
   clientName?: string; // For display
   policyHolder?: string;
   agent?: 'MPR' | 'Paula';
+  mediatorPartner?: 'Finiconde' | 'Neoseguros' | 'Outra' | string;
+  internalResponsible?: 'MPR' | 'Paula';
   policyDate: string;
   renewalDate?: string;
   policyNumber?: string;
@@ -241,12 +243,15 @@ export interface InsurancePolicy {
   netPremiumValue?: number;
   commissionRate: number;
   commissionPaid: boolean;
-  status: 'Proposta' | 'Aceite';
+  hasReceipt?: boolean;
+  status: 'Proposta' | 'Aceite' | 'Cancelada';
   communicationType?: string;
   notes?: string;
   policyTier?: 'Base' | 'Flexível';
   attachment_url?: string;
   documentChecklist?: Record<string, boolean>;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface InsuranceCommissionSettlement {

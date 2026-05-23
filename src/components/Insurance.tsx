@@ -11,7 +11,7 @@ interface InsuranceProps {
   viewerEmail?: string;
 }
 
-type SortableKeys = 'policyHolder' | 'policyNumber' | 'agent' | 'renewalDate' | 'branch' | 'premiumValue' | 'policyTier' | 'netPremiumValue';
+type SortableKeys = 'policyHolder' | 'policyNumber' | 'company' | 'mediatorPartner' | 'internalResponsible' | 'renewalDate' | 'branch' | 'status' | 'premiumValue' | 'netPremiumValue';
 
 interface CommissionPeriodRow {
   key: string;
@@ -42,6 +42,8 @@ interface PaidCommissionHistoryRow {
 const getCompany = (policy: Partial<InsurancePolicy>) => policy.company || policy.insuranceProvider || '';
 const getBranch = (policy: Partial<InsurancePolicy>) => policy.branch || policy.policyType || '';
 const getPolicyHolder = (policy: Partial<InsurancePolicy>) => policy.policyHolder || policy.clientName || '';
+const getMediatorPartner = (policy: Partial<InsurancePolicy>) => policy.mediatorPartner || '';
+const getInternalResponsible = (policy: Partial<InsurancePolicy>) => policy.internalResponsible || policy.agent || '';
 const getTotalPremium = (policy: Partial<InsurancePolicy>) => Number(policy.premiumValue ?? policy.netPremiumValue ?? 0);
 const getNetPremium = (policy: Partial<InsurancePolicy>) => {
   const totalPremium = getTotalPremium(policy);
@@ -52,7 +54,8 @@ const getNetPremium = (policy: Partial<InsurancePolicy>) => {
   return netPremiumRaw;
 };
 
-const COMPANY_OPTIONS = ['Finiconde', 'Nepseguros', 'Outros'] as const;
+const MEDIATOR_PARTNER_OPTIONS = ['Finiconde', 'Neoseguros', 'Outra'] as const;
+const COMPANY_OPTIONS = ['Allianz', 'Tranquilidade', 'Fidelidade', 'Liberty', 'Zurich', 'Generali', 'Ageas', 'Lusitania', 'Outra'] as const;
 const BRANCH_OPTIONS = [
   'Automovel',
   'Ac Trabalho',
@@ -143,16 +146,20 @@ const getSortValue = (policy: InsurancePolicy, sortKey: SortableKeys): string | 
       return getPolicyHolder(policy);
     case 'policyNumber':
       return policy.policyNumber || '';
-    case 'agent':
-      return policy.agent || '';
+    case 'company':
+      return getCompany(policy);
+    case 'mediatorPartner':
+      return getMediatorPartner(policy);
+    case 'internalResponsible':
+      return getInternalResponsible(policy);
     case 'renewalDate':
       return policy.renewalDate || '';
     case 'branch':
       return getBranch(policy);
+    case 'status':
+      return policy.status || '';
     case 'premiumValue':
       return getTotalPremium(policy);
-    case 'policyTier':
-      return policy.policyTier || '';
     case 'netPremiumValue':
       return getNetPremium(policy);
     default:
@@ -166,11 +173,14 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
   const [isSaving, setIsSaving] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [customCompany, setCustomCompany] = useState('');
+  const [customMediatorPartner, setCustomMediatorPartner] = useState('');
   const [customBranch, setCustomBranch] = useState('');
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [companyFilter, setCompanyFilter] = useState('all');
+  const [mediatorPartnerFilter, setMediatorPartnerFilter] = useState('all');
+  const [internalResponsibleFilter, setInternalResponsibleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [policyStatusFilter, setPolicyStatusFilter] = useState('all');
   const [sortConfig, setSortConfig] = useState<{ key: SortableKeys; direction: 'ascending' | 'descending' }>({ key: 'renewalDate', direction: 'ascending' });
@@ -195,13 +205,23 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
 
   const visiblePolicies = useMemo(() => {
     if (!forcedAgent) return policies;
-    return policies.filter(policy => policy.agent === forcedAgent);
+    return policies.filter(policy => getInternalResponsible(policy) === forcedAgent);
   }, [policies, forcedAgent]);
   const visiblePolicyById = useMemo(() => new Map(visiblePolicies.map(policy => [policy.id, policy])), [visiblePolicies]);
 
   const uniqueCompanies = useMemo(() => {
     const companies = new Set(visiblePolicies.map(policy => getCompany(policy)).filter(Boolean));
     return Array.from(companies) as string[];
+  }, [visiblePolicies]);
+
+  const uniqueMediatorPartners = useMemo(() => {
+    const mediators = new Set(visiblePolicies.map(policy => getMediatorPartner(policy)).filter(Boolean));
+    return Array.from(mediators) as string[];
+  }, [visiblePolicies]);
+
+  const uniqueInternalResponsibles = useMemo(() => {
+    const responsibles = new Set(visiblePolicies.map(policy => getInternalResponsible(policy)).filter(Boolean));
+    return Array.from(responsibles) as string[];
   }, [visiblePolicies]);
 
   const sortedClients = useMemo(() => {
@@ -217,17 +237,20 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
         p.policyNumber?.toLowerCase().includes(search) ||
         getCompany(p).toLowerCase().includes(search) ||
         getBranch(p).toLowerCase().includes(search) ||
-        (p.agent || '').toLowerCase().includes(search);
+        getMediatorPartner(p).toLowerCase().includes(search) ||
+        getInternalResponsible(p).toLowerCase().includes(search);
       
       const companyMatch = companyFilter === 'all' || getCompany(p) === companyFilter;
+      const mediatorPartnerMatch = mediatorPartnerFilter === 'all' || getMediatorPartner(p) === mediatorPartnerFilter;
+      const internalResponsibleMatch = internalResponsibleFilter === 'all' || getInternalResponsible(p) === internalResponsibleFilter;
       
-      const statusMatch = !canViewCommissionData || statusFilter === 'all' ||
-        (statusFilter === 'paid' && p.commissionPaid) ||
-        (statusFilter === 'pending' && !p.commissionPaid);
+      const statusMatch = statusFilter === 'all' ||
+        (statusFilter === 'paid' && p.hasReceipt) ||
+        (statusFilter === 'pending' && !p.hasReceipt);
       
       const policyStatusMatch = policyStatusFilter === 'all' || p.status === policyStatusFilter;
 
-      return searchMatch && companyMatch && statusMatch && policyStatusMatch;
+      return searchMatch && companyMatch && mediatorPartnerMatch && internalResponsibleMatch && statusMatch && policyStatusMatch;
     });
 
     if (sortConfig !== null) {
@@ -244,7 +267,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
       });
     }
     return filtered;
-  }, [visiblePolicies, searchTerm, companyFilter, statusFilter, policyStatusFilter, sortConfig, canViewCommissionData]);
+  }, [visiblePolicies, searchTerm, companyFilter, mediatorPartnerFilter, internalResponsibleFilter, statusFilter, policyStatusFilter, sortConfig, canViewCommissionData]);
 
   const totals = useMemo(() => {
     let pending = 0;
@@ -355,17 +378,22 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
 
   const handleOpenModal = (policy?: InsurancePolicy) => {
     const companyValue = policy ? getCompany(policy) : '';
+    const mediatorPartnerValue = policy ? getMediatorPartner(policy) : '';
     const branchValue = policy ? getBranch(policy) : '';
-    const companyOption = isInOptions(companyValue, COMPANY_OPTIONS) ? companyValue : (companyValue ? 'Outros' : '');
+    const companyOption = isInOptions(companyValue, COMPANY_OPTIONS) ? companyValue : (companyValue ? 'Outra' : '');
+    const mediatorPartnerOption = isInOptions(mediatorPartnerValue, MEDIATOR_PARTNER_OPTIONS) ? mediatorPartnerValue : (mediatorPartnerValue ? 'Outra' : '');
     const branchOption = isInOptions(branchValue, BRANCH_OPTIONS) ? branchValue : (branchValue ? 'Outros' : '');
 
-    setCustomCompany(companyOption === 'Outros' && companyValue !== 'Outros' ? companyValue : '');
+    setCustomCompany(companyOption === 'Outra' && companyValue !== 'Outra' ? companyValue : '');
+    setCustomMediatorPartner(mediatorPartnerOption === 'Outra' && mediatorPartnerValue !== 'Outra' ? mediatorPartnerValue : '');
     setCustomBranch(branchOption === 'Outros' && branchValue !== 'Outros' ? branchValue : '');
 
     setEditingPolicy(policy ? {
       ...policy,
       policyHolder: getPolicyHolder(policy),
-      agent: forcedAgent || policy.agent || 'MPR',
+      agent: forcedAgent || getInternalResponsible(policy) || 'MPR',
+      internalResponsible: forcedAgent || getInternalResponsible(policy) || 'MPR',
+      mediatorPartner: mediatorPartnerOption,
       renewalDate: policy.renewalDate || policy.policyDate,
       company: companyOption,
       branch: branchOption,
@@ -381,14 +409,17 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
       status: 'Proposta',
       policyTier: 'Base',
       commissionPaid: false,
+      hasReceipt: false,
       commissionRate: 10,
       premiumValue: 0,
       netPremiumValue: 0,
       agent: forcedAgent || 'MPR',
+      internalResponsible: forcedAgent || 'MPR',
+      mediatorPartner: 'Finiconde',
       policyHolder: '',
-      company: 'Finiconde',
+      company: 'Allianz',
       branch: 'Automovel',
-      insuranceProvider: 'Finiconde',
+      insuranceProvider: 'Allianz',
       policyType: 'Automovel',
       notes: '',
     });
@@ -403,20 +434,24 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     }
 
     const resolvedCompany =
-      editingPolicy.company === 'Outros'
-        ? ((customCompany || '').trim() || 'Outros')
+      editingPolicy.company === 'Outra'
+        ? ((customCompany || '').trim() || 'Outra')
         : (editingPolicy.company || '').trim();
+    const resolvedMediatorPartner =
+      editingPolicy.mediatorPartner === 'Outra'
+        ? ((customMediatorPartner || '').trim() || 'Outra')
+        : (editingPolicy.mediatorPartner || '').trim();
     const resolvedBranch =
       editingPolicy.branch === 'Outros'
         ? ((customBranch || '').trim() || 'Outros')
         : (editingPolicy.branch || '').trim();
 
-    if (!resolvedCompany || !resolvedBranch) {
-      alert('Companhia e Ramo sao obrigatorios.');
+    if (!resolvedCompany || !resolvedMediatorPartner || !resolvedBranch) {
+      alert('Mediador/parceiro, Companhia e Ramo sao obrigatorios.');
       return;
     }
 
-    const resolvedAgent = forcedAgent || editingPolicy.agent || 'MPR';
+    const resolvedAgent = forcedAgent || editingPolicy.internalResponsible || editingPolicy.agent || 'MPR';
     const isPaulaAgent = resolvedAgent === 'Paula';
     if (!isPaulaAgent && !editingPolicy.clientId) {
       alert('Cliente, Companhia e Ramo sao obrigatorios.');
@@ -424,7 +459,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     }
 
     if (isPaulaAgent && !editingPolicy.clientId && !(editingPolicy.policyHolder || '').trim()) {
-      alert('Quando o agente e Paula e nao ha cliente, o Tomador e obrigatorio.');
+      alert('Quando a responsavel interna e Paula e nao ha cliente, o Tomador e obrigatorio.');
       return;
     }
 
@@ -445,6 +480,8 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
         ...editingPolicy,
         id: policyId,
         agent: resolvedAgent,
+        internalResponsible: resolvedAgent,
+        mediatorPartner: resolvedMediatorPartner,
         attachment_url: attachmentUrl,
         policyHolder: (editingPolicy.policyHolder || '').trim() || selectedClientName,
         renewalDate: editingPolicy.renewalDate || editingPolicy.policyDate,
@@ -608,7 +645,12 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
   const selectedCompanyOption = editingPolicy
     ? (isInOptions(editingPolicy.company, COMPANY_OPTIONS)
         ? (editingPolicy.company || '')
-        : (editingPolicy.company ? 'Outros' : ''))
+        : (editingPolicy.company ? 'Outra' : ''))
+    : '';
+  const selectedMediatorPartnerOption = editingPolicy
+    ? (isInOptions(editingPolicy.mediatorPartner, MEDIATOR_PARTNER_OPTIONS)
+        ? (editingPolicy.mediatorPartner || '')
+        : (editingPolicy.mediatorPartner ? 'Outra' : ''))
     : '';
   const selectedBranchOption = editingPolicy
     ? (isInOptions(editingPolicy.branch, BRANCH_OPTIONS)
@@ -621,7 +663,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Gestão de Seguros</h2>
-          <p className="text-sm text-slate-500">Com tomador, agente, renovação, companhia, ramo e prémio líquido.</p>
+          <p className="text-sm text-slate-500">Com tomador, companhia, mediador, responsavel interno, renovacao, ramo e comissao.</p>
         </div>
         <button onClick={() => handleOpenModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
           <Plus size={18}/> Adicionar Seguro
@@ -851,11 +893,19 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className={`p-4 border-b grid grid-cols-1 ${canViewCommissionData ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-3`}>
+        <div className="p-4 border-b grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
-                <input type="text" placeholder="Pesquisar cliente, tomador, companhia, ramo ou apolice..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm" />
+                <input type="text" placeholder="Pesquisar tomador, companhia, mediador, responsavel ou apolice..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm" />
             </div>
+            <select value={mediatorPartnerFilter} onChange={e => setMediatorPartnerFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+                <option value="all">Todos os Mediadores</option>
+                {uniqueMediatorPartners.map(mediator => <option key={mediator} value={mediator}>{mediator}</option>)}
+            </select>
+            <select value={internalResponsibleFilter} onChange={e => setInternalResponsibleFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+                <option value="all">Todos os Responsaveis</option>
+                {uniqueInternalResponsibles.map(responsible => <option key={responsible} value={responsible}>{responsible}</option>)}
+            </select>
             <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
                 <option value="all">Todas as Companhias</option>
                 {uniqueCompanies.map(company => <option key={company} value={company}>{company}</option>)}
@@ -864,14 +914,13 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 <option value="all">Todos os Estados da Apolice</option>
                 <option value="Proposta">Proposta</option>
                 <option value="Aceite">Aceite</option>
+                <option value="Cancelada">Cancelada</option>
             </select>
-            {canViewCommissionData && (
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
-                  <option value="all">Todos os Estados de Comissao</option>
-                  <option value="paid">Paga</option>
-                  <option value="pending">Pendente</option>
-              </select>
-            )}
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white">
+                <option value="all">Com recibo e sem recibo</option>
+                <option value="paid">Com recibo</option>
+                <option value="pending">Sem recibo</option>
+            </select>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
@@ -879,14 +928,13 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               <tr>
                 <SortableHeader sortKey="policyHolder">Tomador</SortableHeader>
                 <SortableHeader sortKey="policyNumber">Apolice</SortableHeader>
-                <SortableHeader sortKey="agent">Agente</SortableHeader>
+                <SortableHeader sortKey="company">Companhia</SortableHeader>
+                <SortableHeader sortKey="mediatorPartner">Mediador</SortableHeader>
+                <SortableHeader sortKey="internalResponsible">Responsavel</SortableHeader>
                 <SortableHeader sortKey="renewalDate">Renovacao</SortableHeader>
                 <SortableHeader sortKey="branch">Ramo</SortableHeader>
-                <SortableHeader sortKey="premiumValue">Premio Total</SortableHeader>
-                <SortableHeader sortKey="policyTier">Tipo</SortableHeader>
-                {canViewCommissionData && <SortableHeader sortKey="netPremiumValue">Premio Liquido</SortableHeader>}
-                {canViewCommissionData && <th className="px-4 py-3 text-center">Comissao</th>}
-                <th className="px-4 py-3 text-center">Estado</th>
+                <SortableHeader sortKey="status">Estado</SortableHeader>
+                <th className="px-4 py-3 text-center">Comissao</th>
                 <th className="px-4 py-3 text-right">Acoes</th>
               </tr>
             </thead>
@@ -894,33 +942,28 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               {sortedPolicies.map(p => {
                 const branch = getBranch(p);
                 const policyHolder = getPolicyHolder(p);
-                const totalPremium = getTotalPremium(p);
-                const netPremium = getNetPremium(p);
-                const policyType = p.policyTier || '-';
+                const company = getCompany(p);
+                const mediatorPartner = getMediatorPartner(p);
+                const internalResponsible = getInternalResponsible(p);
                 return (
                   <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-xs">{policyHolder || '-'}</td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">{policyHolder || '-'}</td>
                     <td className="px-4 py-3">
                       <div className="font-semibold text-slate-800 font-mono text-xs">{p.policyNumber || '-'}</div>
                       <div className="text-[11px] text-slate-400">{p.clientName || '-'}</div>
                     </td>
-                    <td className="px-4 py-3 text-xs font-bold text-slate-700">{p.agent || '-'}</td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">{company || '-'}</td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">{mediatorPartner || '-'}</td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-700 whitespace-nowrap">{internalResponsible || '-'}</td>
                     <td className="px-4 py-3 text-xs">{p.renewalDate ? new Date(p.renewalDate).toLocaleDateString('pt-PT') : '-'}</td>
-                    <td className="px-4 py-3 text-xs">{branch || '-'}</td>
-                    <td className="px-4 py-3 text-right font-medium">{totalPremium.toFixed(2)}{'\u20AC'}</td>
-                    <td className="px-4 py-3 text-xs">{policyType}</td>
-                    {canViewCommissionData && (
-                      <td className="px-4 py-3 text-right font-bold text-slate-800">{netPremium.toFixed(2)}{'\u20AC'}</td>
-                    )}
-                    {canViewCommissionData && (
-                      <td className="px-4 py-3 text-center text-xs font-bold">{Number(p.commissionRate || 0).toFixed(1)}%</td>
-                    )}
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">{branch || '-'}</td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${p.status === 'Aceite' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                      <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${p.status === 'Aceite' ? 'bg-green-100 text-green-700' : p.status === 'Cancelada' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
                         {p.status === 'Aceite' ? <FileCheck size={14}/> : <FileClock size={14}/>}
                         {p.status}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-center text-xs font-bold">{Number(p.commissionRate || 0).toFixed(1)}%</td>
                     <td className="px-4 py-3 text-right">
                       {p.attachment_url && (
                         <a href={p.attachment_url} target="_blank" rel="noopener noreferrer" title="Ver Anexo" className="p-2 text-slate-400 hover:text-blue-600 inline-block">
@@ -935,7 +978,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               })}
               {sortedPolicies.length === 0 && (
                 <tr>
-                  <td colSpan={canViewCommissionData ? 11 : 9} className="text-center italic text-slate-400 py-10">Nenhuma apolice encontrada.</td>
+                  <td colSpan={10} className="text-center italic text-slate-400 py-10">Nenhuma apolice encontrada.</td>
                 </tr>
               )}
             </tbody>
@@ -955,7 +998,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">
-                  {(forcedAgent || editingPolicy.agent) === 'Paula' ? 'Cliente' : 'Cliente*'}
+                  {(forcedAgent || editingPolicy.internalResponsible || editingPolicy.agent) === 'Paula' ? 'Cliente' : 'Cliente*'}
                 </label>
                 <select value={editingPolicy.clientId || ''} onChange={e => {
                   const clientId = e.target.value || undefined;
@@ -970,7 +1013,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                   setEditingPolicy(nextPolicy);
                 }} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                   <option value="">
-                    {(forcedAgent || editingPolicy.agent) === 'Paula' ? 'Sem cliente (tomador manual)' : 'Selecione um cliente'}
+                    {(forcedAgent || editingPolicy.internalResponsible || editingPolicy.agent) === 'Paula' ? 'Sem cliente (tomador manual)' : 'Selecione um cliente'}
                   </option>
                   {sortedClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
@@ -986,11 +1029,11 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Agente*</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Responsavel interno*</label>
                 {forcedAgent ? (
                   <input type="text" value={forcedAgent} readOnly className="w-full px-3 py-2 border rounded-lg text-sm bg-slate-100 text-slate-600" />
                 ) : (
-                  <select value={editingPolicy.agent || 'MPR'} onChange={e => setEditingPolicy({...editingPolicy, agent: e.target.value as InsurancePolicy['agent']})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                  <select value={editingPolicy.internalResponsible || editingPolicy.agent || 'MPR'} onChange={e => setEditingPolicy({...editingPolicy, agent: e.target.value as InsurancePolicy['agent'], internalResponsible: e.target.value as InsurancePolicy['internalResponsible']})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                     <option value="MPR">MPR</option>
                     <option value="Paula">Paula</option>
                   </select>
@@ -1009,6 +1052,33 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 <input type="text" value={editingPolicy.policyNumber || ''} onChange={e => setEditingPolicy({...editingPolicy, policyNumber: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
               </div>
               <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Mediador / Parceiro*</label>
+                <select
+                  required
+                  value={selectedMediatorPartnerOption}
+                  onChange={e => {
+                    const value = e.target.value;
+                    setEditingPolicy({ ...editingPolicy, mediatorPartner: value });
+                    if (value !== 'Outra') setCustomMediatorPartner('');
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                >
+                  <option value="">Selecione o mediador</option>
+                  {MEDIATOR_PARTNER_OPTIONS.map(mediator => (
+                    <option key={mediator} value={mediator}>{mediator}</option>
+                  ))}
+                </select>
+                {selectedMediatorPartnerOption === 'Outra' && (
+                  <input
+                    type="text"
+                    value={customMediatorPartner}
+                    onChange={e => setCustomMediatorPartner(e.target.value)}
+                    className="w-full mt-2 px-3 py-2 border rounded-lg text-sm"
+                    placeholder="Escreva o mediador"
+                  />
+                )}
+              </div>
+              <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Companhia*</label>
                 <select
                   required
@@ -1016,7 +1086,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                   onChange={e => {
                     const value = e.target.value;
                     setEditingPolicy({ ...editingPolicy, company: value, insuranceProvider: value });
-                    if (value !== 'Outros') setCustomCompany('');
+                    if (value !== 'Outra') setCustomCompany('');
                   }}
                   className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
                 >
@@ -1025,7 +1095,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                     <option key={company} value={company}>{company}</option>
                   ))}
                 </select>
-                {selectedCompanyOption === 'Outros' && (
+                {selectedCompanyOption === 'Outra' && (
                   <input
                     type="text"
                     value={customCompany}
@@ -1076,6 +1146,7 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                 <select required value={editingPolicy.status || 'Proposta'} onChange={e => setEditingPolicy({...editingPolicy, status: e.target.value as any})} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
                   <option value="Proposta">Proposta</option>
                   <option value="Aceite">Aceite</option>
+                  <option value="Cancelada">Cancelada</option>
                 </select>
               </div>
               <div className="md:col-span-2">
@@ -1105,6 +1176,15 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                   <label className="block text-xs font-bold text-slate-500 mb-1">Taxa de Comissão (%)</label>
                   <input type="number" step="0.1" value={editingPolicy.commissionRate} onChange={e => setEditingPolicy({...editingPolicy, commissionRate: parseFloat(e.target.value) || 0})} className="w-full px-3 py-2 border rounded-lg text-sm" />
                 </div>
+                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700 pt-6">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editingPolicy.hasReceipt)}
+                    onChange={e => setEditingPolicy({ ...editingPolicy, hasReceipt: e.target.checked })}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  Com recibo
+                </label>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-xs font-bold text-slate-500 mb-1">Tipo de Comunicação</label>
