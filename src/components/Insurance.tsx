@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { InsurancePolicy, Client } from '../types';
 import { insuranceService } from '../services';
-import { Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, FileCheck, FileClock, Paperclip, ChevronUp, ChevronDown, PieChart } from 'lucide-react';
+import { Plus, X, Save, RefreshCcw, Trash2, Edit2, Search, FileCheck, FileClock, Paperclip, ChevronUp, ChevronDown, PieChart, Printer } from 'lucide-react';
 
 interface InsuranceProps {
   policies: InsurancePolicy[];
@@ -21,7 +21,11 @@ interface CommissionPeriodRow {
   policyHolder: string;
   policyNumber: string;
   company: string;
+  mediatorPartner: string;
+  internalResponsible: string;
   paymentFrequency: InsurancePolicy['paymentFrequency'];
+  netPremium: number;
+  commissionRate: number;
   amount: number;
   isPaid: boolean;
 }
@@ -64,6 +68,23 @@ const getNetPremium = (policy: Partial<InsurancePolicy>) => {
   }
   return netPremiumRaw;
 };
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(Number(value || 0));
+
+const formatDate = (value?: string) => {
+  if (!value) return '-';
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString('pt-PT');
+};
+
+const escapeHtml = (value: unknown) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 
 const MEDIATOR_PARTNER_OPTIONS = ['Finiconde', 'Neoseguros', 'Outra'] as const;
 const COMPANY_OPTIONS = ['Allianz', 'Tranquilidade', 'Fidelidade', 'Liberty', 'Zurich', 'Generali', 'Ageas', 'Lusitania', 'Outra'] as const;
@@ -333,6 +354,16 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     const selected = selectedCommissionRows.reduce((sum, row) => sum + row.amount, 0);
     return { pending, paid, selected };
   }, [pendingCommissionRows, commissionRows, selectedCommissionRows]);
+  const commissionTotalsByResponsible = useMemo(() => {
+    return commissionRows.reduce<Record<string, { count: number; pending: number; selected: number }>>((acc, row) => {
+      const responsible = row.internalResponsible || 'Sem responsavel';
+      if (!acc[responsible]) acc[responsible] = { count: 0, pending: 0, selected: 0 };
+      acc[responsible].count += 1;
+      if (!row.isPaid) acc[responsible].pending += row.amount;
+      if (selectedCommissionRowKeys.includes(row.key) && !row.isPaid) acc[responsible].selected += row.amount;
+      return acc;
+    }, {});
+  }, [commissionRows, selectedCommissionRowKeys]);
   const allPendingSelected = pendingCommissionRows.length > 0 && selectedCommissionRows.length === pendingCommissionRows.length;
   const paidCommissionHistoryTotal = useMemo(
     () => paidCommissionHistoryRows.reduce((sum, row) => sum + row.amount, 0),
@@ -562,7 +593,11 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               policyHolder: getPolicyHolder(policy) || '-',
               policyNumber: policy.policyNumber || '-',
               company: getCompany(policy) || '-',
+              mediatorPartner: getMediatorPartner(policy) || '-',
+              internalResponsible: getInternalResponsible(policy) || '-',
               paymentFrequency: policy.paymentFrequency,
+              netPremium: getNetPremium(policy),
+              commissionRate: Number(policy.commissionRate || 0),
               amount: installmentAmount,
               isPaid: false,
             });
@@ -639,6 +674,167 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     }
   };
 
+  const openPrintableReport = (title: string, subtitle: string, bodyHtml: string) => {
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) {
+      alert('Nao foi possivel abrir o relatorio. Verifique se o bloqueador de pop-ups esta ativo.');
+      return;
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(title)}</title>
+          <style>
+            @page { size: A4 landscape; margin: 12mm; }
+            * { box-sizing: border-box; }
+            body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #0f172a; background: #fff; }
+            header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 14px; }
+            h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
+            .subtitle { margin-top: 4px; color: #475569; font-size: 11px; }
+            .stamp { text-align: right; color: #475569; font-size: 10px; line-height: 1.5; }
+            .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 14px; }
+            .kpi { border: 1px solid #dbe4ee; background: #f8fafc; padding: 8px; border-radius: 8px; }
+            .kpi-label { color: #64748b; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+            .kpi-value { margin-top: 4px; font-size: 15px; font-weight: 800; }
+            table { width: 100%; border-collapse: collapse; font-size: 9px; }
+            th { background: #eaf0f7; color: #334155; text-align: left; font-size: 8px; text-transform: uppercase; padding: 6px; border-bottom: 1px solid #cbd5e1; }
+            td { padding: 6px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+            tr:nth-child(even) td { background: #fbfdff; }
+            .num { text-align: right; white-space: nowrap; }
+            .mono { font-family: "Courier New", monospace; }
+            .badge { display: inline-block; border-radius: 999px; padding: 2px 6px; font-size: 8px; font-weight: 700; background: #dcfce7; color: #166534; }
+            .badge.gray { background: #f1f5f9; color: #475569; }
+            .badge.red { background: #fee2e2; color: #991b1b; }
+            .muted { color: #64748b; font-size: 8px; }
+            footer { margin-top: 12px; color: #64748b; font-size: 9px; }
+            @media print { button { display: none; } body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+          </style>
+        </head>
+        <body>
+          <header>
+            <div>
+              <h1>${escapeHtml(title)}</h1>
+              <div class="subtitle">${escapeHtml(subtitle)}</div>
+            </div>
+            <div class="stamp">
+              MPR Negocios<br/>
+              Gerado em ${new Date().toLocaleString('pt-PT')}
+            </div>
+          </header>
+          ${bodyHtml}
+          <footer>Relatorio gerado a partir da Gestao de Seguros.</footer>
+          <script>
+            window.onload = () => {
+              window.focus();
+              setTimeout(() => window.print(), 250);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const handleExportPoliciesPdf = () => {
+    const acceptedCount = sortedPolicies.filter(policy => policy.status === 'Aceite').length;
+    const proposalCount = sortedPolicies.filter(policy => policy.status === 'Proposta').length;
+    const totalPremium = sortedPolicies.reduce((sum, policy) => sum + getTotalPremium(policy), 0);
+    const netPremium = sortedPolicies.reduce((sum, policy) => sum + getNetPremium(policy), 0);
+    const commissionTotal = sortedPolicies.reduce((sum, policy) => sum + ((getNetPremium(policy) * Number(policy.commissionRate || 0)) / 100), 0);
+    const rowsHtml = sortedPolicies.map(policy => {
+      const statusClass = policy.status === 'Aceite' ? '' : policy.status === 'Cancelada' ? 'red' : 'gray';
+      return `
+        <tr>
+          <td><strong>${escapeHtml(getPolicyHolder(policy) || '-')}</strong><div class="muted">${escapeHtml(policy.clientName || '-')}</div></td>
+          <td class="mono">${escapeHtml(policy.policyNumber || '-')}</td>
+          <td>${escapeHtml(getCompany(policy) || '-')}</td>
+          <td>${escapeHtml(getMediatorPartner(policy) || '-')}</td>
+          <td><strong>${escapeHtml(getInternalResponsible(policy) || '-')}</strong></td>
+          <td>${escapeHtml(getBranch(policy) || '-')}</td>
+          <td>${formatDate(policy.renewalDate || policy.policyDate)}</td>
+          <td>${escapeHtml(policy.paymentFrequency || '-')}</td>
+          <td class="num">${formatCurrency(getTotalPremium(policy))}</td>
+          <td class="num">${formatCurrency(getNetPremium(policy))}</td>
+          <td class="num">${Number(policy.commissionRate || 0).toFixed(2)}%</td>
+          <td><span class="badge ${statusClass}">${escapeHtml(policy.status || '-')}</span></td>
+        </tr>
+      `;
+    }).join('');
+
+    openPrintableReport(
+      'Apolices a gerir',
+      `${sortedPolicies.length} apolices filtradas | ${acceptedCount} aceites | ${proposalCount} propostas`,
+      `
+        <section class="kpis">
+          <div class="kpi"><div class="kpi-label">Apolices</div><div class="kpi-value">${sortedPolicies.length}</div></div>
+          <div class="kpi"><div class="kpi-label">Premios cliente</div><div class="kpi-value">${formatCurrency(totalPremium)}</div></div>
+          <div class="kpi"><div class="kpi-label">Base comissao</div><div class="kpi-value">${formatCurrency(netPremium)}</div></div>
+          <div class="kpi"><div class="kpi-label">Comissao estimada</div><div class="kpi-value">${formatCurrency(commissionTotal)}</div></div>
+        </section>
+        <table>
+          <thead>
+            <tr>
+              <th>Tomador</th><th>Apolice</th><th>Companhia</th><th>Mediador</th><th>Resp.</th><th>Ramo</th><th>Renovacao</th><th>Pag.</th><th class="num">Premio</th><th class="num">Liquido</th><th class="num">Taxa</th><th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml || '<tr><td colspan="12">Sem apolices para listar.</td></tr>'}</tbody>
+        </table>
+      `
+    );
+  };
+
+  const handleExportCommissionPdf = () => {
+    const byResponsibleHtml = Object.entries(commissionTotalsByResponsible)
+      .sort(([a], [b]) => a.localeCompare(b, 'pt-PT', { sensitivity: 'base' }))
+      .map(([responsible, item]) => `
+        <div class="kpi">
+          <div class="kpi-label">${escapeHtml(responsible)} pendente</div>
+          <div class="kpi-value">${formatCurrency(item.pending)}</div>
+          <div class="muted">${item.count} linha(s) | selecionado ${formatCurrency(item.selected)}</div>
+        </div>
+      `).join('');
+    const rowsHtml = commissionRows.map(row => `
+      <tr>
+        <td>${formatDate(row.dueDate)}</td>
+        <td><strong>${escapeHtml(row.clientName)}</strong><div class="muted">${escapeHtml(row.policyHolder)}</div></td>
+        <td class="mono">${escapeHtml(row.policyNumber)}</td>
+        <td>${escapeHtml(row.company)}</td>
+        <td>${escapeHtml(row.mediatorPartner)}</td>
+        <td><strong>${escapeHtml(row.internalResponsible)}</strong></td>
+        <td>${escapeHtml(row.paymentFrequency)}</td>
+        <td class="num">${formatCurrency(row.netPremium)}</td>
+        <td class="num">${row.commissionRate.toFixed(2)}%</td>
+        <td class="num"><strong>${formatCurrency(row.amount)}</strong></td>
+        <td><span class="badge ${row.isPaid ? '' : 'gray'}">${row.isPaid ? 'Pago' : 'Pendente'}</span></td>
+      </tr>
+    `).join('');
+
+    openPrintableReport(
+      'Mapa de comissoes por periodo',
+      `${formatDate(commissionPeriodStart)} a ${formatDate(commissionPeriodEnd)} | ${commissionRows.length} linha(s)`,
+      `
+        <section class="kpis">
+          <div class="kpi"><div class="kpi-label">Pendente</div><div class="kpi-value">${formatCurrency(commissionTotals.pending)}</div></div>
+          <div class="kpi"><div class="kpi-label">Selecionado</div><div class="kpi-value">${formatCurrency(commissionTotals.selected)}</div></div>
+          <div class="kpi"><div class="kpi-label">Recebido no mapa</div><div class="kpi-value">${formatCurrency(commissionTotals.paid)}</div></div>
+          <div class="kpi"><div class="kpi-label">Linhas pendentes</div><div class="kpi-value">${pendingCommissionRows.length}</div></div>
+          ${byResponsibleHtml}
+        </section>
+        <table>
+          <thead>
+            <tr>
+              <th>Liquidacao</th><th>Cliente / Tomador</th><th>Apolice</th><th>Companhia</th><th>Mediador</th><th>Resp.</th><th>Pag.</th><th class="num">Base</th><th class="num">Taxa</th><th class="num">Comissao</th><th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml || '<tr><td colspan="11">Sem comissoes para listar.</td></tr>'}</tbody>
+        </table>
+      `
+    );
+  };
+
   const requestSort = (key: SortableKeys) => {
     let direction: 'ascending' | 'descending' = 'ascending';
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
@@ -679,9 +875,14 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
           <h2 className="text-2xl font-bold text-slate-800">Gestão de Seguros</h2>
           <p className="text-sm text-slate-500">Com tomador, companhia, mediador, responsavel interno, renovacao, ramo e comissao.</p>
         </div>
-        <button onClick={() => handleOpenModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
-          <Plus size={18}/> Adicionar Seguro
-        </button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button onClick={handleExportPoliciesPdf} className="bg-white text-slate-700 border border-slate-200 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-slate-50 font-bold shadow-sm">
+            <Printer size={18}/> PDF apolices
+          </button>
+          <button onClick={() => handleOpenModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
+            <Plus size={18}/> Adicionar Seguro
+          </button>
+        </div>
       </div>
 
       {canViewCommissionData && (
@@ -693,6 +894,14 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
               Gere o período, selecione as comissões recebidas e marque como pagas. As não selecionadas ficam pendentes.
             </p>
           </div>
+          <button
+            onClick={handleExportCommissionPdf}
+            disabled={commissionRows.length === 0}
+            className="bg-white text-slate-700 border border-slate-200 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <Printer size={16} />
+            PDF mapa
+          </button>
           <button
             onClick={handleGenerateCommissionMap}
             disabled={isGeneratingCommissions}
@@ -732,6 +941,20 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
           </div>
         </div>
 
+        {commissionRows.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            {Object.entries(commissionTotalsByResponsible)
+              .sort(([a], [b]) => a.localeCompare(b, 'pt-PT', { sensitivity: 'base' }))
+              .map(([responsible, item]) => (
+                <div key={responsible} className="bg-slate-50 rounded-lg px-3 py-2 border border-slate-100">
+                  <p className="text-[11px] font-bold uppercase text-slate-500">{responsible}</p>
+                  <p className="text-lg font-bold text-slate-800">{item.pending.toFixed(2)}€</p>
+                  <p className="text-[11px] text-slate-500">{item.count} linha(s) | selecionado {item.selected.toFixed(2)}€</p>
+                </div>
+              ))}
+          </div>
+        )}
+
         {commissionRows.length > 0 ? (
           <>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs text-slate-600">
@@ -764,7 +987,10 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                     <th className="px-3 py-2">Cliente / Tomador</th>
                     <th className="px-3 py-2">Apólice</th>
                     <th className="px-3 py-2">Companhia</th>
+                    <th className="px-3 py-2">Resp.</th>
                     <th className="px-3 py-2">Fracionamento</th>
+                    <th className="px-3 py-2 text-right">Base</th>
+                    <th className="px-3 py-2 text-right">Taxa</th>
                     <th className="px-3 py-2 text-right">Comissão</th>
                     <th className="px-3 py-2 text-center">Estado</th>
                   </tr>
@@ -791,7 +1017,10 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
                         </td>
                         <td className="px-3 py-2 text-xs font-mono">{row.policyNumber}</td>
                         <td className="px-3 py-2 text-xs">{row.company}</td>
+                        <td className="px-3 py-2 text-xs font-bold text-slate-700">{row.internalResponsible}</td>
                         <td className="px-3 py-2 text-xs">{row.paymentFrequency}</td>
+                        <td className="px-3 py-2 text-right text-xs">{row.netPremium.toFixed(2)}€</td>
+                        <td className="px-3 py-2 text-right text-xs">{row.commissionRate.toFixed(2)}%</td>
                         <td className="px-3 py-2 text-right font-bold">{row.amount.toFixed(2)}€</td>
                         <td className="px-3 py-2 text-center">
                           <span className={`inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold ${row.isPaid ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
