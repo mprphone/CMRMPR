@@ -369,6 +369,14 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
     () => paidCommissionHistoryRows.reduce((sum, row) => sum + row.amount, 0),
     [paidCommissionHistoryRows]
   );
+  const dashboardTotals = useMemo(() => {
+    const estimatedCommission = totals.pending + totals.paid;
+    return {
+      ...totals,
+      pending: Math.max(estimatedCommission - paidCommissionHistoryTotal, 0),
+      paid: paidCommissionHistoryTotal,
+    };
+  }, [totals, paidCommissionHistoryTotal]);
 
   const loadPaidCommissionHistory = async () => {
     setIsLoadingPaidCommissionHistory(true);
@@ -1117,13 +1125,13 @@ const Insurance: React.FC<InsuranceProps> = ({ policies, setPolicies, clients, f
         {canViewCommissionData && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
             <p className="text-sm font-medium text-amber-600">Comissoes Pendentes</p>
-            <h3 className="text-2xl font-bold text-slate-800 mt-1">{totals.pending.toFixed(2)}{'\u20AC'}</h3>
+            <h3 className="text-2xl font-bold text-slate-800 mt-1">{dashboardTotals.pending.toFixed(2)}{'\u20AC'}</h3>
           </div>
         )}
         {canViewCommissionData && (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
             <p className="text-sm font-medium text-green-600">Comissoes Recebidas (Total)</p>
-            <h3 className="text-2xl font-bold text-slate-800 mt-1">{totals.paid.toFixed(2)}{'\u20AC'}</h3>
+            <h3 className="text-2xl font-bold text-slate-800 mt-1">{dashboardTotals.paid.toFixed(2)}{'\u20AC'}</h3>
           </div>
         )}
         <div onClick={() => setIsQuarterlyModalOpen(true)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:bg-slate-50">
