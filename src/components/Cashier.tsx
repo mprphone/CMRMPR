@@ -12,6 +12,7 @@ import CashierHistory from './cashier/CashierHistory';
 import PlanModal from './cashier/PlanModal';
 import ExpenseModal from './cashier/ExpenseModal';
 import CloseRegisterModal, { CloseRegisterSummary } from './cashier/CloseRegisterModal';
+import ClientPaymentHistoryModal from './cashier/ClientPaymentHistoryModal';
 import ToastContainer from './ui/ToastContainer';
 import ConfirmModal from './ui/ConfirmModal';
 import InputModal from './ui/InputModal';
@@ -49,6 +50,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const { toast, toasts, dismiss } = useToast();
   const { confirm, confirmState, handleConfirmClose } = useConfirm();
   const { prompt, inputModalState, inputModalValue, setInputModalValue, handleInputModalClose } = useInputModal();
+  const [historyClient, setHistoryClient] = useState<Client | null>(null);
   const [closeRegisterSummary, setCloseRegisterSummary] = useState<CloseRegisterSummary | null>(null);
   const [closeRegisterPayments, setCloseRegisterPayments] = useState<CashPayment[]>([]);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -787,7 +789,13 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                     <td className="px-4 py-2">
                       <div>
                         <div>
-                          <p className="font-bold text-slate-700">{client.name}</p>
+                          <button
+                            type="button"
+                            onClick={() => setHistoryClient(client)}
+                            className="font-bold text-slate-700 hover:text-blue-600 hover:underline text-left"
+                          >
+                            {client.name}
+                          </button>
                           {clientPlan ? (
                             <p className="text-[11px] text-slate-500">
                               Acordo ate {months[clientPlan.paidUntilMonth - 1]}/{clientPlan.year} | Mensal {clientPlan.monthlyAmount.toFixed(2)} EUR | Divida {(debtInfo?.debt || 0).toFixed(2)} EUR
@@ -1070,6 +1078,17 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         summary={closeRegisterSummary}
         onConfirm={doCloseRegister}
         onCancel={() => setCloseRegisterSummary(null)}
+      />
+
+      <ClientPaymentHistoryModal
+        client={historyClient}
+        cashOperations={cashOperations}
+        onClose={() => setHistoryClient(null)}
+        onSelectReport={(operation) => {
+          setHistoryClient(null);
+          setActiveReport(operation);
+          setView('report');
+        }}
       />
 
       <ConfirmModal state={confirmState} onClose={handleConfirmClose} />
