@@ -145,7 +145,6 @@ export interface GlobalSettings {
   supabaseImportStaffTable?: string;
   supabaseStoreUrl: string;
   supabaseStoreKey: string;
-  resendApiKey?: string;
   fromEmail?: string;
   fromName?: string;
   emailSignature?: string;

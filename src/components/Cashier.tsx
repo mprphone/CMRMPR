@@ -171,7 +171,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     return map;
   }, [cashPayments, pendingChanges, currentYear]);
 
-  const consolidatedPayments = useMemo(() => {
+  const consolidatedPayments = useMemo<Map<string, Partial<CashPayment>>>(() => {
     const map = new Map<string, Partial<CashPayment>>();
     cashPayments.forEach(payment => {
       map.set(`${payment.clientId}-${payment.paymentYear}-${payment.paymentMonth}`, payment);
@@ -479,13 +479,13 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
   const getNextAgreementPaymentMonth = (clientId: string) => {
     const usedAgreementMonths = Array.from(consolidatedPayments.values())
-      .filter(payment =>
+      .filter((payment: Partial<CashPayment>) =>
         payment.clientId === clientId &&
         payment.paymentYear === currentYear &&
         payment.amountPaid !== -1 &&
         isAgreementPaymentMonth(payment.paymentMonth)
       )
-      .map(payment => Number(payment.paymentMonth || 0));
+      .map((payment: Partial<CashPayment>) => Number(payment.paymentMonth || 0));
 
     const latestAgreementMonth = usedAgreementMonths.length > 0
       ? Math.max(...usedAgreementMonths)
@@ -559,8 +559,8 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   const handleSaveChanges = useCallback(async (silent = false): Promise<CashPayment[] | null> => {
     if (pendingChanges.size === 0) return null;
     setIsSaving(true);
-    const toDelete = Array.from(pendingChanges.values()).filter(p => p.amountPaid === -1).map(p => p.id!);
-    const toUpsert = Array.from(pendingChanges.values()).filter(p => p.amountPaid !== -1);
+    const toDelete = Array.from<Partial<CashPayment>>(pendingChanges.values()).filter(p => p.amountPaid === -1).map(p => p.id!);
+    const toUpsert = Array.from<Partial<CashPayment>>(pendingChanges.values()).filter(p => p.amountPaid !== -1);
 
     try {
       if (toDelete.length > 0) await cashPaymentService.deleteMany(toDelete);
