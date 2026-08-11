@@ -766,7 +766,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
             >
               <Plus size={16} /> Adicionar acordo
             </button>
-            <button onClick={handleSaveChanges} disabled={isSaving || pendingChanges.size === 0} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm disabled:opacity-50">
+            <button onClick={() => handleSaveChanges()} disabled={isSaving || pendingChanges.size === 0} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm disabled:opacity-50">
               {isSaving ? <RefreshCcw size={16} className="animate-spin" /> : <Save size={16} />} Gravar Pagamentos
             </button>
           </div>

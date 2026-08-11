@@ -223,11 +223,12 @@ export const cashOperationService = {
 
       const { data, error } = await storeClient.rpc('create_cash_operation', payload).single();
       if (error) throw error;
+      const row = data as { id: string };
 
       if (sessionExpenseIds.length > 0) {
         const { error: attachError } = await storeClient
           .from('cash_session_expenses')
-          .update({ cash_operation_id: data.id })
+          .update({ cash_operation_id: row.id })
           .in('id', sessionExpenseIds)
           .is('cash_operation_id', null);
 

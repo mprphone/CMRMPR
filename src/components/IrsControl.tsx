@@ -423,7 +423,11 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
   const irsGroup = useMemo(() => groups.find(g => g.name.toLowerCase().includes('irs')), [groups]);
   const clientsById = useMemo(() => new Map(clients.map(client => [client.id, client])), [clients]);
   const clientsByNif = useMemo(
-    () => new Map(clients.map((client) => [normalizeNif(client.nif), client]).filter(([nif]) => Boolean(nif))),
+    () => new Map(
+      clients
+        .map((client): [string, Client] => [normalizeNif(client.nif), client])
+        .filter(([nif]) => Boolean(nif))
+    ),
     [clients]
   );
   const irsGroupClients = useMemo(() => {
@@ -556,7 +560,11 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
       return result;
     }
 
-    const clientsByNifSnapshot = new Map(clients.map((client) => [normalizeNif(client.nif), client]).filter(([nif]) => Boolean(nif)));
+    const clientsByNifSnapshot = new Map(
+      clients
+        .map((client): [string, Client] => [normalizeNif(client.nif), client])
+        .filter(([nif]) => Boolean(nif))
+    );
     const subjectAClient = clientsByNifSnapshot.get(subjectANif);
     if (!subjectAClient) {
       result.errors.push(`Sujeito Passivo A (${subjectANif}) não existe na base de clientes.`);
@@ -856,7 +864,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
               ...parseMaybeJsonArray(importMainRow.fichas_relacionadas_json),
             ]
           : [];
-        const manualRelationRows = (manualRelationsBySourceNif.get(normalizedNif) || []).map((relation) => ({
+        const manualRelationRows: Record<string, unknown>[] = (manualRelationsBySourceNif.get(normalizedNif) || []).map((relation) => ({
           relation: relation.relation,
           customerNif: relation.targetNif,
           relatedClientNif: relation.targetNif,

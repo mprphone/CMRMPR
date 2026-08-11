@@ -11,7 +11,7 @@ import {
 
 interface FeeGroupsProps {
   groups: FeeGroup[];
-  setGroups: (groups: FeeGroup[]) => void;
+  setGroups: React.Dispatch<React.SetStateAction<FeeGroup[]>>;
   clients: Client[];
   setClients: (clients: Client[]) => void;
   onSelectClient: (client: Client) => void;

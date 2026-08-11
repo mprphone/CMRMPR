@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Client, Staff, Task, FeeGroup } from '../types';
 import { clientService, saftDossierService } from '../services';
 import { Search, Plus, X, CloudCheck, RefreshCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -99,6 +99,35 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
     });
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [clients]);
+
+  const buildLocalFallbackPage = useCallback((): { clients: Client[]; total: number } => {
+    const search = searchTerm.trim().toLowerCase();
+    const numericKeys: SortableKeys[] = ['employeeCount', 'documentCount', 'monthlyFee'];
+    const direction = sortConfig.direction === 'ascending' ? 1 : -1;
+
+    const filtered = clients.filter(client => {
+      if (search) {
+        const haystack = `${client.name} ${client.nif} ${client.email} ${client.phone}`.toLowerCase();
+        if (!haystack.includes(search)) return false;
+      }
+      if (statusFilter !== 'all' && client.status !== statusFilter) return false;
+      if (entityTypeFilter !== 'all' && client.entityType !== entityTypeFilter) return false;
+      if (responsibleFilter !== 'all' && client.responsibleStaff !== responsibleFilter) return false;
+      if (groupFilter !== 'all' && selectedGroup && !selectedGroup.clientIds.includes(client.id)) return false;
+      return true;
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      const key = sortConfig.key;
+      if (numericKeys.includes(key)) {
+        return (Number(a[key]) - Number(b[key])) * direction;
+      }
+      return String(a[key] || '').localeCompare(String(b[key] || '')) * direction;
+    });
+
+    const start = (page - 1) * pageSize;
+    return { clients: sorted.slice(start, start + pageSize), total: sorted.length };
+  }, [clients, searchTerm, statusFilter, entityTypeFilter, responsibleFilter, groupFilter, selectedGroup, sortConfig, page, pageSize]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

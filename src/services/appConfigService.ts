@@ -23,6 +23,16 @@ export interface TaskCatalogSaveResult extends VersionedTaskCatalog {
 
 const toIsoStringOrNull = (value: string | null | undefined): string | null => value || null;
 
+interface SaveGlobalSettingsRpcRow {
+  conflict: boolean;
+  value: Partial<GlobalSettings>;
+  updated_at: string | null;
+}
+
+interface ReplaceTasksRpcRow {
+  conflict: boolean;
+}
+
 export const appConfigService = {
   async getValueByKey<T = unknown>(key: string): Promise<T | null> {
     const storeClient = ensureStoreClient();
@@ -83,10 +93,11 @@ export const appConfigService = {
         .single();
 
       if (error) throw error;
+      const row = data as SaveGlobalSettingsRpcRow;
       return {
-        conflict: Boolean(data.conflict),
-        value: (data.value as Partial<GlobalSettings>) || {},
-        updatedAt: toIsoStringOrNull(data.updated_at),
+        conflict: Boolean(row.conflict),
+        value: row.value || {},
+        updatedAt: toIsoStringOrNull(row.updated_at),
       };
     } catch (err: any) {
       // Fallback for environments where the new RPC is not deployed yet.
@@ -176,9 +187,10 @@ export const taskCatalogService = {
 
       if (error) throw error;
 
+      const row = data as ReplaceTasksRpcRow;
       const latest = await this.getAllWithVersion();
       return {
-        conflict: Boolean(data.conflict),
+        conflict: Boolean(row.conflict),
         tasks: latest.tasks,
         version: latest.version,
       };

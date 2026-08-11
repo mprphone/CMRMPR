@@ -1,31 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Session } from '@supabase/supabase-js';
 import Sidebar from './components/Sidebar';
-import Dashboard from './components/Dashboard';
-import ClientList from './components/ClientList';
-import ClientDetail from './components/ClientDetail';
-import StaffTeam from './components/StaffTeam';
-import StaffDetail from './components/StaffDetail';
-import Tasks from './components/Tasks';
-import Calculator from './components/Calculator';
-import Settings from './components/Settings';
-import EmailCampaigns from './components/EmailCampaigns';
 import Login from './components/Login';
-import FeeGroups from './components/FeeGroups';
 import { DEFAULT_TASKS, DEFAULT_AREA_COSTS, DEFAULT_TURNOVER_BRACKETS, DEFAULT_STAFF } from './constants';
-import { 
+import {
   Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation
 } from './types';
-import { 
+import {
   clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService, appConfigService, taskCatalogService, APP_CONFIG_GLOBAL_SETTINGS_KEY,
   atomicSyncImportedData
 } from './services';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
-import Insurance from './components/Insurance';
-import WorkSafety from './components/WorkSafety';
-import Cashier from './components/Cashier';
-import IrsControl from './components/IrsControl';
 import { usePwaInstall } from './hooks/usePwaInstall';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const ClientList = lazy(() => import('./components/ClientList'));
+const ClientDetail = lazy(() => import('./components/ClientDetail'));
+const StaffTeam = lazy(() => import('./components/StaffTeam'));
+const StaffDetail = lazy(() => import('./components/StaffDetail'));
+const Tasks = lazy(() => import('./components/Tasks'));
+const Calculator = lazy(() => import('./components/Calculator'));
+const Settings = lazy(() => import('./components/Settings'));
+const EmailCampaigns = lazy(() => import('./components/EmailCampaigns'));
+const FeeGroups = lazy(() => import('./components/FeeGroups'));
+const Insurance = lazy(() => import('./components/Insurance'));
+const WorkSafety = lazy(() => import('./components/WorkSafety'));
+const Cashier = lazy(() => import('./components/Cashier'));
+const IrsControl = lazy(() => import('./components/IrsControl'));
+
+const ViewLoadingFallback = () => (
+  <div className="bg-white border-2 border-dashed border-slate-200 p-12 rounded-3xl text-center">
+    <RefreshCcw className="mx-auto text-blue-500 mb-4 animate-spin" size={40} />
+    <h3 className="text-lg font-bold text-slate-800">A carregar...</h3>
+  </div>
+);
 
 const isMissingAtomicSyncRpcError = (error: unknown) => {
   const err = error as { code?: string; message?: string } | null;
@@ -750,8 +758,9 @@ export default function App() {
             </div>
           )}
 
+          <Suspense fallback={<ViewLoadingFallback />}>
           {!isPaulaInsuranceOnlyUser && selectedClient ? (
-            <ClientDetail 
+            <ClientDetail
               client={selectedClient} 
               onBack={() => setSelectedClient(null)} 
               staff={staff} tasks={tasks} areaCosts={areaCosts}
@@ -862,6 +871,7 @@ export default function App() {
               )}
             </>
           )}
+          </Suspense>
         </div>
       </main>
 
