@@ -499,6 +499,7 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
               <option value="Em Análise">Em Análise</option>
               <option value="Risco">Risco</option>
               <option value="Cancelado">Cancelado</option>
+              <option value="Inativo">Inativo</option>
             </select>
 
             <select value={responsibleFilter} onChange={e => setResponsibleFilter(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium bg-white">
@@ -737,6 +738,7 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
                     <option value="Em Análise">Em Análise</option>
                     <option value="Risco">Risco</option>
                     <option value="Cancelado">Cancelado</option>
+                    <option value="Inativo">Inativo</option>
                   </select>
                 </div>
               </div>

@@ -12,9 +12,11 @@ export const generateNotifications = (
 ): AppNotification[] => {
   const notifications: AppNotification[] = [];
   const today = new Date();
-  
+  // Inactive clients (company ceased activity) shouldn't generate analysis/renewal alerts.
+  const activeClients = clients.filter(client => client.status !== 'Inativo');
+
   // 1. Profitability & Fair Value Alerts
-  clients.forEach(client => {
+  activeClients.forEach(client => {
     const stats = calculateClientProfitability(client, tasks, areaCosts as Record<TaskArea, number>, staff, turnoverBrackets);
     
     // Low Margin
@@ -45,7 +47,7 @@ export const generateNotifications = (
   });
 
   // 2. Contract Renewal Alerts (Next 60 days)
-  clients.forEach(client => {
+  activeClients.forEach(client => {
     const renewalDate = new Date(client.contractRenewalDate);
     const diffTime = renewalDate.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -96,7 +98,7 @@ export const generateNotifications = (
   }
   
   // Specific Task Volume Warning (Simulation)
-  clients.forEach(client => {
+  activeClients.forEach(client => {
     if (client.documentCount > 50 && client.monthlyFee < 300) {
        notifications.push({
         id: `vol-${client.id}`,

@@ -131,15 +131,17 @@ export function calculateStaffStats(
   clients: Client[],
   tasks: Task[]
 ): StaffStats {
-  
+
   let totalMinutesAnnually = 0;
   let totalRevenueAttrib = 0; // Approximate revenue attribution
+  // Inactive clients (company ceased activity) don't count towards staff profitability.
+  const activeClients = clients.filter(c => c.status !== 'Inativo');
   // A client is this staff's responsibility if the ID matches.
   // Also check by name for backward compatibility with older data structures.
-  const staffClients = clients.filter(c => c.responsibleStaff === staff.id || c.responsibleStaff === staff.name);
+  const staffClients = activeClients.filter(c => c.responsibleStaff === staff.id || c.responsibleStaff === staff.name);
   const staffClientsCount = staffClients.length;
 
-  clients.forEach(client => {
+  activeClients.forEach(client => {
     let clientMinutesForThisStaff = 0;
     const isResponsibleManager = client.responsibleStaff === staff.id || client.responsibleStaff === staff.name;
     

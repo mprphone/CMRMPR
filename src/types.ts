@@ -101,7 +101,7 @@ export interface Client {
   saftCollectEnabled?: boolean;
 
   tasks: ClientTaskOverride[];
-  status: 'Ativo' | 'Em Análise' | 'Risco' | 'Cancelado';
+  status: 'Ativo' | 'Em Análise' | 'Risco' | 'Cancelado' | 'Inativo';
   contractRenewalDate: string;
   aiAnalysisCache?: AiAnalysis | null;
 }

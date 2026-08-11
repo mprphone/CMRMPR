@@ -1,6 +1,17 @@
 import { Client } from '../types';
 import { importClient, ensureStoreClient } from './supabaseClient';
 
+const normalizeClientStatus = (rawStatus: unknown): Client['status'] => {
+  const value = String(rawStatus || '').trim().toLowerCase();
+  if (!value) return 'Ativo';
+  if (value.includes('inativ') || value.includes('inactive')) return 'Inativo';
+  if (value === 'cancelado') return 'Cancelado';
+  if (value === 'risco') return 'Risco';
+  if (value === 'em análise' || value === 'em analise') return 'Em Análise';
+  if (value === 'ativo' || value === 'ativa') return 'Ativo';
+  return String(rawStatus) as Client['status'];
+};
+
 const mapDbToClient = (db: any): Client => ({
   ...db,
   id: db.id,
@@ -12,7 +23,7 @@ const mapDbToClient = (db: any): Client => ({
   sector: db.sector || 'Geral',
   entityType: db.entity_type || db.tipo_entidade || 'SOCIEDADE',
   responsibleStaff: db.responsavel_interno_id || db.responsible_staff || db.responsavel || db.Responsavel || db.gestor || db.Gestor || '',
-  status: db.status || db.estado || 'Ativo',
+  status: normalizeClientStatus(db.status || db.estado),
   monthlyFee: Number(db.monthly_fee || 0),
   employeeCount: Number(db.employee_count || 0),
   turnover: Number(db.turnover || 0),

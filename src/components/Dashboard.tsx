@@ -21,8 +21,11 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
     let totalCost = 0;
     let profitable = 0;
     let risk = 0;
-    
-    const clientData = clients.map(c => {
+
+    // Inactive clients (company ceased activity) are excluded from profitability analyses.
+    const activeClients = clients.filter(c => c.status !== 'Inativo');
+
+    const clientData = activeClients.map(c => {
       // Pass the staff list and global cost to calculation
       const analysis = calculateClientProfitability(c, tasks, areaCosts as Record<TaskArea, number>, staff);
       totalRev += analysis.totalAnnualRevenue;
@@ -41,7 +44,7 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
     const bottomClients = clientData.slice(0, 5).reverse();
 
     const staffPerformance = staff
-      .map(s => calculateStaffStats(s, clients, tasks))
+      .map(s => calculateStaffStats(s, activeClients, tasks))
       .sort((a, b) => b.profitability - a.profitability);
 
     return { 
