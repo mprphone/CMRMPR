@@ -236,15 +236,21 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
 
   const syncSaftAvenca = async () => {
     setAvencaError('');
-    setShowAvencaReport(true);
     try {
       const { runId } = await saftAvencaService.trigger();
       const run = await saftAvencaService.getRun(runId);
       setAvencaRun(run);
     } catch (err: any) {
       setAvencaError(err?.message || 'Falha ao iniciar a atualização de avenças no SAFTonline.');
+      setShowAvencaReport(true);
     }
   };
+
+  // Ao abrir o ecrã, verifica se já há uma sincronização em curso ou o
+  // resultado da última — não é preciso ter estado nesta sessão para a ver.
+  useEffect(() => {
+    saftAvencaService.getLastRun().then((run) => { if (run) setAvencaRun(run); }).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (!avencaRun || avencaRun.status !== 'running') return;
@@ -321,8 +327,19 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60"
             >
               <RefreshCcw size={15} className={avencaRun?.status === 'running' ? 'animate-spin' : ''} />
-              {avencaRun?.status === 'running' ? 'A atualizar SAFTonline…' : 'Atualizar Avenças SAFTonline'}
+              Atualizar Avenças SAFTonline
             </button>
+            {avencaRun && (
+              <button
+                type="button"
+                onClick={() => setShowAvencaReport(true)}
+                className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-bold ${avencaRun.status === 'running' ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : avencaRun.status === 'failed' || avencaRun.failed_count > 0 ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}
+              >
+                {avencaRun.status === 'running'
+                  ? <><RefreshCcw size={13} className="animate-spin" /> SAFTonline a decorrer…</>
+                  : <>SAFTonline: {avencaRun.updated_count}/{avencaRun.total} atualizados{avencaRun.failed_count > 0 ? `, ${avencaRun.failed_count} falhas` : ''} · Ver relatório</>}
+              </button>
+            )}
           </div>
         </div>
         {error && <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"><AlertTriangle size={14} /> {error}</div>}
