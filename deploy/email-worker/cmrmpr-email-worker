@@ -28,3 +28,16 @@ set -euo pipefail
   --header "x-cron-secret: ${CRON_SECRET}" \
   --data '{"batchSize":50}' \
   "${SUPABASE_FUNCTION_URL%/}/process-email-queue"
+
+# Le a caixa de correio (IMAP) a procura de devolucoes (bounces) desde a
+# ultima verificacao; nao critico, por isso nao aborta o resto do worker.
+/usr/bin/curl \
+  --silent \
+  --show-error \
+  --connect-timeout 10 \
+  --max-time 55 \
+  --request POST \
+  --header "Content-Type: application/json" \
+  --header "x-cron-secret: ${CRON_SECRET}" \
+  --data '{}' \
+  "${SUPABASE_FUNCTION_URL%/}/check-email-bounces" || true

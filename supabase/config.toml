@@ -417,3 +417,6 @@ verify_jwt = false
 
 [functions.monthly-obligations]
 verify_jwt = false
+
+[functions.check-email-bounces]
+verify_jwt = false
