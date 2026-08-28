@@ -533,6 +533,22 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
                      <p className="text-[11px] text-slate-400 mt-1">Registado em {new Date(editedClient.emailMarketingConsentAt).toLocaleString('pt-PT')}.</p>
                    )}
                  </div>
+
+                 <div className="border-t border-slate-100 my-4"></div>
+
+                 <div>
+                   <p className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Globe size={14} className="text-slate-500"/> Região Fiscal (IVA)</p>
+                   <select
+                     value={editedClient.vatRegion || 'continente'}
+                     onChange={e => { setEditedClient({ ...editedClient, vatRegion: e.target.value as Client['vatRegion'] }); setIsDirty(true); }}
+                     className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm bg-white"
+                   >
+                     <option value="continente">Continente (23%)</option>
+                     <option value="madeira">Madeira (22%)</option>
+                     <option value="acores">Açores (18%)</option>
+                   </select>
+                   <p className="text-[11px] text-slate-400 mt-1">Usado para calcular a avença com IVA ao sincronizar com o SAFTonline.</p>
+                 </div>
                </div>
             </div>
 

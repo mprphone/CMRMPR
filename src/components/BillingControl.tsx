@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, CircleDollarSign, Pencil, RefreshCcw, Save, Search, ShieldCheck, X } from 'lucide-react';
 import { Client } from '../types';
 import { PrimaveraBillingLine, PrimaveraPendingBalance, primaveraBillingService } from '../services/primaveraBillingService';
-import { clientService } from '../services';
+import { clientService, saftAvencaService, SaftAvencaSyncRun } from '../services';
 
 type BillingStatus = 'correct' | 'missing' | 'different' | 'duplicate' | 'unconfigured';
 
@@ -84,6 +84,9 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
   const [isSyncingDebt, setIsSyncingDebt] = useState(false);
   const [debtError, setDebtError] = useState('');
   const [debtSyncedAt, setDebtSyncedAt] = useState<string | null>(null);
+  const [avencaRun, setAvencaRun] = useState<SaftAvencaSyncRun | null>(null);
+  const [avencaError, setAvencaError] = useState('');
+  const [showAvencaReport, setShowAvencaReport] = useState(false);
 
   const eligibleClients = useMemo(() => clients.filter(isSubscriptionClient), [clients]);
 
@@ -231,6 +234,31 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
   };
   const isSyncingAny = isSyncing || isSyncingDebt;
 
+  const syncSaftAvenca = async () => {
+    setAvencaError('');
+    setShowAvencaReport(true);
+    try {
+      const { runId } = await saftAvencaService.trigger();
+      const run = await saftAvencaService.getRun(runId);
+      setAvencaRun(run);
+    } catch (err: any) {
+      setAvencaError(err?.message || 'Falha ao iniciar a atualização de avenças no SAFTonline.');
+    }
+  };
+
+  useEffect(() => {
+    if (!avencaRun || avencaRun.status !== 'running') return;
+    const timer = window.setInterval(async () => {
+      try {
+        const run = await saftAvencaService.getRun(avencaRun.id);
+        if (run) setAvencaRun(run);
+      } catch {
+        // silenciosamente tenta novamente no próximo ciclo
+      }
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [avencaRun?.id, avencaRun?.status]);
+
   const openEditModal = (client: Client) => {
     setEditingClient(client);
     setEditForm({ monthlyFee: String(client.monthlyFee ?? 0), entityType: client.entityType || 'SOCIEDADE' });
@@ -286,11 +314,68 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
             <button type="button" onClick={synchronize} disabled={isSyncingAny} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
               <RefreshCcw size={15} className={isSyncingAny ? 'animate-spin' : ''} /> {isSyncingAny ? 'A sincronizar…' : 'Sincronizar Primavera'}
             </button>
+            <button
+              type="button"
+              onClick={() => void syncSaftAvenca()}
+              disabled={Boolean(avencaRun && avencaRun.status === 'running')}
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60"
+            >
+              <RefreshCcw size={15} className={avencaRun?.status === 'running' ? 'animate-spin' : ''} />
+              {avencaRun?.status === 'running' ? 'A atualizar SAFTonline…' : 'Atualizar Avenças SAFTonline'}
+            </button>
           </div>
         </div>
         {error && <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"><AlertTriangle size={14} /> {error}</div>}
         {debtError && <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"><AlertTriangle size={14} /> {debtError}</div>}
       </section>
+
+      {showAvencaReport && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 p-4" role="dialog" aria-modal="true" aria-label="Atualização de avenças SAFTonline">
+          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b p-5">
+              <div>
+                <h3 className="text-lg font-bold">Atualização de Avenças no SAFTonline</h3>
+                <p className="text-sm text-slate-500">Envia a avença (com IVA) de cada cliente elegível para o campo "Avença" no SAFTonline.</p>
+              </div>
+              <button onClick={() => setShowAvencaReport(false)}><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-auto p-5">
+              {avencaError && (
+                <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+                  <AlertTriangle size={14} /> {avencaError}
+                </div>
+              )}
+              {!avencaRun && !avencaError && <p className="text-sm text-slate-400">A iniciar…</p>}
+              {avencaRun && (
+                <>
+                  <div className="mb-4 grid grid-cols-3 gap-3 text-center">
+                    <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-bold uppercase text-slate-400">Total</p><p className="text-2xl font-bold">{avencaRun.total}</p></div>
+                    <div className="rounded-xl bg-emerald-50 p-3"><p className="text-xs font-bold uppercase text-emerald-600">Atualizados</p><p className="text-2xl font-bold text-emerald-700">{avencaRun.updated_count}</p></div>
+                    <div className="rounded-xl bg-red-50 p-3"><p className="text-xs font-bold uppercase text-red-600">Falharam</p><p className="text-2xl font-bold text-red-700">{avencaRun.failed_count}</p></div>
+                  </div>
+                  {avencaRun.status === 'running' && <p className="text-sm text-slate-500">A processar no SAFTonline — isto pode demorar alguns minutos para muitos clientes…</p>}
+                  {avencaRun.status !== 'running' && Array.isArray(avencaRun.details) && avencaRun.details.some((d) => !d.ok) && (
+                    <div className="mt-3">
+                      <p className="mb-2 text-xs font-bold uppercase text-slate-400">Falhas</p>
+                      <div className="divide-y rounded-lg border text-sm">
+                        {avencaRun.details.filter((d) => !d.ok).map((d) => (
+                          <div key={d.nif} className="flex justify-between gap-3 px-3 py-2">
+                            <span className="font-mono text-xs">{d.nif}</span>
+                            <span className="text-right text-xs text-red-700">{d.error}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t p-4">
+              <button onClick={() => setShowAvencaReport(false)} className="rounded-lg bg-slate-900 px-5 py-2 font-bold text-white">Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
         {[

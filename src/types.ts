@@ -107,6 +107,7 @@ export interface Client {
   emailMarketingStatus?: 'unknown' | 'consented' | 'legitimate_interest' | 'opted_out';
   emailMarketingConsentAt?: string | null;
   emailMarketingConsentSource?: string | null;
+  vatRegion?: 'continente' | 'madeira' | 'acores';
   aiAnalysisCache?: AiAnalysis | null;
 }
 

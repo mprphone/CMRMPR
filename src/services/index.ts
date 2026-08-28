@@ -13,3 +13,4 @@ export * from './insuranceService';
 export * from './accessControlService';
 export * from './systemHealthService';
 export * from './primaveraBillingService';
+export * from './saftAvencaService';

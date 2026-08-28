@@ -423,3 +423,9 @@ verify_jwt = false
 
 [functions.email-open-track]
 verify_jwt = false
+
+[functions.sync-saft-avenca]
+verify_jwt = false
+
+[functions.saft-avenca-report]
+verify_jwt = false
