@@ -327,32 +327,34 @@ const FeeGroups: React.FC<FeeGroupsProps> = ({
   if (!selectedGroupId) {
     return (
       <div className="space-y-6 animate-fade-in pb-20">
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800">Grupos de Avenças</h2>
-            <p className="text-sm text-slate-500">Analise a rentabilidade por tipologia de negócio</p>
+        <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h1 className="text-xl font-bold md:text-2xl">Grupos de Avenças</h1>
+              <p className="mt-1 text-xs text-slate-200 md:text-sm">Analise a rentabilidade por tipologia de negócio.</p>
+            </div>
+            <div className="flex gap-2">
+              {isAdding ? (
+                <div className="flex gap-2 rounded-xl border border-white/15 bg-white/10 p-2">
+                  <input
+                    type="text"
+                    value={newGroupName}
+                    onChange={e => setNewGroupName(e.target.value)}
+                    placeholder="Ex: Restauração"
+                    className="bg-transparent px-3 py-1.5 text-sm text-white placeholder:text-slate-300 outline-none"
+                    autoFocus
+                  />
+                  <button onClick={handleAddGroup} className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold uppercase text-indigo-900">Criar</button>
+                  <button onClick={() => setIsAdding(false)} className="px-2 text-xs text-slate-300 hover:text-white">X</button>
+                </div>
+              ) : (
+                <button onClick={() => setIsAdding(true)} className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 font-bold text-indigo-900 shadow-sm hover:bg-indigo-50">
+                  <Plus size={18}/> Novo Grupo
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex gap-2">
-            {isAdding ? (
-              <div className="flex gap-2 bg-white p-2 border rounded-xl shadow-sm">
-                <input 
-                  type="text" 
-                  value={newGroupName} 
-                  onChange={e => setNewGroupName(e.target.value)}
-                  placeholder="Ex: Restauração"
-                  className="px-3 py-1.5 text-sm outline-none"
-                  autoFocus
-                />
-                <button onClick={handleAddGroup} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg font-bold text-xs uppercase">Criar</button>
-                <button onClick={() => setIsAdding(false)} className="text-slate-400 px-2 text-xs">X</button>
-              </div>
-            ) : (
-              <button onClick={() => setIsAdding(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
-                <Plus size={18}/> Novo Grupo
-              </button>
-            )}
-          </div>
-        </div>
+        </section>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {groups.map(group => {

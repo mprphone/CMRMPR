@@ -119,24 +119,24 @@ const StaffTeam: React.FC<StaffTeamProps> = ({ staff, setStaff, clients, tasks, 
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Gestão da Equipa</h2>
-            <p className="mt-1 text-xs text-slate-500">Monitorize custos, capacidades e rentabilidade</p>
+            <h1 className="text-xl font-bold md:text-2xl">Gestão da Equipa</h1>
+            <p className="mt-1 text-xs text-slate-200 md:text-sm">Monitorize custos, capacidades e rentabilidade.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {onSyncRequest && (
               <button
                 onClick={onSyncRequest}
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 text-sm font-bold text-blue-600 hover:bg-blue-100"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-4 text-sm font-bold text-white hover:bg-white/20"
               >
                 <DownloadCloud size={16} /> Sincronizar da Origem
               </button>
             )}
             <button
               onClick={() => handleOpenModal()}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white shadow-sm hover:bg-blue-700"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-bold text-indigo-900 shadow-sm hover:bg-indigo-50"
             >
               <Plus size={16} /> Novo Colaborador
             </button>

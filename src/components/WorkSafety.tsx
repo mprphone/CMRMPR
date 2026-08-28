@@ -455,15 +455,17 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Seguranca e Higiene no Trabalho (SHT)</h2>
-          <p className="text-sm text-slate-500">Gestao de servicos SHT com alertas de renovacao e checklist obrigatoria.</p>
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-xl font-bold md:text-2xl">Segurança e Higiene no Trabalho (SHT)</h1>
+            <p className="mt-1 text-xs text-slate-200 md:text-sm">Gestão de serviços SHT com alertas de renovação e checklist obrigatória.</p>
+          </div>
+          <button onClick={() => handleOpenModal()} className="inline-flex h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-bold text-indigo-900 shadow-sm hover:bg-indigo-50">
+            <Plus size={18} /> Novo Registo SHT
+          </button>
         </div>
-        <button onClick={() => handleOpenModal()} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
-          <Plus size={18} /> Novo Registo SHT
-        </button>
-      </div>
+      </section>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">

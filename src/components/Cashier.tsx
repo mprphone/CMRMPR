@@ -732,23 +732,25 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Caixa de Pagamentos em Numerário</h2>
-          <p className="text-sm text-slate-500">Grupo: <span className="font-bold">{cashGroup.name}</span></p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setView('history')} className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-blue-600 bg-white border border-slate-200 px-3 py-2 rounded-lg"><History size={14} /> Histórico</button>
-          <div className="p-3 rounded-lg bg-green-100 text-green-800 text-center">
-            <span className="text-xs font-bold uppercase">Em Caixa</span>
-            <p className="text-xl font-black">{cashInHand.toFixed(2)}€</p>
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-xl font-bold md:text-2xl">Caixa de Pagamentos em Numerário</h1>
+            <p className="mt-1 text-xs text-slate-200 md:text-sm">Grupo: <span className="font-bold text-white">{cashGroup.name}</span></p>
           </div>
-          <div className="p-3 rounded-lg bg-blue-100 text-blue-800 text-center">
-            <span className="text-xs font-bold uppercase">MB Way Pendente</span>
-            <p className="text-xl font-black">{mbWayInHand.toFixed(2)}€</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setView('history')} className="flex items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20"><History size={14} /> Histórico</button>
+            <div className="rounded-lg bg-emerald-400/10 border border-emerald-300/30 p-3 text-center">
+              <span className="text-xs font-bold uppercase text-emerald-200">Em Caixa</span>
+              <p className="text-xl font-black text-white">{cashInHand.toFixed(2)}€</p>
+            </div>
+            <div className="rounded-lg bg-indigo-400/10 border border-indigo-300/30 p-3 text-center">
+              <span className="text-xs font-bold uppercase text-indigo-200">MB Way Pendente</span>
+              <p className="text-xl font-black text-white">{mbWayInHand.toFixed(2)}€</p>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="p-4 border-b flex justify-between items-center">

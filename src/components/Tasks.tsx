@@ -47,22 +47,24 @@ const Tasks: React.FC<TasksProps> = ({ tasks, setTasks }) => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-            <ListTodo size={24} /> Catálogo de Tarefas
-          </h2>
-          <p className="text-sm text-slate-500">Defina as tarefas padrão, os seus tempos e a lógica de cálculo. As alterações são guardadas automaticamente.</p>
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="flex items-center gap-3 text-xl font-bold md:text-2xl">
+              <ListTodo size={22} /> Catálogo de Tarefas
+            </h1>
+            <p className="mt-1 text-xs text-slate-200 md:text-sm">Defina as tarefas padrão, os seus tempos e a lógica de cálculo. As alterações são guardadas automaticamente.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={handleReset} className="flex items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20">
+              <RotateCcw size={14} /> Repor Padrões
+            </button>
+            <button onClick={handleAddTask} className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-bold text-indigo-900 hover:bg-indigo-50">
+              <Plus size={14} /> Nova Tarefa
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={handleReset} className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-red-600 bg-white border border-slate-200 px-3 py-2 rounded-lg">
-            <RotateCcw size={14} /> Repor Padrões
-          </button>
-          <button onClick={handleAddTask} className="flex items-center gap-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-lg">
-            <Plus size={14} /> Nova Tarefa
-          </button>
-        </div>
-      </div>
+      </section>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="overflow-x-auto">

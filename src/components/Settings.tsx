@@ -71,10 +71,10 @@ const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className="space-y-8 animate-fade-in">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
-        <p className="text-sm text-slate-500">Ajuste os parâmetros da aplicação.</p>
-      </div>
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+        <h1 className="text-xl font-bold md:text-2xl">Configurações Gerais</h1>
+        <p className="mt-1 text-xs text-slate-200 md:text-sm">Ajuste os parâmetros da aplicação.</p>
+      </section>
 
       <MfaSecurity />
 

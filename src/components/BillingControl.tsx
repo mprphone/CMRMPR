@@ -302,29 +302,30 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-slate-900">Controlo de Faturação</h2>
-              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">
+              <h1 className="text-xl font-bold md:text-2xl">Controlo de Faturação</h1>
+              <span className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-200">
                 <ShieldCheck size={11} /> Primavera só leitura
               </span>
             </div>
+            <p className="mt-1 text-xs text-slate-200 md:text-sm">Reconciliação de avenças, dívida acumulada e sincronização com o Primavera.</p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <label className="text-[10px] font-bold uppercase text-slate-500">
+            <label className="text-[10px] font-bold uppercase text-indigo-200">
               Mês
-              <input type="month" value={month} onChange={event => setMonth(event.target.value)} className="mt-1 block rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-800" />
+              <input type="month" value={month} onChange={event => setMonth(event.target.value)} className="mt-1 block rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-sm font-medium text-white [color-scheme:dark]" />
             </label>
-            <button type="button" onClick={synchronize} disabled={isSyncingAny} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
+            <button type="button" onClick={synchronize} disabled={isSyncingAny} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-500 px-4 text-sm font-bold text-white shadow-sm hover:bg-emerald-400 disabled:opacity-60">
               <RefreshCcw size={15} className={isSyncingAny ? 'animate-spin' : ''} /> {isSyncingAny ? 'A sincronizar…' : 'Sincronizar Primavera'}
             </button>
             <button
               type="button"
               onClick={() => void syncSaftAvenca()}
               disabled={Boolean(avencaRun && avencaRun.status === 'running')}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-bold text-indigo-900 shadow-sm hover:bg-indigo-50 disabled:opacity-60"
             >
               <RefreshCcw size={15} className={avencaRun?.status === 'running' ? 'animate-spin' : ''} />
               Atualizar Avenças SAFTonline
@@ -333,7 +334,7 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
               <button
                 type="button"
                 onClick={() => setShowAvencaReport(true)}
-                className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-bold ${avencaRun.status === 'running' ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : avencaRun.status === 'failed' || avencaRun.failed_count > 0 ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}
+                className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-bold ${avencaRun.status === 'running' ? 'border-indigo-300/30 bg-indigo-400/10 text-indigo-100' : avencaRun.status === 'failed' || avencaRun.failed_count > 0 ? 'border-amber-300/30 bg-amber-400/10 text-amber-200' : 'border-emerald-300/30 bg-emerald-400/10 text-emerald-200'}`}
               >
                 {avencaRun.status === 'running'
                   ? <><RefreshCcw size={13} className="animate-spin" /> SAFTonline a decorrer…</>
@@ -342,8 +343,8 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
             )}
           </div>
         </div>
-        {error && <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"><AlertTriangle size={14} /> {error}</div>}
-        {debtError && <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"><AlertTriangle size={14} /> {debtError}</div>}
+        {error && <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-300/30 bg-red-400/10 px-3 py-2 text-xs font-medium text-red-200"><AlertTriangle size={14} /> {error}</div>}
+        {debtError && <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-300/30 bg-red-400/10 px-3 py-2 text-xs font-medium text-red-200"><AlertTriangle size={14} /> {debtError}</div>}
       </section>
 
       {showAvencaReport && (

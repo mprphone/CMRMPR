@@ -89,6 +89,11 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+        <h1 className="text-xl font-bold md:text-2xl">Dashboard</h1>
+        <p className="mt-1 text-xs text-slate-200 md:text-sm">Visão geral da rentabilidade e da carteira de clientes.</p>
+      </section>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* KPI Cards */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
