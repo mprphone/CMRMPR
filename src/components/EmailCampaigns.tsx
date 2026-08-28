@@ -619,14 +619,19 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({
     <div className="space-y-5 animate-fade-in pb-10">
       {toast && <div role="status" className={`fixed top-20 right-5 z-[80] max-w-md rounded-xl px-4 py-3 shadow-xl border text-sm font-medium ${toast.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>{toast.message}</div>}
 
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div><h2 className="text-2xl font-bold text-slate-900">Comunicações por Email</h2><p className="text-sm text-slate-500 mt-1">Campanhas persistentes, agendamento real e proteção de destinatários.</p></div>
-        <div className="flex gap-3">
-          <div className="bg-white border rounded-xl px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-400">Na fila</p><p className="text-xl font-bold text-blue-700">{history.filter((item) => ['queued', 'processing'].includes(item.delivery_status || '')).length}</p></div>
-          <div className="bg-white border rounded-xl px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-400">Agendadas</p><p className="text-xl font-bold text-violet-700">{history.filter((item) => item.delivery_status === 'scheduled').length}</p></div>
-          <div className="bg-white border rounded-xl px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-400">Supressões</p><p className="text-xl font-bold text-slate-800">{suppressions.length}</p></div>
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-xl font-bold md:text-2xl">Comunicações por Email</h1>
+            <p className="mt-1 text-xs text-slate-200 md:text-sm">Campanhas persistentes, agendamento real e proteção de destinatários.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <div className="rounded-lg bg-white/10 px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-300">Na fila</p><p className="text-xl font-bold text-white">{history.filter((item) => ['queued', 'processing'].includes(item.delivery_status || '')).length}</p></div>
+            <div className="rounded-lg bg-white/10 px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-300">Agendadas</p><p className="text-xl font-bold text-white">{history.filter((item) => item.delivery_status === 'scheduled').length}</p></div>
+            <div className="rounded-lg bg-white/10 px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-300">Supressões</p><p className="text-xl font-bold text-white">{suppressions.length}</p></div>
+          </div>
         </div>
-      </div>
+      </section>
 
       <nav className="bg-white border rounded-xl p-1.5 flex gap-1 overflow-x-auto" aria-label="Secções de email">
         {tabItems.map((tab) => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap ${activeTab === tab.id ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}>{tab.icon}{tab.label}</button>)}
