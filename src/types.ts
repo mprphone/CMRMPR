@@ -104,6 +104,9 @@ export interface Client {
   tasks: ClientTaskOverride[];
   status: 'Ativo' | 'Em Análise' | 'Risco' | 'Cancelado' | 'Inativo';
   contractRenewalDate: string;
+  emailMarketingStatus?: 'unknown' | 'consented' | 'legitimate_interest' | 'opted_out';
+  emailMarketingConsentAt?: string | null;
+  emailMarketingConsentSource?: string | null;
   aiAnalysisCache?: AiAnalysis | null;
 }
 
@@ -182,13 +185,26 @@ export interface EmailTemplate {
   name: string;
   subject: string;
   body: string;
+  preheader?: string;
+  category?: string;
+  approval_status?: 'draft' | 'approved' | 'archived';
+  version?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface CampaignRecipientResult {
+  id?: string;
+  client_id?: string | null;
   name: string;
   email: string;
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'pending' | 'sending' | 'retry' | 'accepted' | 'delivered' | 'bounced' | 'complained' | 'failed' | 'cancelled' | 'suppressed' | 'skipped';
   error?: string;
+  exclusion_reason?: string | null;
+  attempts?: number;
+  max_attempts?: number;
+  provider_message_id?: string | null;
+  updated_at?: string;
 }
 
 export interface CampaignHistory {
@@ -204,6 +220,69 @@ export interface CampaignHistory {
   scheduled_at?: string | null;
   send_delay?: number | null;
   template_id?: string | null;
+  delivery_status?: 'draft' | 'scheduled' | 'queued' | 'processing' | 'completed' | 'partial' | 'failed' | 'cancelled';
+  campaign_type?: 'service' | 'marketing';
+  preheader?: string;
+  signature_html?: string;
+  from_name?: string;
+  from_email?: string;
+  reply_to?: string | null;
+  created_by?: string | null;
+  updated_at?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  idempotency_key?: string | null;
+  eligible_count?: number;
+  excluded_count?: number;
+  success_count?: number;
+  failure_count?: number;
+  bounce_count?: number;
+  last_error?: string | null;
+}
+
+export interface EmailSuppression {
+  id: string;
+  email: string;
+  email_normalized: string;
+  reason: 'unsubscribe' | 'hard_bounce' | 'complaint' | 'invalid' | 'manual';
+  source: string;
+  notes?: string | null;
+  created_at: string;
+  lifted_at?: string | null;
+}
+
+export interface EmailAutomation {
+  id: string;
+  name: string;
+  is_active: boolean;
+  client_group: string;
+  admin_email: string;
+  from_name: string;
+  from_email: string;
+  reply_to?: string | null;
+  subject_hint: string;
+  ai_instructions: string;
+  trigger_type?: 'monthly_documents';
+  schedule_day?: number;
+  schedule_hour?: number;
+  requires_approval?: boolean;
+  campaign_type?: 'service' | 'marketing';
+  last_run_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmailAutomationRun {
+  id: string;
+  automation_id: string;
+  run_month: string;
+  started_at: string;
+  finished_at?: string | null;
+  status: string;
+  successes: number;
+  failures: number;
+  details?: Record<string, unknown> | null;
+  error?: string | null;
 }
 
 export interface QuoteHistory {

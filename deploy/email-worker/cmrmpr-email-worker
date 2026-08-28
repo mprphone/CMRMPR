@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${SUPABASE_FUNCTION_URL:?SUPABASE_FUNCTION_URL em falta}"
+: "${CRON_SECRET:?CRON_SECRET em falta}"
+
+# Em cada passagem, materializa no maximo uma automacao mensal vencida.
+# A funcao e idempotente por automacao/mes; os rascunhos exigem aprovacao por omissao.
+/usr/bin/curl \
+  --silent \
+  --show-error \
+  --connect-timeout 10 \
+  --max-time 55 \
+  --request POST \
+  --header "Content-Type: application/json" \
+  --header "x-cron-secret: ${CRON_SECRET}" \
+  --data '{}' \
+  "${SUPABASE_FUNCTION_URL%/}/monthly-obligations"
+
+/usr/bin/curl \
+  --fail-with-body \
+  --silent \
+  --show-error \
+  --connect-timeout 10 \
+  --max-time 55 \
+  --request POST \
+  --header "Content-Type: application/json" \
+  --header "x-cron-secret: ${CRON_SECRET}" \
+  --data '{"batchSize":50}' \
+  "${SUPABASE_FUNCTION_URL%/}/process-email-queue"

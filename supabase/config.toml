@@ -402,3 +402,18 @@ verify_jwt = false
 
 [functions.analyze-client]
 verify_jwt = false
+
+[functions.queue-email-campaign]
+verify_jwt = false
+
+[functions.process-email-queue]
+verify_jwt = false
+
+[functions.email-unsubscribe]
+verify_jwt = false
+
+[functions.email-delivery-webhook]
+verify_jwt = false
+
+[functions.monthly-obligations]
+verify_jwt = false

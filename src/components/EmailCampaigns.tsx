@@ -1,14 +1,24 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Client, FeeGroup, Staff, EmailTemplate, CampaignHistory, GlobalSettings, CampaignRecipientResult } from '../types';
-import { Mail, BrainCircuit, Send, Users, Plus, X, RefreshCcw, Save, Trash2, History, Edit2, Search, CheckCircle, AlertCircle, Clock, Bold, FileText, Eye, RotateCcw } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle, Archive, Ban, Bold, BrainCircuit, CalendarClock, Check, CheckCircle2,
+  ChevronLeft, ChevronRight, Clock, Edit3, Eye, FileText, History, LayoutTemplate,
+  Link2, List, Mail, Monitor, Pause, Play, Plus, RefreshCcw, Save, Search, Send,
+  ShieldCheck, Smartphone, Trash2, Users, Workflow, X,
+} from 'lucide-react';
+import {
+  CampaignHistory, CampaignRecipientResult, Client, EmailAutomation, EmailSuppression,
+  EmailTemplate, FeeGroup, GlobalSettings, Staff,
+} from '../types';
+import { hasAppPermission, UserAccessProfile } from '../accessControl';
 import { generateTemplateWithAI } from '../services/geminiService';
-import { templateService, campaignHistoryService, storeClient } from '../services';
-
-const clientVariables: (keyof Client)[] = [
-  'name', 'nif', 'email', 'phone', 'address', 'sector', 'entityType', 'monthlyFee', 'turnover', 'status', 'contractRenewalDate'
-];
-const specialVariables = ['responsible_name', 'avenca_atual', 'nova_avenca'];
-const allVariables = [...clientVariables, ...specialVariables];
+import {
+  campaignHistoryService, emailAutomationService, emailSuppressionService, storeClient,
+  templateService,
+} from '../services';
+import {
+  ALL_EMAIL_VARIABLES, applyEmailVariables, buildEmailPreviewDocument,
+  buildPersonalizedEmailHtml, getUnknownEmailVariables, isValidEmail, normalizeEmail,
+} from './email/emailComposerUtils';
 
 interface EmailCampaignsProps {
   clients: Client[];
@@ -19,1487 +29,701 @@ interface EmailCampaignsProps {
   history: CampaignHistory[];
   setHistory: (history: CampaignHistory[]) => void;
   globalSettings: GlobalSettings;
+  accessProfile: UserAccessProfile;
 }
 
-type QueueStatus = 'pending' | 'sent' | 'error';
+type EmailTab = 'compose' | 'scheduled' | 'history' | 'templates' | 'automations' | 'suppressions';
+type Toast = { type: 'success' | 'error' | 'info'; message: string };
 
-interface DeliveryQueueItem {
-  id: string;
-  campaignLabel: string;
-  name: string;
-  email: string;
-  status: QueueStatus;
-  error?: string;
-  updatedAt: string;
+interface ComposerDraft {
+  selectedTemplateId: string;
+  subject: string;
+  preheader: string;
+  body: string;
+  campaignType: 'service' | 'marketing';
+  selectedGroupId: string;
+  isScheduled: boolean;
+  scheduleDateTime: string;
+  requiresApproval: boolean;
 }
 
-const EmailCampaigns: React.FC<EmailCampaignsProps> = ({ clients, groups, staff, templates, setTemplates, history, setHistory, globalSettings }) => {
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-  
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
+const DRAFT_STORAGE_KEY = 'cmrmpr-email-composer-draft-v2';
+const PAGE_SIZE = 20;
+
+const emptyDraft: ComposerDraft = {
+  selectedTemplateId: '',
+  subject: '',
+  preheader: '',
+  body: '',
+  campaignType: 'service',
+  selectedGroupId: 'all',
+  isScheduled: false,
+  scheduleDateTime: '',
+  requiresApproval: false,
+};
+
+const readDraft = (): ComposerDraft => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || 'null');
+    return parsed && typeof parsed === 'object' ? { ...emptyDraft, ...parsed } : emptyDraft;
+  } catch {
+    return emptyDraft;
+  }
+};
+
+const localDateTimeMin = () => {
+  const now = new Date(Date.now() + 60_000);
+  const offset = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 16);
+};
+
+const statusTone = (status?: string) => {
+  switch (status) {
+    case 'completed': return 'bg-emerald-100 text-emerald-800';
+    case 'partial': return 'bg-amber-100 text-amber-800';
+    case 'failed': return 'bg-red-100 text-red-800';
+    case 'cancelled': return 'bg-slate-200 text-slate-700';
+    case 'scheduled': return 'bg-violet-100 text-violet-800';
+    case 'draft': return 'bg-yellow-100 text-yellow-800';
+    case 'queued':
+    case 'processing': return 'bg-blue-100 text-blue-800';
+    default: return 'bg-slate-100 text-slate-700';
+  }
+};
+
+const recipientStatusLabel: Record<string, string> = {
+  success: 'Aceite', error: 'Erro', pending: 'Pendente', sending: 'A enviar', retry: 'Nova tentativa',
+  accepted: 'Aceite pelo servidor', delivered: 'Entregue', bounced: 'Devolvido', complained: 'Spam',
+  failed: 'Falhou', cancelled: 'Cancelado', suppressed: 'Suprimido', skipped: 'Excluído',
+};
+
+const EmailCampaigns: React.FC<EmailCampaignsProps> = ({
+  clients, groups, staff, templates, setTemplates, history, setHistory, globalSettings, accessProfile,
+}) => {
+  const initialDraft = useMemo(readDraft, []);
+  const [activeTab, setActiveTab] = useState<EmailTab>('compose');
+  const [selectedTemplateId, setSelectedTemplateId] = useState(initialDraft.selectedTemplateId);
+  const [subject, setSubject] = useState(initialDraft.subject);
+  const [preheader, setPreheader] = useState(initialDraft.preheader);
+  const [body, setBody] = useState(initialDraft.body);
+  const [campaignType, setCampaignType] = useState<'service' | 'marketing'>(initialDraft.campaignType);
+  const [selectedGroupId, setSelectedGroupId] = useState(initialDraft.selectedGroupId);
   const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
-  
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<Partial<EmailTemplate> | null>(null);
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isScheduled, setIsScheduled] = useState(initialDraft.isScheduled);
+  const [scheduleDateTime, setScheduleDateTime] = useState(initialDraft.scheduleDateTime);
+  const [requiresApproval, setRequiresApproval] = useState(initialDraft.requiresApproval);
+  const [recipientSearch, setRecipientSearch] = useState('');
+  const [isRecipientModalOpen, setIsRecipientModalOpen] = useState(false);
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
+  const [previewClientId, setPreviewClientId] = useState('');
+  const [validationIssues, setValidationIssues] = useState<string[]>([]);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [isWorking, setIsWorking] = useState(false);
+  const [testEmail, setTestEmail] = useState(accessProfile.email || '');
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+  const [suppressions, setSuppressions] = useState<EmailSuppression[]>([]);
+  const [campaignPage, setCampaignPage] = useState(1);
+  const [campaignTotal, setCampaignTotal] = useState(history.length);
+  const [selectedCampaign, setSelectedCampaign] = useState<CampaignHistory | null>(null);
+  const [recipientDetails, setRecipientDetails] = useState<CampaignRecipientResult[]>([]);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState<Partial<EmailTemplate> | null>(null);
+  const [templateDeleteId, setTemplateDeleteId] = useState<string | null>(null);
   const [aiTopic, setAiTopic] = useState('');
   const [aiTone, setAiTone] = useState('Profissional');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [automations, setAutomations] = useState<EmailAutomation[]>([]);
+  const [automationDraft, setAutomationDraft] = useState<Partial<EmailAutomation> | null>(null);
+  const [newSuppressionEmail, setNewSuppressionEmail] = useState('');
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  const templateBodyRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const [isScheduled, setIsScheduled] = useState(false);
-  const [scheduleDateTime, setScheduleDateTime] = useState('');
-  const [isRecipientModalOpen, setIsRecipientModalOpen] = useState(false);
-  // New states for guardrails
-  const [sendDelay, setSendDelay] = useState(500); // Default 0.5s
-  const [recipientSearch, setRecipientSearch] = useState('');
-  const [campaignResult, setCampaignResult] = useState<{ successCount: number; errorCount: number; details: { name: string; email: string; status: 'success' | 'error'; error?: string }[] } | null>(null);
-  const [validationIssues, setValidationIssues] = useState<string[]>([]);
-  const [selectedHistoryCampaign, setSelectedHistoryCampaign] = useState<CampaignHistory | null>(null);
-  const [deliveryQueue, setDeliveryQueue] = useState<DeliveryQueueItem[]>([]);
-  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
-  const [isResendingFailuresId, setIsResendingFailuresId] = useState<string | null>(null);
-  const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const templateBodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const canCreate = hasAppPermission(accessProfile, 'emails', 'create');
+  const canEdit = hasAppPermission(accessProfile, 'emails', 'edit');
+  const canDelete = hasAppPermission(accessProfile, 'emails', 'delete');
 
-  const formatMoney = (value: any) => {
-    const n = Number(value);
-    if (Number.isNaN(n)) return String(value ?? '');
-    return `${n.toFixed(2).replace('.', ',')} €`;
+  const notify = (type: Toast['type'], message: string) => {
+    setToast({ type, message });
+    window.setTimeout(() => setToast((current) => current?.message === message ? null : current), 7000);
   };
 
-  const escapeHtml = (input: string) => {
-    return input
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+  const loadSuppressions = async () => {
+    try { setSuppressions(await emailSuppressionService.getAll()); }
+    catch (error: any) { notify('error', `Não foi possível carregar supressões: ${error.message}`); }
   };
 
-  const decodeBasicEntities = (input: string) => {
-    return input
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/&quot;/gi, '"')
-      .replace(/&#39;/gi, "'")
-      .replace(/&euro;/gi, ' €');
-  };
-
-  const stripHtmlToText = (input: string) => {
-    const withBreaks = input
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n\n')
-      .replace(/<\/div>/gi, '\n')
-      .replace(/<li[^>]*>/gi, '- ')
-      .replace(/<\/li>/gi, '\n')
-      .replace(/<\/tr>/gi, '\n')
-      .replace(/<\/td>/gi, ' ')
-      .replace(/<[^>]+>/g, '');
-
-    return decodeBasicEntities(withBreaks)
-      .replace(/\r\n/g, '\n')
-      .replace(/\t/g, ' ')
-      .replace(/[ \u00A0]+/g, ' ')
-      .replace(/\n{4,}/g, '\n\n\n')
-      .replace(/[ \t]+\n/g, '\n')
-      .replace(/[ \t]+$/g, '');
-  };
-
-  const formatInlineText = (text: string) => {
-    const escaped = escapeHtml(text.trim());
-    return escaped
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/__(.+?)__/g, '<strong>$1</strong>');
-  };
-
-  const renderBodyAsCleanHtml = (rawBody: string) => {
-    const plainBody = stripHtmlToText(rawBody);
-    if (!plainBody) return '';
-
-    const lines = plainBody.split('\n');
-    const blocks: string[] = [];
-    let listItems: string[] = [];
-    let pendingEmptyLines = 0;
-
-    const pushSpacerLines = (count: number) => {
-      const safeCount = Math.min(Math.max(count, 1), 3);
-      for (let i = 0; i < safeCount; i += 1) {
-        blocks.push('<div style="height:16px;line-height:16px;font-size:16px;">&nbsp;</div>');
-      }
-    };
-
-    const flushList = () => {
-      if (listItems.length === 0) return;
-      blocks.push(`<ul style="margin:0 0 22px 22px;padding:0;">${listItems.join('')}</ul>`);
-      listItems = [];
-    };
-
-    for (const rawLine of lines) {
-      const line = rawLine.replace(/[ \t]+$/g, '');
-      if (!line.trim()) {
-        flushList();
-        pendingEmptyLines += 1;
-        continue;
-      }
-
-      if (pendingEmptyLines > 0) {
-        pushSpacerLines(pendingEmptyLines);
-        pendingEmptyLines = 0;
-      }
-
-      if (/^\s*[-*]\s+/.test(line)) {
-        const listText = line.replace(/^\s*[-*]\s+/, '');
-        listItems.push(`<li style="margin:0 0 14px 0;">${formatInlineText(listText)}</li>`);
-        continue;
-      }
-
-      flushList();
-
-      const keyValueMatch = line.trim().match(/^([A-Za-z0-9()./%\s-]{2,40}:)\s*(.+)$/);
-      if (keyValueMatch) {
-        const label = escapeHtml(keyValueMatch[1]);
-        const value = formatInlineText(keyValueMatch[2]);
-        blocks.push(`<p style="margin:0 0 20px 0;"><strong>${label}</strong> ${value}</p>`);
-        continue;
-      }
-
-      blocks.push(`<p style="margin:0 0 22px 0;">${formatInlineText(line)}</p>`);
+  const loadCampaigns = async (page = campaignPage) => {
+    try {
+      const result = await campaignHistoryService.getPage(page, PAGE_SIZE);
+      setHistory(result.campaigns);
+      setCampaignTotal(result.total);
+    } catch (error: any) {
+      notify('error', `Não foi possível atualizar as campanhas: ${error.message}`);
     }
-
-    flushList();
-    return blocks.join('');
   };
 
-  const removeLegacyOptOutText = (input: string) => {
-    if (!input) return '';
-    return input.replace(/Para deixar de receber[\s\S]*?assunto\s*["“”]?Remover["“”]?\s*\.?/gi, '').trim();
+  const loadAutomations = async () => {
+    try { setAutomations(await emailAutomationService.getAll()); }
+    catch (error: any) { notify('error', `Não foi possível carregar automatismos: ${error.message}`); }
   };
 
-  const normalizeEuroCurrency = (input: string) => {
-    if (!input) return '';
-    return input
-      .replace(/(\d[\d.,\s]*)\s*EUR\b/gi, (_m, amount) => `${String(amount).trim()} €`)
-      .replace(/€\s*EUR\b/gi, '€')
-      .replace(/\bEUR\b/gi, '€');
-  };
-
-  const buildCampaignEmailHtml = (messageBody: string, signatureHtml: string) => {
-    const bodyHtml = renderBodyAsCleanHtml(normalizeEuroCurrency(removeLegacyOptOutText(messageBody)));
-    const sanitizedSignature = normalizeEuroCurrency(removeLegacyOptOutText(signatureHtml));
-    const signatureBlock = sanitizedSignature ? `<div style="margin-top:16px;">${sanitizedSignature}</div>` : '';
-    return `${bodyHtml}${signatureBlock}`;
-  };
-
-  const getCleanBaseTemplate = () => ({
-    subject: 'Atualizacao de avenca contabilistica - {{name}}',
-    body: [
-      'Ola {{name}},',
-      '',
-      'Informamos uma atualizacao da sua avenca de contabilidade.',
-      '',
-      '**Nova avenca:** {{nova_avenca}}',
-      '**Avenca atual:** {{avenca_atual}}',
-      '**Entrada em vigor:** dia 1 do proximo mes',
-      '',
-      'Se tiver alguma questao, responda a este email.',
-      '',
-      'Com os melhores cumprimentos,',
-      '{{responsible_name}}',
-    ].join('\n'),
-  });
-
-  const applyBoldMarkdown = (
-    currentValue: string,
-    onChange: (nextValue: string) => void,
-    textarea: HTMLTextAreaElement | null
-  ) => {
-    const start = textarea?.selectionStart ?? currentValue.length;
-    const end = textarea?.selectionEnd ?? currentValue.length;
-    const hasSelection = end > start;
-    const selectedText = hasSelection ? currentValue.slice(start, end) : 'texto importante';
-    const replacement = `**${selectedText}**`;
-    const nextValue = `${currentValue.slice(0, start)}${replacement}${currentValue.slice(end)}`;
-
-    onChange(nextValue);
-
-    requestAnimationFrame(() => {
-      if (!textarea) return;
-      const selectionStart = start + 2;
-      const selectionEnd = selectionStart + selectedText.length;
-      textarea.focus();
-      textarea.setSelectionRange(selectionStart, selectionEnd);
-    });
-  };
-
-  const handleApplyCleanBaseTemplateComposer = () => {
-    const baseTemplate = getCleanBaseTemplate();
-    setSubject(baseTemplate.subject);
-    setBody(baseTemplate.body);
-  };
-
-  const handleApplyCleanBaseTemplateModal = () => {
-    const baseTemplate = getCleanBaseTemplate();
-    setEditingTemplate(prev => {
-      if (!prev) return prev;
-      return { ...prev, subject: baseTemplate.subject, body: baseTemplate.body };
-    });
-  };
-
-  const handleBoldComposer = () => {
-    applyBoldMarkdown(body, setBody, bodyTextareaRef.current);
-  };
-
-  const handleBoldModal = () => {
-    const currentBody = editingTemplate?.body || '';
-    applyBoldMarkdown(
-      currentBody,
-      (nextValue) => setEditingTemplate(prev => (prev ? { ...prev, body: nextValue } : prev)),
-      templateBodyTextareaRef.current
-    );
-  };
-
-  const applyTemplateVars = (text: string, client: Client, responsibleName: string, novaAvenca?: number) => {
-    let out = text;
-    for (const key of clientVariables) {
-      const value = (client as any)[key];
-      const regex = new RegExp(`{{${key}}}`, 'g');
-      out = out.replace(regex, value !== undefined && value !== null ? String(value) : '');
-    }
-    out = out.replace(/{{responsible_name}}/g, responsibleName);
-    out = out.replace(/{{avenca_atual}}/g, formatMoney(client.monthlyFee));
-    if (novaAvenca !== undefined && novaAvenca !== null) {
-      out = out.replace(/{{nova_avenca}}/g, formatMoney(novaAvenca));
-    }
-    return out;
-  };
+  useEffect(() => { void loadSuppressions(); }, []);
 
   useEffect(() => {
-    // Set initial state from first template if available
-    if (templates.length > 0 && !selectedTemplateId) {
-      handleTemplateChange(templates[0].id);
-    }
+    if (activeTab === 'automations') void loadAutomations();
+    if (activeTab === 'history' || activeTab === 'scheduled') void loadCampaigns(campaignPage);
+  }, [activeTab, campaignPage]);
+
+  useEffect(() => {
+    const hasActiveCampaigns = history.some((campaign) => ['queued', 'processing', 'scheduled'].includes(campaign.delivery_status || ''));
+    if (!hasActiveCampaigns) return;
+    const timer = window.setInterval(() => void loadCampaigns(campaignPage), 10000);
+    return () => window.clearInterval(timer);
+  }, [history, campaignPage]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
+        selectedTemplateId, subject, preheader, body, campaignType, selectedGroupId,
+        isScheduled, scheduleDateTime, requiresApproval,
+      } satisfies ComposerDraft));
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [selectedTemplateId, subject, preheader, body, campaignType, selectedGroupId, isScheduled, scheduleDateTime, requiresApproval]);
+
+  useEffect(() => {
+    if (templates.length && !selectedTemplateId && !subject && !body) selectTemplate(templates[0].id);
   }, [templates]);
 
   const availableRecipients = useMemo(() => {
-    if (selectedGroupId === 'all') {
-      return clients;
-    }
-    const group = groups.find(g => g.id === selectedGroupId);
-    return group ? clients.filter(c => group.clientIds.includes(c.id)) : [];
-  }, [selectedGroupId, clients, groups]);
+    if (selectedGroupId === 'all') return clients;
+    const group = groups.find((item) => item.id === selectedGroupId);
+    const ids = new Set(group?.clientIds || []);
+    return clients.filter((client) => ids.has(client.id));
+  }, [clients, groups, selectedGroupId]);
 
-  const filteredRecipients = useMemo(() => {
-    if (!recipientSearch) return availableRecipients;
-    return availableRecipients.filter(c => 
-        c.name.toLowerCase().includes(recipientSearch.toLowerCase()) || 
-        (c.email && c.email.toLowerCase().includes(recipientSearch.toLowerCase()))
-    );
-  }, [availableRecipients, recipientSearch]);
-
-  
-  const getFailureCountFromStatus = (status: string) => {
-    const m = status.match(/(\d+)\s*(?:falhas?|erros?)/i);
-    return m ? parseInt(m[1], 10) : 0;
-  };
-
-  const getRecipientResults = (item: CampaignHistory): CampaignRecipientResult[] => {
-    if (!Array.isArray(item.recipient_results)) return [];
-    return item.recipient_results.filter((entry): entry is CampaignRecipientResult => {
-      return !!entry && typeof entry === 'object' && typeof entry.name === 'string' && typeof entry.email === 'string' && (entry.status === 'success' || entry.status === 'error');
-    });
-  };
-
-  const getRecipientIdsForGroup = (groupId: string) => {
-    if (groupId === 'all') return clients.map(c => c.id);
-    const group = groups.find(g => g.id === groupId);
-    if (!group) return [];
-    return clients.filter(c => group.clientIds.includes(c.id)).map(c => c.id);
-  };
-
-  const updateQueueStatus = (itemId: string, status: QueueStatus, error?: string) => {
-    setDeliveryQueue(prev =>
-      prev.map(item =>
-        item.id === itemId
-          ? {
-              ...item,
-              status,
-              error,
-              updatedAt: new Date().toISOString(),
-            }
-          : item
-      )
-    );
-  };
-
-  const buildResponsibleName = (client: Client) => {
-    if (!client.responsibleStaff) return 'N/A';
-    if (client.responsibleStaff.includes('-')) {
-      const member = staff.find(s => s.id === client.responsibleStaff);
-      return member ? member.name : 'Desconhecido';
-    }
-    return client.responsibleStaff;
-  };
-
-  const getRecipientsFromSelection = () => clients.filter(c => selectedRecipients.includes(c.id));
-
-  const validateSendConfiguration = (recipients: Client[]) => {
-    if (recipients.length === 0) return 'Selecione pelo menos um destinatário.';
-    if (!globalSettings.fromEmail || !globalSettings.fromName) {
-      return 'Configure o Nome e Email de Remetente nas Configurações.';
-    }
-
-    if (isScheduled) {
-      if (!scheduleDateTime) return 'Selecione uma data e hora para o agendamento.';
-      const scheduleDate = new Date(scheduleDateTime);
-      if (scheduleDate < new Date()) return 'A data de agendamento não pode ser no passado.';
-      return null;
-    }
-
-    const invalidEmails = recipients.filter(c => !c.email || !c.email.includes('@'));
-    if (invalidEmails.length > 0) {
-      return `Existem ${invalidEmails.length} destinatário(s) sem email válido. Corrija antes de enviar.`;
-    }
-
-    const selectedGroup = groups.find(g => g.id === selectedGroupId);
-    const proposedFees = selectedGroup?.proposed_fees || {};
-    const needsNovaAvenca = subject.includes('{{nova_avenca}}') || body.includes('{{nova_avenca}}');
-    if (needsNovaAvenca) {
-      const missing = recipients.filter(c => proposedFees[c.id] === undefined || proposedFees[c.id] === null);
-      if (missing.length > 0) {
-        return `Existem ${missing.length} destinatário(s) sem nova avença definida neste grupo.`;
-      }
-    }
-
-    return null;
-  };
-
-  const previewRecipients = useMemo(
-    () => clients.filter(client => selectedRecipients.includes(client.id)),
-    [clients, selectedRecipients]
+  const suppressionEmails = useMemo(
+    () => new Set(suppressions.filter((item) => !item.lifted_at).map((item) => item.email_normalized)),
+    [suppressions],
   );
 
-  const previewSample = useMemo(() => {
-    const firstRecipient = previewRecipients[0];
-    if (!firstRecipient) return null;
+  const eligibility = useMemo(() => {
+    const seen = new Set<string>();
+    return new Map(availableRecipients.map((client) => {
+      const email = normalizeEmail(client.email);
+      let reason = '';
+      if (client.status === 'Inativo' || client.status === 'Cancelado') reason = 'Cliente inativo';
+      else if (!isValidEmail(email)) reason = 'Email inválido';
+      else if (seen.has(email)) reason = 'Email duplicado';
+      else if (suppressionEmails.has(email) || client.emailMarketingStatus === 'opted_out') reason = 'Opt-out/supressão';
+      else if (campaignType === 'marketing' && !['consented', 'legitimate_interest'].includes(client.emailMarketingStatus || 'unknown')) reason = 'Sem base registada para marketing';
+      seen.add(email);
+      return [client.id, reason];
+    }));
+  }, [availableRecipients, campaignType, suppressionEmails]);
 
-    const selectedGroup = groups.find(g => g.id === selectedGroupId);
-    const proposedFees = selectedGroup?.proposed_fees || {};
-    const responsibleName = buildResponsibleName(firstRecipient);
-    const novaAvenca = proposedFees[firstRecipient.id];
+  useEffect(() => {
+    setSelectedRecipients((current) => current.filter((id) => eligibility.get(id) === ''));
+  }, [eligibility]);
 
+  const filteredRecipients = useMemo(() => {
+    const search = recipientSearch.trim().toLocaleLowerCase('pt-PT');
+    if (!search) return availableRecipients;
+    return availableRecipients.filter((client) => [client.name, client.email, client.nif]
+      .some((value) => String(value || '').toLocaleLowerCase('pt-PT').includes(search)));
+  }, [availableRecipients, recipientSearch]);
+
+  const hygieneCounts = useMemo(() => {
+    const counts = { eligible: 0, invalid: 0, inactive: 0, suppressed: 0, duplicate: 0, noConsent: 0 };
+    eligibility.forEach((reason) => {
+      if (!reason) counts.eligible += 1;
+      else if (reason.includes('inválido')) counts.invalid += 1;
+      else if (reason.includes('inativo')) counts.inactive += 1;
+      else if (reason.includes('duplicado')) counts.duplicate += 1;
+      else if (reason.includes('base')) counts.noConsent += 1;
+      else counts.suppressed += 1;
+    });
+    return counts;
+  }, [eligibility]);
+
+  const selectedClients = useMemo(
+    () => clients.filter((client) => selectedRecipients.includes(client.id)),
+    [clients, selectedRecipients],
+  );
+
+  const selectedGroup = groups.find((group) => group.id === selectedGroupId);
+  const proposedFees = selectedGroup?.proposed_fees || {};
+
+  const responsibleName = (client: Client) => {
+    if (!client.responsibleStaff) return '';
+    return staff.find((member) => member.id === client.responsibleStaff)?.name || client.responsibleStaff;
+  };
+
+  const personalize = (client: Client) => {
+    const newFee = proposedFees[client.id];
+    const personalizedSubject = applyEmailVariables(subject, client, responsibleName(client), newFee);
+    const personalizedBody = applyEmailVariables(body, client, responsibleName(client), newFee);
     return {
-      recipientName: firstRecipient.name,
-      recipientEmail: firstRecipient.email,
-      subject: applyTemplateVars(subject, firstRecipient, responsibleName, novaAvenca),
-      body: applyTemplateVars(body, firstRecipient, responsibleName, novaAvenca),
+      subject: personalizedSubject,
+      body: personalizedBody,
+      html: buildPersonalizedEmailHtml(personalizedBody, globalSettings.emailSignature || ''),
     };
-  }, [previewRecipients, groups, selectedGroupId, subject, body]);
-
-const handleTemplateChange = (templateId: string) => {
-    const template = templates.find(t => t.id === templateId);
-    if (template) {
-      setSelectedTemplateId(templateId);
-      setSubject(template.subject);
-      setBody(template.body);
-    }
   };
 
-  const handleAiAssist = async () => {
-    if (!aiTopic) {
-      alert("Por favor, insira um tópico para o email.");
-      return;
-    }
+  const previewClient = clients.find((client) => client.id === previewClientId)
+    || selectedClients[0]
+    || availableRecipients.find((client) => eligibility.get(client.id) === '')
+    || null;
+  const preview = previewClient ? personalize(previewClient) : null;
 
-    setIsGenerating(true);
-    try {
-      // A autenticação é agora gerida centralmente em geminiService.ts
-      const result = await generateTemplateWithAI(aiTopic, aiTone);
-      setEditingTemplate(prev => ({ ...prev, subject: result.subject, body: result.body }));
-    } catch (err: any) {
-      let detailedError = err.message;
-      if (err.context && typeof err.context.json === 'function') {
-        const functionError = await err.context.json().catch(() => null);
-        if (functionError && functionError.error) detailedError = functionError.error;
-        else if (functionError && functionError.message) detailedError = functionError.message;
-      }
-      if (detailedError.includes('Invalid JWT')) {
-          alert("A sua sessão expirou. Por favor, recarregue a página e tente novamente.");
-      } else {
-        alert("Falha na IA: " + detailedError + "\n\nVerifique se a chave GEMINI_API_KEY foi configurada nos 'Secrets' do seu projeto Supabase.");
-      }
-      console.error(err);
-    } finally {
-      setIsGenerating(false);
-      setIsAiModalOpen(false);
-    }
-  };
-
-  const runScheduledCampaign = async (recipients: Client[]) => {
-    const scheduleDate = new Date(scheduleDateTime);
-    const group = groups.find(g => g.id === selectedGroupId);
-    const groupName = selectedGroupId === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
-
-    const queueItems: DeliveryQueueItem[] = recipients.map(client => ({
-      id: crypto.randomUUID(),
-      campaignLabel: `Agendada: ${scheduleDate.toLocaleString('pt-PT')}`,
-      name: client.name,
-      email: client.email,
-      status: 'pending',
-      updatedAt: new Date().toISOString(),
-    }));
-    setDeliveryQueue(prev => [...queueItems, ...prev].slice(0, 300));
-
-    const scheduledCampaign: Partial<CampaignHistory> = {
-      subject,
-      body,
-      recipient_ids: selectedRecipients,
-      group_name: groupName,
-      status: 'Agendada',
-      scheduled_at: scheduleDate.toISOString(),
-      send_delay: sendDelay,
-      template_id: selectedTemplateId || null,
-      recipient_count: selectedRecipients.length,
-    };
-
-    const savedRecord = await campaignHistoryService.create(scheduledCampaign);
-    setHistory([savedRecord, ...history]);
-
-    alert(`Campanha agendada com sucesso para ${scheduleDate.toLocaleString('pt-PT')}.\n\nNOTA: E necessario um processo no servidor (cron) para executar campanhas agendadas.`);
-    setSelectedRecipients([]);
-    setIsScheduled(false);
-    setScheduleDateTime('');
-  };
-
-  const runImmediateCampaign = async (
-    recipients: Client[],
-    campaignLabel = `Envio: ${new Date().toLocaleString('pt-PT')}`,
-    subjectTemplate = subject,
-    bodyTemplate = body,
-    groupIdForContext = selectedGroupId
-  ) => {
-    setValidationIssues([]);
-    if (!storeClient) throw new Error('Cliente Supabase nao inicializado.');
-
-    try {
-      const { data: { session } } = await storeClient.auth.getSession();
-      if (session?.access_token) storeClient.functions.setAuth(session.access_token);
-    } catch (_) {
-      // ignore
-    }
-
-    const selectedGroup = groups.find(g => g.id === groupIdForContext);
-    const proposedFees = selectedGroup?.proposed_fees || {};
-
-    const queueItems = recipients.map(client => ({
-      id: crypto.randomUUID(),
-      campaignLabel,
-      name: client.name,
-      email: client.email,
-      status: 'pending' as QueueStatus,
-      updatedAt: new Date().toISOString(),
-    }));
-    setDeliveryQueue(prev => [...queueItems, ...prev].slice(0, 300));
-    const queueByEmail = new Map(queueItems.map(item => [item.email.toLowerCase(), item.id]));
-
-    let successCount = 0;
-    let errorCount = 0;
-    const campaignLogs: CampaignRecipientResult[] = [];
-    let jwtError = false;
-
-    for (const client of recipients) {
-      const responsibleName = buildResponsibleName(client);
-      const novaAvenca = proposedFees[client.id];
-      const finalSubject = applyTemplateVars(subjectTemplate, client, responsibleName, novaAvenca);
-      const finalBody = applyTemplateVars(bodyTemplate, client, responsibleName, novaAvenca);
-      const queueItemId = queueByEmail.get(client.email.toLowerCase());
-
-      try {
-        const finalHtml = buildCampaignEmailHtml(finalBody, globalSettings.emailSignature || '');
-        const { error } = await storeClient.functions.invoke('send-email', {
-          body: {
-            to: client.email,
-            from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`,
-            subject: finalSubject,
-            html: finalHtml,
-          },
-        });
-        if (error) throw error;
-
-        successCount += 1;
-        campaignLogs.push({ name: client.name, email: client.email, status: 'success' });
-        if (queueItemId) updateQueueStatus(queueItemId, 'sent');
-      } catch (err: any) {
-        let detailedError = err.message;
-        if (err.context && typeof err.context.json === 'function') {
-          const functionError = await err.context.json().catch(() => null);
-          if (functionError && functionError.error) detailedError = functionError.error;
-        }
-
-        if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessao invalida')) {
-          jwtError = true;
-          if (queueItemId) updateQueueStatus(queueItemId, 'error', 'Sessao invalida');
-          campaignLogs.push({ name: client.name, email: client.email, status: 'error', error: 'Sessao invalida' });
-          errorCount += 1;
-          break;
-        }
-
-        errorCount += 1;
-        campaignLogs.push({ name: client.name, email: client.email, status: 'error', error: detailedError });
-        if (queueItemId) updateQueueStatus(queueItemId, 'error', detailedError);
-      }
-
-      await new Promise(resolve => setTimeout(resolve, sendDelay));
-    }
-
-    if (jwtError) {
-      alert('A sessao expirou ou e invalida. O envio foi interrompido.');
-    }
-
-    const group = groups.find(g => g.id === groupIdForContext);
-    const groupName = groupIdForContext === 'all' ? 'Todos os Clientes' : group?.name || 'Grupo Desconhecido';
-    const statusText = successCount === 0
-      ? `Falhou (0 enviados, ${errorCount} ${errorCount === 1 ? 'erro' : 'erros'})`
-      : errorCount === 0
-        ? `Enviada (${successCount} ${successCount === 1 ? 'sucesso' : 'sucessos'})`
-        : `Enviada (${successCount} ${successCount === 1 ? 'sucesso' : 'sucessos'}, ${errorCount} ${errorCount === 1 ? 'falha' : 'falhas'})`;
-
-    const newHistoryRecord: Partial<CampaignHistory> = {
-      subject: subjectTemplate,
-      body: bodyTemplate,
-      recipient_count: recipients.length,
-      recipient_ids: recipients.map(r => r.id),
-      recipient_results: campaignLogs,
-      group_name: groupName,
-      status: statusText,
-    };
-
-    try {
-      const savedRecord = await campaignHistoryService.create(newHistoryRecord);
-      setHistory([savedRecord, ...history]);
-    } catch (err: any) {
-      alert('Falha ao gravar o historico da campanha: ' + err.message);
-    }
-
-    setCampaignResult({ successCount, errorCount, details: campaignLogs });
-  };
-
-  const handleSendCampaign = () => {
-    const recipients = getRecipientsFromSelection();
-    const validationError = validateSendConfiguration(recipients);
-    if (validationError) {
-      alert(validationError);
-      return;
-    }
-    setIsPreviewModalOpen(true);
-  };
-
-  const handleConfirmSendCampaign = async () => {
-    const recipients = getRecipientsFromSelection();
-    const validationError = validateSendConfiguration(recipients);
-    if (validationError) {
-      alert(validationError);
-      setIsPreviewModalOpen(false);
-      return;
-    }
-
-    setIsPreviewModalOpen(false);
-    setIsSending(true);
-
-    try {
-      if (isScheduled) {
-        await runScheduledCampaign(recipients);
-      } else {
-        await runImmediateCampaign(recipients);
-      }
-    } catch (err: any) {
-      alert('Erro ao processar campanha: ' + (err?.message || 'erro desconhecido'));
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const handleResendFailures = async (historyItem: CampaignHistory) => {
-    const failedResults = getRecipientResults(historyItem).filter(result => result.status === 'error');
-    if (failedResults.length === 0) {
-      alert('Esta campanha não tem falhas para reenviar.');
-      return;
-    }
-
-    const recipientMap = new Map<string, Client>();
-    failedResults.forEach(result => {
-      const found = clients.find(client => client.email.toLowerCase() === result.email.toLowerCase());
-      if (found) recipientMap.set(found.id, found);
-    });
-    const recipients = Array.from(recipientMap.values());
-
-    if (recipients.length === 0) {
-      alert('Nenhum destinatário falhado pôde ser associado aos clientes atuais.');
-      return;
-    }
-
-    if (!globalSettings.fromEmail || !globalSettings.fromName) {
-      alert('Configure o Nome e Email de Remetente nas Configurações.');
-      return;
-    }
-
-    const contextGroup = groups.find(group => group.name === historyItem.group_name);
-    const contextGroupId = contextGroup ? contextGroup.id : selectedGroupId;
-
-    if (!confirm(`Reenviar para ${recipients.length} destinatário(s) que falharam nesta campanha?`)) {
-      return;
-    }
-
-    setIsResendingFailuresId(historyItem.id);
-    setIsSending(true);
-    try {
-      await runImmediateCampaign(
-        recipients,
-        `Reenvio Falhados: ${new Date().toLocaleString('pt-PT')}`,
-        historyItem.subject,
-        historyItem.body,
-        contextGroupId
-      );
-    } catch (err: any) {
-      alert('Erro ao reenviar falhados: ' + (err?.message || 'erro desconhecido'));
-    } finally {
-      setIsSending(false);
-      setIsResendingFailuresId(null);
-    }
-  };
-
-  const handleSendTestEmail = async () => {
-    if (availableRecipients.length === 0) {
-      alert("Não há clientes na lista de destinatários para usar como exemplo.");
-      return;
-    }
-    if (!globalSettings.fromEmail || !globalSettings.fromName) {
-      alert("Por favor, configure o seu Nome e Email de Remetente nas Configurações.");
-      return;
-    }
-
-    const testClient = availableRecipients[0];
-    
-    let responsibleName = 'N/A';
-    if (testClient.responsibleStaff) {
-      if (testClient.responsibleStaff.includes('-')) { // It's a UUID
-        const staffMember = staff.find(s => s.id === testClient.responsibleStaff);
-        responsibleName = staffMember ? staffMember.name : 'Responsável Desconhecido';
-      } else { // It's a name
-        responsibleName = testClient.responsibleStaff;
-      }
-    }
-
-    const selectedGroup = groups.find(g => g.id === selectedGroupId);
-    const proposedFees = selectedGroup?.proposed_fees || {};
-    const novaAvenca = proposedFees[testClient.id];
-
-    let testSubject = applyTemplateVars(subject, testClient, responsibleName, novaAvenca);
-    let testBody = applyTemplateVars(body, testClient, responsibleName, novaAvenca);
-
-    if (testSubject.includes('{{nova_avenca}}') || testBody.includes('{{nova_avenca}}')) {
-      testSubject = testSubject.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENCA]');
-      testBody = testBody.replace(/{{nova_avenca}}/g, '[VALOR NOVA AVENCA]');
-    }
-
-    const finalHtml = buildCampaignEmailHtml(testBody, globalSettings.emailSignature || '');
-
-    const confirmationMessage = `Isto irá enviar um email de teste REAL para 'mpr@mpr.pt' a partir de '${globalSettings.fromEmail}'.\n\nAssunto: ${testSubject}\n\nDeseja continuar?`;
-
-    if (!confirm(confirmationMessage)) return;
-
-    setIsSending(true);
-    try {
-      if (!storeClient) throw new Error("Cliente Supabase não inicializado.");
-
-      // (Opcional) Se existir sessão autenticada, envia o JWT para a Edge Function.
-      // Se não houver sessão (app sem Auth), a função deve estar com verify_jwt=false.
-      const { data: { session } } = await storeClient.auth.getSession();
-      if (session?.access_token) {
-        storeClient.functions.setAuth(session.access_token);
-      }
-
-      const { error } = await storeClient.functions.invoke('send-email', {
-        body: { to: 'mpr@mpr.pt', from: `${globalSettings.fromName} <${globalSettings.fromEmail}>`, subject: testSubject, html: finalHtml },
-      });
-      if (error) throw error;
-      alert("Email de teste enviado com sucesso!");
-    } catch (err: any) {
-      let detailedError = err.message;
-      if (err.context && typeof err.context.json === 'function') {
-        const functionError = await err.context.json().catch(() => null);
-        if (functionError && functionError.error) detailedError = functionError.error;
-        else if (functionError && functionError.message) detailedError = functionError.message;
-      }
-      if (detailedError.includes('Invalid JWT') || detailedError.includes('Sessão inválida')) {
-        alert("A sua sessão expirou ou é inválida. Por favor, recarregue a página e tente novamente.");
-      } else {
-        alert(`Erro ao enviar email de teste: ${detailedError}`);
-      }
-      console.error(err);
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const handleSaveTemplate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingTemplate || !editingTemplate.name) {
-      alert("O nome do template é obrigatório.");
-      return;
-    }
-
-    try {
-      const savedTemplate = await templateService.upsert(editingTemplate);
-      if (editingTemplate.id) {
-        // Update existing
-        setTemplates(templates.map(t => t.id === savedTemplate.id ? savedTemplate : t));
-      } else {
-        // Add new
-        setTemplates([...templates, savedTemplate]);
-      }
-      // TODO: Implement template versioning and approval flow.
-      // A template should have a status (e.g., 'draft', 'approved').
-      // Only 'approved' templates can be sent. An 'admin' role would be needed to change the status.
-      setIsTemplateModalOpen(false);
-      setEditingTemplate(null);
-      handleTemplateChange(savedTemplate.id); // Select the new/edited template
-    } catch (err: any) {
-      alert("Erro ao gravar o template: " + err.message);
-    }
-  };
-
-  const handleOpenEditModal = () => {
-    const templateToEdit = templates.find(t => t.id === selectedTemplateId);
-    if (templateToEdit) {
-      setEditingTemplate(templateToEdit);
-      setIsTemplateModalOpen(true);
-    } else {
-      alert("Por favor, selecione um template para editar.");
-    }
-  };
-
-  const handleDeleteTemplate = async () => {
-    if (!selectedTemplateId) {
-      alert("Nenhum template selecionado para apagar.");
-      return;
-    }
-    if (confirm("Tem a certeza que deseja apagar este template? Esta ação não pode ser desfeita.")) {
-      try {
-        await templateService.delete(selectedTemplateId);
-        const updatedTemplates = templates.filter(t => t.id !== selectedTemplateId);
-        setTemplates(updatedTemplates);
-        handleTemplateChange(updatedTemplates.length > 0 ? updatedTemplates[0].id : '');
-        alert("Template apagado com sucesso.");
-      } catch (err: any) {
-        alert("Erro ao apagar o template: " + err.message);
-      }
-    }
-  };
-
-  const insertVariable = (variable: string) => {
-    if (!editingTemplate) return;
-    // This is a simplification. A real implementation would insert at the cursor position.
-    // For now, we append to the body.
-    setEditingTemplate(prev => ({ ...prev, body: (prev?.body || '') + `{{${variable}}}` }));
-  };
-
-  const validateCurrentTemplate = () => {
-    setValidationIssues([]);
+  const validateCampaign = () => {
     const issues: string[] = [];
-    const allContent = subject + ' ' + body;
-    const variablesFound = allContent.match(/{{(.*?)}}/g) || [];
-    
-    variablesFound.forEach(variable => {
-        const varName = variable.replace(/{{|}}/g, '');
-        if (!allVariables.includes(varName as any)) {
-            issues.push(`A variável ${variable} não é reconhecida.`);
-        }
-    });
-
-    if (issues.length === 0) {
-        alert("Nenhum problema encontrado. As variáveis parecem estar corretas.");
+    if (!subject.trim()) issues.push('Preencha o assunto.');
+    if (!body.trim()) issues.push('Preencha o corpo do email.');
+    if (!selectedClients.length) issues.push('Selecione pelo menos um destinatário elegível.');
+    if (!globalSettings.fromName?.trim()) issues.push('Configure o nome do remetente.');
+    if (!isValidEmail(globalSettings.fromEmail || '')) issues.push('Configure um email de resposta válido.');
+    getUnknownEmailVariables(subject, body).forEach((variable) => issues.push(`Variável desconhecida: {{${variable}}}.`));
+    if ((subject.includes('{{nova_avenca}}') || body.includes('{{nova_avenca}}')) && selectedGroupId === 'all') {
+      issues.push('A variável {{nova_avenca}} exige um grupo de avenças específico.');
+    } else if (subject.includes('{{nova_avenca}}') || body.includes('{{nova_avenca}}')) {
+      const missing = selectedClients.filter((client) => proposedFees[client.id] == null);
+      if (missing.length) issues.push(`${missing.length} destinatário(s) sem nova avença definida.`);
+    }
+    if (isScheduled) {
+      const date = new Date(scheduleDateTime);
+      if (!scheduleDateTime || Number.isNaN(date.getTime()) || date.getTime() <= Date.now()) issues.push('Escolha uma data futura válida.');
     }
     setValidationIssues(issues);
+    return issues;
   };
 
+  const selectTemplate = (id: string) => {
+    const template = templates.find((item) => item.id === id);
+    setSelectedTemplateId(id);
+    if (!template) return;
+    setSubject(template.subject);
+    setPreheader(template.preheader || '');
+    setBody(template.body);
+  };
+
+  const insertAtCursor = (
+    value: string,
+    setter: (value: string) => void,
+    textarea: HTMLTextAreaElement | null,
+    insertion: string,
+  ) => {
+    const start = textarea?.selectionStart ?? value.length;
+    const end = textarea?.selectionEnd ?? value.length;
+    setter(`${value.slice(0, start)}${insertion}${value.slice(end)}`);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(start + insertion.length, start + insertion.length);
+    });
+  };
+
+  const wrapSelection = (prefix: string, suffix = prefix) => {
+    const textarea = bodyRef.current;
+    const start = textarea?.selectionStart ?? body.length;
+    const end = textarea?.selectionEnd ?? body.length;
+    const selected = body.slice(start, end) || 'texto';
+    insertAtCursor(body, setBody, textarea, `${prefix}${selected}${suffix}`);
+  };
+
+  const openReview = () => {
+    const issues = validateCampaign();
+    if (issues.length) {
+      notify('error', 'Corrija os problemas assinalados antes de continuar.');
+      return;
+    }
+    setIsReviewOpen(true);
+  };
+
+  const createCampaign = async () => {
+    const issues = validateCampaign();
+    if (issues.length) return;
+    setIsReviewOpen(false);
+    setIsWorking(true);
+    try {
+      const campaign = await campaignHistoryService.queue({
+        subject,
+        body,
+        groupName: selectedGroupId === 'all' ? 'Todos os Clientes' : selectedGroup?.name || 'Grupo',
+        campaignType,
+        preheader,
+        signatureHtml: globalSettings.emailSignature || '',
+        fromName: globalSettings.fromName || '',
+        fromEmail: globalSettings.fromEmail || '',
+        replyTo: globalSettings.fromEmail || '',
+        scheduledAt: isScheduled ? new Date(scheduleDateTime).toISOString() : new Date().toISOString(),
+        templateId: selectedTemplateId || null,
+        idempotencyKey,
+        requiresApproval,
+        recipients: selectedClients.map((client) => {
+          const content = personalize(client);
+          return {
+            clientId: client.id,
+            name: client.name,
+            email: client.email,
+            subject: content.subject,
+            html: content.html,
+            metadata: { responsible_name: responsibleName(client) },
+          };
+        }),
+      });
+
+      if (!isScheduled && !requiresApproval && (campaign.eligible_count || 0) > 0) {
+        await campaignHistoryService.processQueue(campaign.id, 50).catch((error) => {
+          notify('info', `A campanha ficou na fila persistente: ${error.message}`);
+        });
+      }
+      await loadCampaigns(1);
+      setCampaignPage(1);
+      setSelectedRecipients([]);
+      setIdempotencyKey(crypto.randomUUID());
+      notify('success', requiresApproval
+        ? 'Rascunho criado e pronto para aprovação.'
+        : isScheduled
+          ? 'Campanha agendada no servidor.'
+          : 'Campanha colocada na fila persistente. Pode fechar o browser em segurança.');
+      setActiveTab(isScheduled || requiresApproval ? 'scheduled' : 'history');
+    } catch (error: any) {
+      notify('error', error.message || 'Não foi possível criar a campanha.');
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  const sendTest = async () => {
+    if (!isValidEmail(testEmail)) return notify('error', 'Indique um email de teste válido.');
+    if (!subject.trim() || !body.trim()) return notify('error', 'Preencha o assunto e o corpo.');
+    if (!previewClient) return notify('error', 'Não existe um cliente elegível para personalizar o teste.');
+    if (!storeClient) return notify('error', 'Ligação ao servidor indisponível.');
+    setIsWorking(true);
+    try {
+      const content = personalize(previewClient);
+      const { error } = await storeClient.functions.invoke('send-email', {
+        body: {
+          to: testEmail,
+          from: `${globalSettings.fromName || ''} <${globalSettings.fromEmail || ''}>`,
+          replyTo: globalSettings.fromEmail || '',
+          subject: `[TESTE] ${content.subject}`,
+          html: content.html,
+          preheader,
+        },
+      });
+      if (error) throw error;
+      notify('success', `Email de teste enviado para ${testEmail}.`);
+    } catch (error: any) {
+      notify('error', `Falha no teste: ${error.message}`);
+    } finally { setIsWorking(false); }
+  };
+
+  const openCampaignDetails = async (campaign: CampaignHistory) => {
+    setSelectedCampaign(campaign);
+    setRecipientDetails([]);
+    setIsLoadingDetails(true);
+    try { setRecipientDetails(await campaignHistoryService.getRecipients(campaign.id)); }
+    catch (error: any) { notify('error', `Falha ao carregar destinatários: ${error.message}`); }
+    finally { setIsLoadingDetails(false); }
+  };
+
+  const controlCampaign = async (campaign: CampaignHistory, action: 'cancel' | 'approve') => {
+    setIsWorking(true);
+    try {
+      await campaignHistoryService.control(campaign.id, action);
+      if (action === 'approve' && (!campaign.scheduled_at || new Date(campaign.scheduled_at) <= new Date())) {
+        await campaignHistoryService.processQueue(campaign.id, 50).catch(() => undefined);
+      }
+      await loadCampaigns(campaignPage);
+      notify('success', action === 'cancel' ? 'Campanha cancelada.' : 'Campanha aprovada e colocada na fila.');
+    } catch (error: any) { notify('error', error.message); }
+    finally { setIsWorking(false); }
+  };
+
+  const prepareRetry = async (campaign: CampaignHistory) => {
+    setIsWorking(true);
+    try {
+      const details = await campaignHistoryService.getRecipients(campaign.id);
+      const failedIds = details
+        .filter((detail) => ['error', 'failed', 'bounced'].includes(detail.status))
+        .map((detail) => detail.client_id)
+        .filter((id): id is string => Boolean(id));
+      if (!failedIds.length) return notify('info', 'Não existem destinatários falhados associados a clientes atuais.');
+      setSubject(campaign.subject);
+      setBody(campaign.body);
+      setPreheader(campaign.preheader || '');
+      setCampaignType(campaign.campaign_type || 'service');
+      setSelectedRecipients(failedIds);
+      setSelectedGroupId(groups.find((group) => group.name === campaign.group_name)?.id || 'all');
+      setIdempotencyKey(crypto.randomUUID());
+      setActiveTab('compose');
+      notify('info', `${failedIds.length} destinatário(s) preparado(s) para reenvio. Reveja antes de confirmar.`);
+    } finally { setIsWorking(false); }
+  };
+
+  const saveTemplate = async () => {
+    if (!templateDraft?.name?.trim() || !templateDraft.subject?.trim() || !templateDraft.body?.trim()) {
+      return notify('error', 'Nome, assunto e corpo são obrigatórios.');
+    }
+    setIsWorking(true);
+    try {
+      const previous = templates.find((item) => item.id === templateDraft.id);
+      const saved = await templateService.upsert({
+        ...templateDraft,
+        version: previous ? Number(previous.version || 1) + 1 : 1,
+      });
+      const nextTemplates = previous
+        ? templates.map((item) => item.id === saved.id ? saved : item)
+        : [...templates, saved];
+      setTemplates(nextTemplates);
+      setTemplateDraft(saved);
+      setSelectedTemplateId(saved.id);
+      setSubject(saved.subject);
+      setPreheader(saved.preheader || '');
+      setBody(saved.body);
+      notify('success', 'Template guardado.');
+    } catch (error: any) { notify('error', error.message); }
+    finally { setIsWorking(false); }
+  };
+
+  const archiveTemplate = async () => {
+    if (!templateDeleteId) return;
+    setIsWorking(true);
+    try {
+      await templateService.delete(templateDeleteId);
+      const nextTemplates = templates.filter((item) => item.id !== templateDeleteId);
+      setTemplates(nextTemplates);
+      setTemplateDeleteId(null);
+      setTemplateDraft(null);
+      if (selectedTemplateId === templateDeleteId) {
+        setSelectedTemplateId('');
+        setSubject('');
+        setPreheader('');
+        setBody('');
+      }
+      notify('success', 'Template arquivado.');
+    } catch (error: any) { notify('error', error.message); }
+    finally { setIsWorking(false); }
+  };
+
+  const generateWithAi = async () => {
+    if (!aiTopic.trim()) return notify('error', 'Descreva o tema pretendido.');
+    setIsGenerating(true);
+    try {
+      const result = await generateTemplateWithAI(aiTopic, aiTone);
+      setTemplateDraft((current) => ({ ...current, subject: result.subject, body: result.body }));
+      notify('success', 'Rascunho gerado. Reveja todo o conteúdo antes de aprovar.');
+    } catch (error: any) { notify('error', error.message); }
+    finally { setIsGenerating(false); }
+  };
+
+  const saveAutomation = async () => {
+    if (!automationDraft?.name?.trim() || !automationDraft.client_group || !automationDraft.ai_instructions?.trim()) {
+      return notify('error', 'Nome, grupo e instruções são obrigatórios.');
+    }
+    setIsWorking(true);
+    try {
+      const saved = await emailAutomationService.upsert({
+        ...automationDraft,
+        admin_email: automationDraft.admin_email || accessProfile.email,
+        from_name: automationDraft.from_name || globalSettings.fromName || '',
+        from_email: automationDraft.from_email || globalSettings.fromEmail || '',
+        reply_to: automationDraft.reply_to || globalSettings.fromEmail || '',
+        trigger_type: 'monthly_documents',
+      });
+      setAutomations((current) => current.some((item) => item.id === saved.id)
+        ? current.map((item) => item.id === saved.id ? saved : item)
+        : [...current, saved]);
+      setAutomationDraft(saved);
+      notify('success', 'Automatismo guardado.');
+    } catch (error: any) { notify('error', error.message); }
+    finally { setIsWorking(false); }
+  };
+
+  const runAutomation = async (automation: EmailAutomation) => {
+    setIsWorking(true);
+    try {
+      const result = await emailAutomationService.runNow(automation.id);
+      notify('success', result.requiresApproval ? 'Rascunho automático criado para aprovação.' : 'Campanha automática colocada na fila.');
+      await loadCampaigns(1);
+      setActiveTab('scheduled');
+    } catch (error: any) { notify('error', error.message); }
+    finally { setIsWorking(false); }
+  };
+
+  const addSuppression = async () => {
+    if (!isValidEmail(newSuppressionEmail)) return notify('error', 'Email inválido.');
+    setIsWorking(true);
+    try {
+      const created = await emailSuppressionService.add(newSuppressionEmail);
+      setSuppressions((current) => [created, ...current]);
+      setNewSuppressionEmail('');
+      notify('success', 'Endereço adicionado à lista de supressões.');
+    } catch (error: any) { notify('error', error.message); }
+    finally { setIsWorking(false); }
+  };
+
+  const liftSuppression = async (item: EmailSuppression) => {
+    setIsWorking(true);
+    try {
+      await emailSuppressionService.lift(item.id);
+      setSuppressions((current) => current.filter((candidate) => candidate.id !== item.id));
+      notify('success', 'Supressão levantada.');
+    } catch (error: any) { notify('error', error.message); }
+    finally { setIsWorking(false); }
+  };
+
+  const tabItems: Array<{ id: EmailTab; label: string; icon: React.ReactNode }> = [
+    { id: 'compose', label: 'Criar', icon: <Edit3 size={16} /> },
+    { id: 'scheduled', label: 'Agendadas', icon: <CalendarClock size={16} /> },
+    { id: 'history', label: 'Envios', icon: <History size={16} /> },
+    { id: 'templates', label: 'Templates', icon: <LayoutTemplate size={16} /> },
+    { id: 'automations', label: 'Automações', icon: <Workflow size={16} /> },
+    { id: 'suppressions', label: 'Supressões', icon: <Ban size={16} /> },
+  ];
+
+  const renderCampaignTable = (campaigns: CampaignHistory[]) => (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr><th className="px-4 py-3 text-left">Campanha</th><th className="px-4 py-3 text-left">Data</th><th className="px-4 py-3 text-center">Progresso</th><th className="px-4 py-3 text-center">Estado</th><th className="px-4 py-3 text-right">Ações</th></tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {campaigns.map((campaign) => {
+            const total = campaign.eligible_count ?? campaign.recipient_count;
+            const completed = (campaign.success_count || 0) + (campaign.failure_count || 0) + (campaign.bounce_count || 0);
+            return (
+              <tr key={campaign.id} className="hover:bg-slate-50/70">
+                <td className="px-4 py-3"><p className="font-semibold text-slate-800 max-w-xl truncate">{campaign.subject}</p><p className="text-xs text-slate-500 mt-0.5">{campaign.group_name} · {campaign.campaign_type === 'marketing' ? 'Marketing' : 'Serviço'}</p></td>
+                <td className="px-4 py-3 text-xs text-slate-600 whitespace-nowrap">{new Date(campaign.scheduled_at || campaign.sent_at).toLocaleString('pt-PT')}</td>
+                <td className="px-4 py-3 min-w-44"><div className="flex justify-between text-xs mb-1"><span>{completed}/{total}</span><span>{campaign.excluded_count || 0} excl.</span></div><div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500" style={{ width: `${total ? Math.min(100, completed / total * 100) : 0}%` }} /></div></td>
+                <td className="px-4 py-3 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${statusTone(campaign.delivery_status)}`}>{campaign.status}</span></td>
+                <td className="px-4 py-3"><div className="flex justify-end gap-2">
+                  <button onClick={() => void openCampaignDetails(campaign)} className="p-2 border rounded-lg text-slate-600 hover:bg-slate-100" title="Ver destinatários"><Eye size={15} /></button>
+                  {canEdit && campaign.delivery_status === 'draft' && <button onClick={() => void controlCampaign(campaign, 'approve')} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"><Check size={14} className="inline mr-1" />Aprovar</button>}
+                  {canEdit && ['draft', 'scheduled', 'queued'].includes(campaign.delivery_status || '') && <button onClick={() => void controlCampaign(campaign, 'cancel')} className="p-2 border border-red-200 rounded-lg text-red-600 hover:bg-red-50" title="Cancelar"><X size={15} /></button>}
+                  {canCreate && ['partial', 'failed'].includes(campaign.delivery_status || '') && <button onClick={() => void prepareRetry(campaign)} className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-700">Preparar reenvio</button>}
+                </div></td>
+              </tr>
+            );
+          })}
+          {!campaigns.length && <tr><td colSpan={5} className="py-14 text-center text-slate-400">Sem campanhas neste estado.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Campanhas de Email</h2>
-          <p className="text-sm text-slate-500">Crie, personalize e envie comunicações para os seus clientes.</p>
+    <div className="space-y-5 animate-fade-in pb-10">
+      {toast && <div role="status" className={`fixed top-20 right-5 z-[80] max-w-md rounded-xl px-4 py-3 shadow-xl border text-sm font-medium ${toast.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>{toast.message}</div>}
+
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+        <div><h2 className="text-2xl font-bold text-slate-900">Comunicações por Email</h2><p className="text-sm text-slate-500 mt-1">Campanhas persistentes, agendamento real e proteção de destinatários.</p></div>
+        <div className="flex gap-3">
+          <div className="bg-white border rounded-xl px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-400">Na fila</p><p className="text-xl font-bold text-blue-700">{history.filter((item) => ['queued', 'processing'].includes(item.delivery_status || '')).length}</p></div>
+          <div className="bg-white border rounded-xl px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-400">Agendadas</p><p className="text-xl font-bold text-violet-700">{history.filter((item) => item.delivery_status === 'scheduled').length}</p></div>
+          <div className="bg-white border rounded-xl px-4 py-2"><p className="text-[11px] uppercase font-bold text-slate-400">Supressões</p><p className="text-xl font-bold text-slate-800">{suppressions.length}</p></div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Editor Column */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-100 space-y-4">
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <label className="block text-xs font-bold text-slate-500">Modelo de Email</label>
-              <div className="flex items-center gap-3">
-                <button onClick={handleOpenEditModal} disabled={!selectedTemplateId} className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed">
-                  <Edit2 size={12} /> Editar
-                </button>
-                <button onClick={handleDeleteTemplate} disabled={!selectedTemplateId} className="flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed">
-                  <Trash2 size={12} /> Apagar
-                </button>
-                <button onClick={() => { setEditingTemplate({ name: '', subject: '', body: '' }); setIsTemplateModalOpen(true); }} className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
-                  <Plus size={12} /> Novo Template
-                </button>
-              </div>
-            </div>
-            <select
-              value={selectedTemplateId}
-              onChange={e => handleTemplateChange(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm bg-slate-50"
-            >
-              {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <input 
-              type="text" 
-              value={subject}
-              onChange={e => setSubject(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm mb-2"
-              placeholder="Assunto do seu email"
-            />
-            <div className="flex items-center gap-2 mb-2">
-              <button
-                type="button"
-                onClick={handleApplyCleanBaseTemplateComposer}
-                className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200"
-              >
-                <FileText size={13} /> Modelo Base
-              </button>
-              <button
-                type="button"
-                onClick={handleBoldComposer}
-                className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200"
-              >
-                <Bold size={13} /> Negrito
-              </button>
-            </div>
-            <textarea 
-              ref={bodyTextareaRef}
-              value={body}
-              onChange={e => setBody(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg text-sm h-80 font-mono"
-              placeholder="Escreva o seu email aqui... Use {{client_name}} para personalizar."
-            />
-            <div className="flex justify-between items-start mt-2">
-              <div className="text-xs text-slate-500">
-                <span className="font-bold">Variáveis disponíveis:</span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {allVariables.map(variable => (
-                    <code key={variable} className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-md font-mono">{`{{${variable}}}`}</code>
-                  ))}
-                </div>
-              </div>
-              <button onClick={validateCurrentTemplate} className="text-xs font-bold bg-slate-100 text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-2">
-                <CheckCircle size={14}/> Verificar Variáveis
-              </button>
-            </div>
-            {validationIssues.length > 0 && (
-                <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
-                    <p className="font-bold mb-1 flex items-center gap-1"><AlertCircle size={14}/> Problemas Encontrados:</p>
-                    <ul className="list-disc list-inside pl-2">
-                    {validationIssues.map((issue, i) => <li key={i}>{issue}</li>)}
-                    </ul>
-                </div>
-            )}
-          </div>
-        </div>
+      <nav className="bg-white border rounded-xl p-1.5 flex gap-1 overflow-x-auto" aria-label="Secções de email">
+        {tabItems.map((tab) => <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold whitespace-nowrap ${activeTab === tab.id ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}>{tab.icon}{tab.label}</button>)}
+      </nav>
 
-        {/* Settings & Recipients Column */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Users size={18} /> Destinatários</h3>
-            <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Enviar para o Grupo:</label>
-              <select
-                value={selectedGroupId}
-                onChange={e => {
-                  const newGroupId = e.target.value;
-                  setSelectedGroupId(newGroupId);
-                  setSelectedRecipients(getRecipientIdsForGroup(newGroupId)); // Pré-seleciona todos do grupo
-                  setRecipientSearch(''); // limpa pesquisa do modal
-                }}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
-              >
-                <option value="all">Todos os Clientes</option>
-                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-              </select>
-            </div>
-            <div className="mt-4 border-t pt-4">
-                <div className="flex justify-between items-center">
-                    <p className="text-sm">
-                        <span className="font-bold text-blue-600">{selectedRecipients.length}</span> destinatário(s) selecionado(s) de <span className="font-bold">{availableRecipients.length}</span>
-                    </p>
-                    <button onClick={() => setIsRecipientModalOpen(true)} className="bg-blue-50 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-100">
-                        Selecionar
-                    </button>
-                </div>
-            </div>
+      {activeTab === 'compose' && (
+        <div className="space-y-5">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-500 overflow-x-auto">
+            {['1. Conteúdo', '2. Destinatários', '3. Validação', '4. Rever e enviar'].map((step, index) => <React.Fragment key={step}><span className={`px-3 py-1.5 rounded-full ${index < 2 || selectedRecipients.length ? 'bg-blue-50 text-blue-700' : 'bg-slate-100'}`}>{step}</span>{index < 3 && <ChevronRight size={14} />}</React.Fragment>)}
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Send size={18} /> Envio</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input 
-                        type="checkbox" 
-                        checked={isScheduled} 
-                        onChange={e => setIsScheduled(e.target.checked)} 
-                        className="rounded h-4 w-4 text-blue-600 focus:ring-blue-500"
-                    />
-                    Agendar envio
+
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+            <section className="xl:col-span-7 bg-white border rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                <label className="text-sm font-semibold text-slate-700">Template
+                  <select value={selectedTemplateId} onChange={(event) => selectTemplate(event.target.value)} className="mt-1.5 w-full border rounded-lg px-3 py-2.5 bg-white font-normal">
+                    <option value="">Sem template</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.category || 'Geral'} · {template.name}</option>)}
+                  </select>
                 </label>
-                {isScheduled && (
-                    <div className="mt-2 pl-6">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">Data e Hora do Envio</label>
-                        <input 
-                            type="datetime-local" value={scheduleDateTime} onChange={e => setScheduleDateTime(e.target.value)}
-                            className="w-full px-3 py-2 border rounded-lg text-sm bg-white" min={new Date().toISOString().slice(0, 16)}
-                        />
-                    </div>
-                )}
+                <label className="text-sm font-semibold text-slate-700">Finalidade
+                  <select value={campaignType} onChange={(event) => setCampaignType(event.target.value as 'service' | 'marketing')} className="mt-1.5 w-full border rounded-lg px-3 py-2.5 bg-white font-normal">
+                    <option value="service">Comunicação de serviço</option><option value="marketing">Marketing direto</option>
+                  </select>
+                </label>
               </div>
+              {campaignType === 'marketing' && <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900 flex gap-2"><ShieldCheck size={18} className="shrink-0" /><span>Apenas clientes com consentimento ou interesse legítimo registado ficam elegíveis. O link de oposição será incluído automaticamente.</span></div>}
+              <label className="block text-sm font-semibold text-slate-700">Assunto<input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={180} className="mt-1.5 w-full border rounded-lg px-3 py-2.5 font-normal" placeholder="Assunto claro e específico" /></label>
+              <label className="block text-sm font-semibold text-slate-700">Preheader <span className="font-normal text-slate-400">(texto apresentado junto ao assunto)</span><input value={preheader} onChange={(event) => setPreheader(event.target.value)} maxLength={180} className="mt-1.5 w-full border rounded-lg px-3 py-2.5 font-normal" placeholder="Resumo curto do email" /></label>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Velocidade de Envio</label>
-                <select value={sendDelay} onChange={e => setSendDelay(Number(e.target.value))} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option value={200}>Muito Rápido (5/seg)</option>
-                  <option value={500}>Rápido (2/seg)</option>
-                  <option value={2000}>Lento (1/2 seg)</option>
-                  <option value={5000}>Muito Lento (1/5 seg)</option>
-                </select>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2"><label className="text-sm font-semibold text-slate-700">Mensagem</label><div className="flex gap-1">
+                  <button type="button" onClick={() => wrapSelection('**')} className="p-2 border rounded-lg hover:bg-slate-50" title="Negrito"><Bold size={16} /></button>
+                  <button type="button" onClick={() => insertAtCursor(body, setBody, bodyRef.current, '\n- Item')} className="p-2 border rounded-lg hover:bg-slate-50" title="Lista"><List size={16} /></button>
+                  <button type="button" onClick={() => wrapSelection('[', '](https://)')} className="p-2 border rounded-lg hover:bg-slate-50" title="Ligação"><Link2 size={16} /></button>
+                </div></div>
+                <textarea ref={bodyRef} value={body} onChange={(event) => setBody(event.target.value)} className="w-full min-h-[330px] border rounded-xl p-4 text-[15px] leading-7 resize-y" placeholder="Olá {{name}},&#10;&#10;Escreva aqui a sua mensagem..." />
+                <div className="mt-3"><p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Inserir variável no cursor</p><div className="flex flex-wrap gap-1.5">{ALL_EMAIL_VARIABLES.map((variable) => <button key={variable} type="button" onClick={() => insertAtCursor(body, setBody, bodyRef.current, `{{${variable}}}`)} className="px-2 py-1 rounded-md bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-xs font-mono">{`{{${variable}}}`}</button>)}</div></div>
               </div>
-              <button 
-                type="button"
-                onClick={handleSendTestEmail}
-                className="w-full bg-white text-slate-700 border border-slate-300 py-2 rounded-xl font-bold hover:bg-slate-50 transition-all flex justify-center items-center gap-2"
-              >
-                <Mail size={16} /> Enviar Email de Teste
-              </button>
-              <button
-                type="button"
-                onClick={handleSendCampaign}
-                disabled={isSending || selectedRecipients.length === 0}
-                className="w-full bg-blue-50 text-blue-700 border border-blue-100 py-2 rounded-xl font-bold hover:bg-blue-100 transition-all flex justify-center items-center gap-2 disabled:opacity-50"
-              >
-                <Eye size={16} /> Preview Final
-              </button>
-              <button
-                onClick={handleSendCampaign}
-                disabled={isSending || selectedRecipients.length === 0}
-                className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-black transition-all flex justify-center items-center gap-2 disabled:opacity-50"
-              >
-                {isSending ? <RefreshCcw size={18} className="animate-spin" /> : <Send size={18} />}
-                {isSending ? 'A Processar...' : `Enviar Campanha para ${selectedRecipients.length} Destinatarios`}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+            </section>
 
-      {/* Queue Section */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <Clock size={18} /> Fila de Envio
-        </h3>
-        <div className="overflow-x-auto max-h-72 custom-scrollbar">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
-              <tr>
-                <th className="px-4 py-3">Campanha</th>
-                <th className="px-4 py-3">Destinatário</th>
-                <th className="px-4 py-3 text-center">Estado</th>
-                <th className="px-4 py-3">Atualizado em</th>
-                <th className="px-4 py-3">Erro</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {deliveryQueue.map(item => (
-                <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-xs">{item.campaignLabel}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-slate-700">{item.name}</div>
-                    <div className="text-[11px] text-slate-400">{item.email}</div>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full ${
-                      item.status === 'pending'
-                        ? 'bg-yellow-100 text-yellow-700'
-                        : item.status === 'sent'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-red-100 text-red-700'
-                    }`}>
-                      {item.status === 'pending' ? <Clock size={12} /> : item.status === 'sent' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
-                      {item.status === 'pending' ? 'Pendente' : item.status === 'sent' ? 'Enviado' : 'Erro'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{new Date(item.updatedAt).toLocaleString('pt-PT')}</td>
-                  <td className="px-4 py-3 text-xs text-red-600">{item.error || '-'}</td>
-                </tr>
-              ))}
-              {deliveryQueue.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="text-center italic text-slate-400 py-10">Fila vazia. Os envios e agendamentos aparecem aqui.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            <aside className="xl:col-span-5 space-y-5 xl:sticky xl:top-4">
+              <section className="bg-white border rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-4 py-3 border-b flex items-center justify-between"><div><p className="font-bold text-slate-800">Pré-visualização real</p><p className="text-xs text-slate-500">Inclui personalização e assinatura</p></div><div className="flex bg-slate-100 rounded-lg p-1"><button onClick={() => setPreviewDevice('desktop')} className={`p-1.5 rounded ${previewDevice === 'desktop' ? 'bg-white shadow' : ''}`} title="Desktop"><Monitor size={15} /></button><button onClick={() => setPreviewDevice('mobile')} className={`p-1.5 rounded ${previewDevice === 'mobile' ? 'bg-white shadow' : ''}`} title="Telemóvel"><Smartphone size={15} /></button></div></div>
+                <div className="p-3 bg-slate-100 min-h-[370px] flex justify-center">
+                  {preview ? <div className={`bg-white shadow-sm transition-all ${previewDevice === 'mobile' ? 'w-[340px]' : 'w-full'}`}><div className="px-3 py-2 border-b text-xs"><strong>Assunto:</strong> {preview.subject}</div><iframe title="Preview do email" sandbox="" srcDoc={buildEmailPreviewDocument(preview.html, preheader, campaignType)} className="w-full h-[330px] border-0" /></div> : <div className="self-center text-sm text-slate-400 text-center"><Eye className="mx-auto mb-2" />Selecione um destinatário para visualizar.</div>}
+                </div>
+                {selectedClients.length > 1 && <div className="p-3 border-t"><select value={previewClient?.id || ''} onChange={(event) => setPreviewClientId(event.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm bg-white">{selectedClients.map((client) => <option value={client.id} key={client.id}>{client.name} · {client.email}</option>)}</select></div>}
+              </section>
 
-      {/* History Section */}
-      <div className="mt-8 bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-          <History size={18} /> Histórico de Campanhas Enviadas
-        </h3>
-        <div className="overflow-x-auto max-h-96 custom-scrollbar">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0">
-              <tr>
-                <th className="px-4 py-3">Data</th>
-                <th className="px-4 py-3">Assunto</th>
-                <th className="px-4 py-3">Grupo</th>
-                <th className="px-4 py-3 text-center">Destinatários</th>
-                <th className="px-4 py-3 text-center">Estado</th>
-              <th className="px-4 py-3 text-right">Acoes</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {history.map(item => {
-                const isScheduled = item.status === 'Agendada' && item.scheduled_at;
-                const displayDate = isScheduled ? new Date(item.scheduled_at) : new Date(item.sent_at);
-                const failureCount = getFailureCountFromStatus(item.status);
-                const hasFailures = failureCount > 0;
-                const isSentCampaign = !isScheduled && (
-                  item.status.toLowerCase().includes('enviada') ||
-                  item.status.toLowerCase().startsWith('falhou')
-                );
-                const recipientResults = getRecipientResults(item);
-                const hasDetails = recipientResults.length > 0;
-
-                return (
-                  <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{displayDate.toLocaleString('pt-PT')}</td>
-                    <td className="px-4 py-3 font-medium text-slate-700">{item.subject}</td>
-                    <td className="px-4 py-3 text-xs">{item.group_name}</td>
-                    <td className="px-4 py-3 text-center font-bold">{item.recipient_count}</td>
-                    <td className="px-4 py-3 text-center">
-                        <button
-                          type="button"
-                          disabled={!isSentCampaign}
-                          onClick={() => isSentCampaign && setSelectedHistoryCampaign(item)}
-                          title={!isSentCampaign ? 'Apenas campanhas enviadas têm detalhe.' : hasDetails ? 'Ver detalhe dos destinatários' : 'Campanha sem detalhe guardado'}
-                          className={`inline-flex items-center gap-1.5 text-xs font-bold px-2 py-1 rounded-full transition-colors ${
-                            isScheduled ? 'bg-yellow-100 text-yellow-700' 
-                            : hasFailures ? 'bg-red-100 text-red-700' 
-                            : 'bg-green-100 text-green-700'
-                          } ${isSentCampaign ? 'hover:brightness-95 cursor-pointer' : 'cursor-default'}`}
-                        >
-                            {isScheduled ? <Clock size={12} /> : hasFailures ? <AlertCircle size={12} /> : <CheckCircle size={12} />}
-                            {item.status}
-                        </button>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleResendFailures(item)}
-                        disabled={!hasFailures || isSending}
-                        className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {isResendingFailuresId === item.id ? <RefreshCcw size={12} className="animate-spin" /> : <RotateCcw size={12} />}
-                        Reenviar Falhados
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-              {history.length === 0 && ( <tr><td colSpan={6} className="text-center italic text-slate-400 py-10">Nenhuma campanha enviada ainda.</td></tr> )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Template Modal */}
-      {isTemplateModalOpen && editingTemplate && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold">{editingTemplate.id ? 'Editar Template' : 'Novo Template'}</h3>
-              <button onClick={() => setIsTemplateModalOpen(false)}><X size={20} /></button>
-            </div>
-            <form onSubmit={handleSaveTemplate} className="space-y-4">
-              <div className="flex gap-4 items-center">
-                <div className="flex-1">
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Nome do Template</label>
-                  <input type="text" required value={editingTemplate.name || ''} onChange={e => setEditingTemplate({...editingTemplate, name: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
+              <section className="bg-white border rounded-2xl p-4 shadow-sm space-y-4">
+                <div className="flex items-center justify-between"><div><p className="font-bold text-slate-800 flex items-center gap-2"><Users size={17} />Destinatários</p><p className="text-xs text-slate-500">{selectedRecipients.length} selecionados de {hygieneCounts.eligible} elegíveis</p></div><button onClick={() => setIsRecipientModalOpen(true)} className="px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-bold">Selecionar</button></div>
+                <select value={selectedGroupId} onChange={(event) => { setSelectedGroupId(event.target.value); setSelectedRecipients([]); }} className="w-full border rounded-lg px-3 py-2.5 bg-white text-sm"><option value="all">Todos os clientes visíveis</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs"><div className="bg-emerald-50 text-emerald-800 rounded-lg p-2"><strong className="block text-lg">{hygieneCounts.eligible}</strong>Elegíveis</div><div className="bg-amber-50 text-amber-800 rounded-lg p-2"><strong className="block text-lg">{hygieneCounts.inactive + hygieneCounts.invalid + hygieneCounts.duplicate}</strong>Dados</div><div className="bg-red-50 text-red-800 rounded-lg p-2"><strong className="block text-lg">{hygieneCounts.suppressed + hygieneCounts.noConsent}</strong>Protegidos</div></div>
+                <div className="border-t pt-4 space-y-3">
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={isScheduled} onChange={(event) => setIsScheduled(event.target.checked)} />Agendar no servidor</label>
+                  {isScheduled && <input type="datetime-local" min={localDateTimeMin()} value={scheduleDateTime} onChange={(event) => setScheduleDateTime(event.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" />}
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={requiresApproval} onChange={(event) => setRequiresApproval(event.target.checked)} />Criar como rascunho para aprovação</label>
                 </div>
-                {/* Placeholder for approval workflow */}
-                <div className="text-xs mt-5">
-                    <span className="font-bold text-slate-400">Estado:</span>
-                    <span className="ml-1 bg-yellow-100 text-yellow-700 font-bold px-2 py-1 rounded-full">Rascunho</span>
-                </div>
-                <button type="button" onClick={() => setIsAiModalOpen(true)} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 mt-5">
-                  <BrainCircuit size={16} /> Assistente IA
-                </button>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Assunto</label>
-                <input type="text" value={editingTemplate.subject || ''} onChange={e => setEditingTemplate({...editingTemplate, subject: e.target.value})} className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Corpo do Email</label>
-                <div className="flex items-center gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={handleApplyCleanBaseTemplateModal}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200"
-                  >
-                    <FileText size={13} /> Modelo Base
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleBoldModal}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200"
-                  >
-                    <Bold size={13} /> Negrito
-                  </button>
-                </div>
-                <textarea
-                  ref={templateBodyTextareaRef}
-                  value={editingTemplate.body || ''}
-                  onChange={e => setEditingTemplate({...editingTemplate, body: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg text-sm h-40 font-mono"
-                />
-                <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Caixa de Variáveis (clique para inserir)</p>
-                  <div className="flex flex-wrap gap-1">
-                    {allVariables.map(variable => (
-                      <button
-                        key={variable}
-                        type="button"
-                        onClick={() => insertVariable(variable)}
-                        className="text-[10px] bg-slate-200 text-slate-700 px-2 py-1 rounded-md font-mono hover:bg-slate-300"
-                      >
-                        {`{{${variable}}}`}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 pt-4">
-                <button type="button" onClick={() => setIsTemplateModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">Cancelar</button>
-                <button type="button" disabled title="Funcionalidade de aprovação futura" className="bg-gray-300 text-white px-4 py-2 rounded-lg text-sm font-bold cursor-not-allowed">Aprovar</button>
-                <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2">
-                  <Save size={16} /> Salvar Template
-                </button>
-              </div>
-            </form>
+                <div className="flex gap-2"><input type="email" value={testEmail} onChange={(event) => setTestEmail(event.target.value)} className="min-w-0 flex-1 border rounded-lg px-3 py-2 text-sm" placeholder="Email de teste" /><button onClick={() => void sendTest()} disabled={isWorking} className="px-3 py-2 border rounded-lg text-sm font-bold whitespace-nowrap"><Mail size={15} className="inline mr-1" />Testar</button></div>
+                {validationIssues.length > 0 && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800"><p className="font-bold flex gap-2"><AlertTriangle size={17} />Corrigir antes de enviar</p><ul className="list-disc pl-5 mt-1 space-y-1">{validationIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
+                <button onClick={openReview} disabled={!canCreate || isWorking || selectedRecipients.length === 0} className="w-full bg-slate-900 text-white rounded-xl py-3 font-bold flex items-center justify-center gap-2 disabled:opacity-40"><ShieldCheck size={18} />Rever e {isScheduled ? 'agendar' : requiresApproval ? 'guardar' : 'enviar'}</button>
+              </section>
+            </aside>
           </div>
         </div>
       )}
 
-      {/* AI Assistant Modal */}
-      {isAiModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
-            <h3 className="text-lg font-bold mb-4">Assistente IA para Templates</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Tópico do Email</label>
-                <input type="text" value={aiTopic} onChange={e => setAiTopic(e.target.value)} placeholder="Ex: Lembrete sobre o IES" className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Tom de Comunicação</label>
-                <select value={aiTone} onChange={e => setAiTone(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                  <option>Profissional</option>
-                  <option>Informal</option>
-                  <option>Informativo</option>
-                  <option>Publicidade</option>
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 pt-6">
-              <button onClick={() => setIsAiModalOpen(false)} className="px-4 py-2 text-slate-600">Cancelar</button>
-              <button onClick={handleAiAssist} disabled={isGenerating} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50">
-                {isGenerating ? <RefreshCcw size={16} className="animate-spin" /> : <BrainCircuit size={16} />} Gerar Conteúdo
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {activeTab === 'scheduled' && <section className="bg-white border rounded-2xl shadow-sm overflow-hidden"><div className="p-5 border-b"><h3 className="font-bold text-lg">Agendamentos e aprovações</h3><p className="text-sm text-slate-500">A fila continua a ser processada mesmo com o browser fechado.</p></div>{renderCampaignTable(history.filter((campaign) => ['draft', 'scheduled', 'queued', 'processing'].includes(campaign.delivery_status || '')))}</section>}
 
-      {/* Final Preview Modal */}
-      {isPreviewModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">Preview Final da Campanha</h3>
-              <button onClick={() => setIsPreviewModalOpen(false)}><X size={20} /></button>
-            </div>
+      {activeTab === 'history' && <section className="bg-white border rounded-2xl shadow-sm overflow-hidden"><div className="p-5 border-b flex justify-between items-center"><div><h3 className="font-bold text-lg">Histórico de envios</h3><p className="text-sm text-slate-500">Aceite pelo SMTP não significa necessariamente entregue; os webhooks atualizam o estado final.</p></div><button onClick={() => void loadCampaigns(campaignPage)} className="p-2 border rounded-lg" title="Atualizar"><RefreshCcw size={16} /></button></div>{renderCampaignTable(history)}<div className="p-4 border-t flex justify-between items-center text-sm"><span>{campaignTotal} campanha(s)</span><div className="flex items-center gap-2"><button disabled={campaignPage === 1} onClick={() => setCampaignPage((page) => Math.max(1, page - 1))} className="p-2 border rounded-lg disabled:opacity-30"><ChevronLeft size={16} /></button><span>Página {campaignPage} de {Math.max(1, Math.ceil(campaignTotal / PAGE_SIZE))}</span><button disabled={campaignPage >= Math.ceil(campaignTotal / PAGE_SIZE)} onClick={() => setCampaignPage((page) => page + 1)} className="p-2 border rounded-lg disabled:opacity-30"><ChevronRight size={16} /></button></div></div></section>}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <p className="text-[11px] font-bold text-slate-500 uppercase">Destinatarios</p>
-                <p className="text-xl font-bold text-slate-800">{previewRecipients.length}</p>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <p className="text-[11px] font-bold text-slate-500 uppercase">Modo</p>
-                <p className="text-xl font-bold text-slate-800">{isScheduled ? 'Agendado' : 'Imediato'}</p>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <p className="text-[11px] font-bold text-slate-500 uppercase">Ritmo</p>
-                <p className="text-xl font-bold text-slate-800">{sendDelay} ms</p>
-              </div>
-            </div>
+      {activeTab === 'templates' && <div className="grid lg:grid-cols-3 gap-5 items-start">
+        <section className="bg-white border rounded-2xl p-4 shadow-sm"><div className="flex justify-between items-center mb-3"><h3 className="font-bold">Biblioteca</h3>{canCreate && <button onClick={() => setTemplateDraft({ name: '', subject: '', body: '', preheader: '', category: 'Geral', approval_status: 'draft' })} className="p-2 bg-blue-600 text-white rounded-lg" title="Novo"><Plus size={16} /></button>}</div><div className="space-y-2 max-h-[650px] overflow-y-auto">{templates.map((template) => <button key={template.id} onClick={() => setTemplateDraft({ ...template })} className={`w-full text-left p-3 border rounded-xl ${templateDraft?.id === template.id ? 'border-blue-400 bg-blue-50' : 'hover:bg-slate-50'}`}><div className="flex justify-between gap-2"><span className="font-semibold text-sm">{template.name}</span><span className={`text-[10px] px-2 py-0.5 rounded-full ${template.approval_status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{template.approval_status === 'approved' ? 'Aprovado' : 'Rascunho'}</span></div><p className="text-xs text-slate-500 mt-1 truncate">{template.category || 'Geral'} · v{template.version || 1}</p></button>)}</div></section>
+        <section className="lg:col-span-2 bg-white border rounded-2xl p-5 shadow-sm">{templateDraft ? <div className="space-y-4"><div className="flex justify-between items-center"><h3 className="font-bold text-lg">{templateDraft.id ? 'Editar template' : 'Novo template'}</h3><div className="flex gap-2">{templateDraft.id && canDelete && <button onClick={() => setTemplateDeleteId(templateDraft.id || null)} className="p-2 border border-red-200 text-red-600 rounded-lg" title="Arquivar"><Archive size={16} /></button>}<button onClick={() => setTemplateDraft(null)} className="p-2 border rounded-lg"><X size={16} /></button></div></div>
+          <div className="grid md:grid-cols-3 gap-3"><label className="text-sm font-semibold">Nome<input value={templateDraft.name || ''} onChange={(event) => setTemplateDraft({ ...templateDraft, name: event.target.value })} className="mt-1 w-full border rounded-lg px-3 py-2 font-normal" /></label><label className="text-sm font-semibold">Categoria<input value={templateDraft.category || ''} onChange={(event) => setTemplateDraft({ ...templateDraft, category: event.target.value })} className="mt-1 w-full border rounded-lg px-3 py-2 font-normal" /></label><label className="text-sm font-semibold">Estado<select disabled={!canEdit} value={templateDraft.approval_status || 'draft'} onChange={(event) => setTemplateDraft({ ...templateDraft, approval_status: event.target.value as EmailTemplate['approval_status'] })} className="mt-1 w-full border rounded-lg px-3 py-2 bg-white font-normal"><option value="draft">Rascunho</option><option value="approved">Aprovado</option></select></label></div>
+          <label className="block text-sm font-semibold">Assunto<input value={templateDraft.subject || ''} onChange={(event) => setTemplateDraft({ ...templateDraft, subject: event.target.value })} className="mt-1 w-full border rounded-lg px-3 py-2 font-normal" /></label><label className="block text-sm font-semibold">Preheader<input value={templateDraft.preheader || ''} onChange={(event) => setTemplateDraft({ ...templateDraft, preheader: event.target.value })} className="mt-1 w-full border rounded-lg px-3 py-2 font-normal" /></label>
+          <textarea ref={templateBodyRef} value={templateDraft.body || ''} onChange={(event) => setTemplateDraft({ ...templateDraft, body: event.target.value })} className="w-full min-h-64 border rounded-xl p-4 text-[15px] leading-7" />
+          <div className="flex flex-wrap gap-1.5">{ALL_EMAIL_VARIABLES.map((variable) => <button key={variable} onClick={() => insertAtCursor(templateDraft.body || '', (value) => setTemplateDraft({ ...templateDraft, body: value }), templateBodyRef.current, `{{${variable}}}`)} className="px-2 py-1 bg-slate-100 rounded text-xs font-mono">{`{{${variable}}}`}</button>)}</div>
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4"><p className="font-bold text-indigo-900 flex items-center gap-2"><BrainCircuit size={17} />Assistente de rascunho</p><div className="grid md:grid-cols-[1fr,160px,auto] gap-2 mt-3"><input value={aiTopic} onChange={(event) => setAiTopic(event.target.value)} className="border rounded-lg px-3 py-2 text-sm" placeholder="Tema e pontos obrigatórios" /><select value={aiTone} onChange={(event) => setAiTone(event.target.value)} className="border rounded-lg px-3 py-2 bg-white text-sm"><option>Profissional</option><option>Informativo</option><option>Próximo</option></select><button onClick={() => void generateWithAi()} disabled={isGenerating} className="bg-indigo-600 text-white rounded-lg px-4 py-2 text-sm font-bold">{isGenerating ? 'A gerar…' : 'Gerar'}</button></div><p className="text-xs text-indigo-700 mt-2">A IA cria apenas um rascunho; confirme sempre prazos, valores e enquadramento legal.</p></div>
+          <div className="flex justify-end"><button onClick={() => void saveTemplate()} disabled={!canEdit && Boolean(templateDraft.id) || !canCreate && !templateDraft.id || isWorking} className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-bold flex gap-2 disabled:opacity-40"><Save size={17} />Guardar template</button></div>
+        </div> : <div className="py-24 text-center text-slate-400"><LayoutTemplate className="mx-auto mb-3" size={36} /><p>Selecione ou crie um template.</p></div>}</section>
+      </div>}
 
-            {isScheduled && (
-              <div className="mb-4 p-3 rounded-lg bg-yellow-50 border border-yellow-200 text-sm text-yellow-800">
-                Agendado para: {scheduleDateTime ? new Date(scheduleDateTime).toLocaleString('pt-PT') : '-'}
-              </div>
-            )}
+      {activeTab === 'automations' && <div className="grid lg:grid-cols-3 gap-5 items-start"><section className="bg-white border rounded-2xl p-4 shadow-sm"><div className="flex justify-between items-center mb-3"><div><h3 className="font-bold">Regras mensais</h3><p className="text-xs text-slate-500">Uma execução por mês</p></div>{canCreate && <button onClick={() => setAutomationDraft({ name: '', is_active: true, client_group: groups[0]?.name || '', admin_email: accessProfile.email, from_name: globalSettings.fromName || '', from_email: globalSettings.fromEmail || '', reply_to: globalSettings.fromEmail || '', subject_hint: '', ai_instructions: '', schedule_day: 1, schedule_hour: 9, requires_approval: true, campaign_type: 'service' })} className="p-2 bg-blue-600 text-white rounded-lg"><Plus size={16} /></button>}</div><div className="space-y-2">{automations.map((automation) => <button key={automation.id} onClick={() => setAutomationDraft({ ...automation })} className={`w-full text-left p-3 border rounded-xl ${automationDraft?.id === automation.id ? 'border-blue-400 bg-blue-50' : ''}`}><div className="flex justify-between"><span className="font-semibold text-sm">{automation.name}</span><span className={`text-xs ${automation.is_active ? 'text-emerald-700' : 'text-slate-400'}`}>{automation.is_active ? 'Ativo' : 'Pausado'}</span></div><p className="text-xs text-slate-500 mt-1">Dia {automation.schedule_day || 1}, {String(automation.schedule_hour || 9).padStart(2, '0')}:00 · {automation.client_group}</p></button>)}</div></section>
+        <section className="lg:col-span-2 bg-white border rounded-2xl p-5 shadow-sm">{automationDraft ? <div className="space-y-4"><div className="flex justify-between"><div><h3 className="font-bold text-lg">Configurar automatismo</h3><p className="text-sm text-slate-500">Gera uma campanha mensal; aprovação humana ativa por omissão.</p></div><button onClick={() => setAutomationDraft(null)}><X size={18} /></button></div><div className="grid md:grid-cols-2 gap-3"><label className="text-sm font-semibold">Nome<input value={automationDraft.name || ''} onChange={(event) => setAutomationDraft({ ...automationDraft, name: event.target.value })} className="mt-1 w-full border rounded-lg px-3 py-2 font-normal" /></label><label className="text-sm font-semibold">Grupo<select value={automationDraft.client_group || ''} onChange={(event) => setAutomationDraft({ ...automationDraft, client_group: event.target.value })} className="mt-1 w-full border rounded-lg px-3 py-2 bg-white font-normal">{groups.map((group) => <option key={group.id}>{group.name}</option>)}</select></label><label className="text-sm font-semibold">Dia do mês<input type="number" min={1} max={28} value={automationDraft.schedule_day || 1} onChange={(event) => setAutomationDraft({ ...automationDraft, schedule_day: Number(event.target.value) })} className="mt-1 w-full border rounded-lg px-3 py-2 font-normal" /></label><label className="text-sm font-semibold">Hora<input type="number" min={0} max={23} value={automationDraft.schedule_hour ?? 9} onChange={(event) => setAutomationDraft({ ...automationDraft, schedule_hour: Number(event.target.value) })} className="mt-1 w-full border rounded-lg px-3 py-2 font-normal" /></label></div><label className="block text-sm font-semibold">Sugestão de assunto<input value={automationDraft.subject_hint || ''} onChange={(event) => setAutomationDraft({ ...automationDraft, subject_hint: event.target.value })} className="mt-1 w-full border rounded-lg px-3 py-2 font-normal" /></label><label className="block text-sm font-semibold">Instruções obrigatórias<textarea value={automationDraft.ai_instructions || ''} onChange={(event) => setAutomationDraft({ ...automationDraft, ai_instructions: event.target.value })} className="mt-1 w-full min-h-40 border rounded-lg p-3 font-normal" placeholder="Informação validada que o rascunho deve conter. Não dependa da IA para inventar prazos." /></label><div className="grid md:grid-cols-2 gap-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={automationDraft.is_active !== false} onChange={(event) => setAutomationDraft({ ...automationDraft, is_active: event.target.checked })} />Automatismo ativo</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={automationDraft.requires_approval !== false} onChange={(event) => setAutomationDraft({ ...automationDraft, requires_approval: event.target.checked })} />Exigir aprovação antes de enviar</label></div><div className="flex justify-end gap-2">{automationDraft.id && <button onClick={() => void runAutomation(automationDraft as EmailAutomation)} disabled={isWorking} className="px-4 py-2.5 border rounded-lg font-bold flex gap-2"><Play size={16} />Executar agora</button>}<button onClick={() => void saveAutomation()} disabled={isWorking || (!canEdit && Boolean(automationDraft.id)) || (!canCreate && !automationDraft.id)} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-bold flex gap-2 disabled:opacity-40"><Save size={16} />Guardar</button></div></div> : <div className="py-24 text-center text-slate-400"><Workflow className="mx-auto mb-3" size={36} />Selecione ou crie um automatismo.</div>}</section></div>}
 
-            {previewSample ? (
-              <div className="border rounded-lg p-4">
-                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Exemplo de Personalizacao</p>
-                <p className="text-sm font-medium text-slate-700 mb-1">
-                  {previewSample.recipientName} ({previewSample.recipientEmail})
-                </p>
-                <div className="mb-2">
-                  <p className="text-[11px] font-bold text-slate-500 uppercase mb-1">Assunto</p>
-                  <div className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{previewSample.subject}</div>
-                </div>
-                <div>
-                  <p className="text-[11px] font-bold text-slate-500 uppercase mb-1">Corpo</p>
-                  <div className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 whitespace-pre-wrap max-h-64 overflow-y-auto custom-scrollbar">
-                    {previewSample.body}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="border rounded-lg p-8 text-center italic text-slate-400">
-                Sem destinatarios validos para preview.
-              </div>
-            )}
+      {activeTab === 'suppressions' && <section className="bg-white border rounded-2xl shadow-sm overflow-hidden"><div className="p-5 border-b flex flex-col md:flex-row md:items-end justify-between gap-4"><div><h3 className="font-bold text-lg">Lista de supressões</h3><p className="text-sm text-slate-500">Opt-outs, devoluções permanentes, denúncias e bloqueios manuais.</p></div>{canCreate && <div className="flex gap-2"><input type="email" value={newSuppressionEmail} onChange={(event) => setNewSuppressionEmail(event.target.value)} className="border rounded-lg px-3 py-2 text-sm min-w-64" placeholder="email@dominio.pt" /><button onClick={() => void addSuppression()} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold">Bloquear</button></div>}</div><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="text-left px-4 py-3">Email</th><th className="text-left px-4 py-3">Motivo</th><th className="text-left px-4 py-3">Origem</th><th className="text-left px-4 py-3">Data</th><th className="px-4 py-3"></th></tr></thead><tbody className="divide-y">{suppressions.map((item) => <tr key={item.id}><td className="px-4 py-3 font-medium">{item.email}</td><td className="px-4 py-3">{item.reason}</td><td className="px-4 py-3 text-slate-500">{item.source}</td><td className="px-4 py-3 text-slate-500">{new Date(item.created_at).toLocaleString('pt-PT')}</td><td className="px-4 py-3 text-right">{canEdit && <button onClick={() => void liftSuppression(item)} className="text-blue-700 font-bold text-xs">Levantar</button>}</td></tr>)}{!suppressions.length && <tr><td colSpan={5} className="py-14 text-center text-slate-400">Sem endereços suprimidos.</td></tr>}</tbody></table></div></section>}
 
-            <div className="flex justify-end gap-3 pt-5">
-              <button onClick={() => setIsPreviewModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-sm">
-                Cancelar
-              </button>
-              <button
-                onClick={handleConfirmSendCampaign}
-                disabled={isSending || previewRecipients.length === 0}
-                className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 disabled:opacity-50"
-              >
-                {isSending ? <RefreshCcw size={16} className="animate-spin" /> : <Send size={16} />}
-                Confirmar Envio
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {isRecipientModalOpen && <div className="fixed inset-0 z-[70] bg-slate-950/60 p-4 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Selecionar destinatários"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col"><div className="p-5 border-b flex justify-between"><div><h3 className="font-bold text-lg">Selecionar destinatários</h3><p className="text-sm text-slate-500">Destinatários protegidos não podem ser selecionados.</p></div><button onClick={() => setIsRecipientModalOpen(false)}><X size={20} /></button></div><div className="p-4 border-b space-y-3"><div className="relative"><Search size={16} className="absolute left-3 top-3 text-slate-400" /><input autoFocus value={recipientSearch} onChange={(event) => setRecipientSearch(event.target.value)} className="w-full border rounded-lg pl-10 pr-3 py-2.5" placeholder="Pesquisar nome, email ou NIF" /></div><div className="flex justify-between text-sm"><span>{selectedRecipients.length} selecionados</span><button onClick={() => { const eligibleVisible = filteredRecipients.filter((client) => eligibility.get(client.id) === '').map((client) => client.id); const allSelected = eligibleVisible.every((id) => selectedRecipients.includes(id)); setSelectedRecipients((current) => allSelected ? current.filter((id) => !eligibleVisible.includes(id)) : Array.from(new Set([...current, ...eligibleVisible]))); }} className="text-blue-700 font-bold">Selecionar/desselecionar elegíveis</button></div></div><div className="overflow-y-auto flex-1 p-3"><div className="divide-y border rounded-xl">{filteredRecipients.map((client) => { const reason = eligibility.get(client.id) || ''; return <label key={client.id} className={`flex items-center gap-3 p-3 ${reason ? 'bg-slate-50 opacity-65' : 'hover:bg-blue-50 cursor-pointer'}`}><input type="checkbox" disabled={Boolean(reason)} checked={selectedRecipients.includes(client.id)} onChange={() => setSelectedRecipients((current) => current.includes(client.id) ? current.filter((id) => id !== client.id) : [...current, client.id])} /><div className="min-w-0 flex-1"><p className="font-semibold text-sm truncate">{client.name}</p><p className="text-xs text-slate-500 truncate">{client.email || 'Sem email'} · {client.nif}</p></div>{reason && <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-1 rounded">{reason}</span>}</label>; })}</div></div><div className="p-4 border-t flex justify-end"><button onClick={() => setIsRecipientModalOpen(false)} className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-bold">Confirmar seleção</button></div></div></div>}
 
-      {/* Campaign Result Modal */}
-      {campaignResult && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold">Resultado da Campanha</h3>
-                <button onClick={() => setCampaignResult(null)}><X size={20} /></button>
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-center mb-4">
-                <div className="bg-green-50 p-4 rounded-lg">
-                <p className="text-xs font-bold uppercase text-green-700">Sucessos</p>
-                <p className="text-2xl font-bold">{campaignResult.successCount}</p>
-                </div>
-                <div className="bg-red-50 p-4 rounded-lg">
-                <p className="text-xs font-bold uppercase text-red-700">Falhas</p>
-                <p className="text-2xl font-bold">{campaignResult.errorCount}</p>
-                </div>
-            </div>
-            <div className="max-h-80 overflow-y-auto border rounded-lg custom-scrollbar">
-                <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-slate-50">
-                    <tr>
-                    <th className="p-2 text-left">Destinatário</th>
-                    <th className="p-2 text-left">Email</th>
-                    <th className="p-2 text-center">Estado</th>
-                    <th className="p-2 text-left">Detalhe</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    {campaignResult.details.map((detail, i) => (
-                    <tr key={i} className={detail.status === 'error' ? 'bg-red-50/50' : ''}>
-                        <td className="p-2 font-medium">{detail.name}</td>
-                        <td className="p-2 text-slate-500">{detail.email}</td>
-                        <td className={`p-2 text-center font-bold ${detail.status === 'success' ? 'text-green-600' : 'text-red-600'}`}>{detail.status === 'success' ? 'Enviado' : 'Falhou'}</td>
-                        <td className="p-2 text-red-500 italic">{detail.error}</td>
-                    </tr>
-                    ))}
-                </tbody>
-                </table>
-            </div>
-            <div className="text-right mt-4"><button onClick={() => setCampaignResult(null)} className="bg-slate-700 text-white px-6 py-2 rounded-lg font-bold">Fechar</button></div>
-            </div>
-        </div>
-      )}
+      {isReviewOpen && <div className="fixed inset-0 z-[70] bg-slate-950/60 p-4 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Rever campanha"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6"><div className="flex justify-between"><div><h3 className="font-bold text-xl">Revisão final</h3><p className="text-sm text-slate-500">Confirme o público e o modo de envio.</p></div><button onClick={() => setIsReviewOpen(false)}><X size={20} /></button></div><div className="grid grid-cols-3 gap-3 my-5 text-center"><div className="bg-slate-50 rounded-xl p-3"><p className="text-xs uppercase font-bold text-slate-400">Destinatários</p><p className="text-2xl font-bold">{selectedRecipients.length}</p></div><div className="bg-slate-50 rounded-xl p-3"><p className="text-xs uppercase font-bold text-slate-400">Tipo</p><p className="font-bold mt-1">{campaignType === 'marketing' ? 'Marketing' : 'Serviço'}</p></div><div className="bg-slate-50 rounded-xl p-3"><p className="text-xs uppercase font-bold text-slate-400">Modo</p><p className="font-bold mt-1">{requiresApproval ? 'Rascunho' : isScheduled ? 'Agendado' : 'Imediato'}</p></div></div><div className="border rounded-xl overflow-hidden"><div className="px-4 py-2 border-b bg-slate-50"><p className="text-xs uppercase font-bold text-slate-400">Assunto de exemplo</p><p className="font-semibold text-sm">{preview?.subject}</p></div>{preview ? <iframe title="Preview final do email" sandbox="" srcDoc={buildEmailPreviewDocument(preview.html, preheader, campaignType)} className="w-full h-[260px] border-0" /> : <p className="p-4 text-sm text-slate-400">Sem destinatário elegível para pré-visualizar.</p>}{isScheduled && <p className="text-sm text-violet-700 px-4 pb-3">Envio a {new Date(scheduleDateTime).toLocaleString('pt-PT')}</p>}</div><div className="bg-blue-50 border border-blue-100 text-blue-900 rounded-xl p-3 mt-4 text-sm flex gap-2"><ShieldCheck size={18} className="shrink-0" /><span>Depois de confirmar, a campanha fica guardada no servidor com idempotência e tentativas automáticas. Fechar o browser não interrompe o envio.</span></div><div className="flex justify-end gap-3 mt-6"><button onClick={() => setIsReviewOpen(false)} className="px-4 py-2.5 border rounded-lg font-bold">Voltar</button><button onClick={() => void createCampaign()} disabled={isWorking} className="px-5 py-2.5 bg-slate-900 text-white rounded-lg font-bold flex gap-2 disabled:opacity-40">{isWorking ? <RefreshCcw size={17} className="animate-spin" /> : <Send size={17} />}Confirmar</button></div></div></div>}
 
-      {/* History Recipient Details Modal */}
-      {selectedHistoryCampaign && (() => {
-        const details = getRecipientResults(selectedHistoryCampaign);
-        const successCount = details.filter(d => d.status === 'success').length;
-        const errorCount = details.filter(d => d.status === 'error').length;
-        const sentAtText = selectedHistoryCampaign.sent_at ? new Date(selectedHistoryCampaign.sent_at).toLocaleString('pt-PT') : '-';
+      {selectedCampaign && <div className="fixed inset-0 z-[70] bg-slate-950/60 p-4 flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Detalhes da campanha"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col"><div className="p-5 border-b flex justify-between"><div><h3 className="font-bold text-lg">Destinatários da campanha</h3><p className="text-sm text-slate-500 max-w-2xl truncate">{selectedCampaign.subject}</p></div><button onClick={() => setSelectedCampaign(null)}><X size={20} /></button></div><div className="overflow-auto flex-1"><table className="w-full text-sm"><thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="text-left px-4 py-3">Destinatário</th><th className="text-left px-4 py-3">Estado</th><th className="text-center px-4 py-3">Tentativas</th><th className="text-left px-4 py-3">Detalhe</th></tr></thead><tbody className="divide-y">{recipientDetails.map((detail) => <tr key={detail.id || detail.email}><td className="px-4 py-3"><p className="font-semibold">{detail.name}</p><p className="text-xs text-slate-500">{detail.email}</p></td><td className="px-4 py-3"><span className="text-xs font-bold px-2 py-1 rounded bg-slate-100">{recipientStatusLabel[detail.status] || detail.status}</span></td><td className="px-4 py-3 text-center">{detail.attempts ?? '-'}/{detail.max_attempts ?? '-'}</td><td className="px-4 py-3 text-xs text-red-700">{detail.error || detail.exclusion_reason || detail.provider_message_id || '-'}</td></tr>)}{isLoadingDetails && <tr><td colSpan={4} className="py-14 text-center"><RefreshCcw className="animate-spin mx-auto" /></td></tr>}{!isLoadingDetails && !recipientDetails.length && <tr><td colSpan={4} className="py-14 text-center text-slate-400">Sem detalhe disponível.</td></tr>}</tbody></table></div><div className="p-4 border-t text-right"><button onClick={() => setSelectedCampaign(null)} className="px-5 py-2 bg-slate-900 text-white rounded-lg font-bold">Fechar</button></div></div></div>}
 
-        return (
-          <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6">
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="text-lg font-bold">Detalhe de Envios</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">{sentAtText} - {selectedHistoryCampaign.subject}</p>
-                </div>
-                <button onClick={() => setSelectedHistoryCampaign(null)}><X size={20} /></button>
-              </div>
-
-              {details.length > 0 ? (
-                <>
-                  <div className="grid grid-cols-2 gap-4 text-center mb-4">
-                    <div className="bg-green-50 p-4 rounded-lg">
-                      <p className="text-xs font-bold uppercase text-green-700">Sucessos</p>
-                      <p className="text-2xl font-bold">{successCount}</p>
-                    </div>
-                    <div className="bg-red-50 p-4 rounded-lg">
-                      <p className="text-xs font-bold uppercase text-red-700">Falhas</p>
-                      <p className="text-2xl font-bold">{errorCount}</p>
-                    </div>
-                  </div>
-                  <div className="max-h-80 overflow-y-auto border rounded-lg custom-scrollbar">
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-slate-50">
-                        <tr>
-                          <th className="p-2 text-left">Destinatário</th>
-                          <th className="p-2 text-left">Email</th>
-                          <th className="p-2 text-center">Estado</th>
-                          <th className="p-2 text-left">Detalhe</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {details.map((detail, i) => (
-                          <tr key={`${detail.email}-${i}`} className={detail.status === 'error' ? 'bg-red-50/50' : ''}>
-                            <td className="p-2 font-medium">{detail.name}</td>
-                            <td className="p-2 text-slate-500">{detail.email}</td>
-                            <td className={`p-2 text-center font-bold ${detail.status === 'success' ? 'text-green-600' : 'text-red-600'}`}>
-                              {detail.status === 'success' ? 'Enviado' : 'Falhou'}
-                            </td>
-                            <td className="p-2 text-red-500 italic">{detail.error || '-'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : (
-                <div className="border rounded-lg p-8 text-center text-sm text-slate-500 italic">
-                  Esta campanha não tem detalhe por destinatário guardado.
-                </div>
-              )}
-
-              <div className="text-right mt-4">
-                <button onClick={() => setSelectedHistoryCampaign(null)} className="bg-slate-700 text-white px-6 py-2 rounded-lg font-bold">Fechar</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Recipient Selection Modal */}
-      {isRecipientModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl flex flex-col max-h-[80vh]">
-                <div className="p-6 border-b flex justify-between items-center">
-                    <h3 className="text-xl font-bold">Selecionar Destinatários</h3>
-                    <button onClick={() => setIsRecipientModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
-                </div>
-                
-                <div className="p-4 border-b">
-                    <div className="relative">
-                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input 
-                            type="text"
-                            placeholder="Pesquisar por nome ou email..."
-                            value={recipientSearch}
-                            onChange={e => setRecipientSearch(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm"
-                        />
-                    </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                    <div className="flex justify-between items-center mb-2 px-2">
-                        <p className="text-xs font-bold text-slate-500">{selectedRecipients.length} de {filteredRecipients.length} selecionados</p>
-                        <button
-                            onClick={() => {
-                                const allVisibleIds = filteredRecipients.map(c => c.id);
-                                const allVisibleSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => selectedRecipients.includes(id));
-
-                                if (allVisibleSelected) {
-                                    setSelectedRecipients(prev => prev.filter(id => !allVisibleIds.includes(id)));
-                                } else {
-                                    setSelectedRecipients(prev => Array.from(new Set([...prev, ...allVisibleIds])));
-                                }
-                            }}
-                            className="text-xs font-medium text-blue-600 hover:underline"
-                        >
-                            {filteredRecipients.length > 0 && filteredRecipients.every(c => selectedRecipients.includes(c.id)) ? 'Desselecionar Visíveis' : 'Selecionar Visíveis'}
-                        </button>
-                    </div>
-                    <div className="border rounded-lg bg-slate-50/50 p-2 space-y-1">
-                        {filteredRecipients.map(client => (
-                            <label key={client.id} className="flex items-center gap-3 p-2 rounded hover:bg-slate-100 cursor-pointer text-sm">
-                                <input 
-                                    type="checkbox" 
-                                    className="rounded h-4 w-4 text-blue-600 focus:ring-blue-500"
-                                    checked={selectedRecipients.includes(client.id)}
-                                    onChange={() => {
-                                        setSelectedRecipients(prev => 
-                                            prev.includes(client.id) ? prev.filter(id => id !== client.id) : [...prev, client.id]
-                                        );
-                                    }}
-                                />
-                                <div>
-                                    <span className="font-medium text-slate-800">{client.name}</span>
-                                    <span className="text-xs text-slate-400 ml-2">{client.email}</span>
-                                </div>
-                            </label>
-                        ))}
-                        {filteredRecipients.length === 0 && <p className="text-center text-slate-400 italic py-4">Nenhum cliente encontrado.</p>}
-                    </div>
-                </div>
-
-                <div className="p-4 bg-slate-50 border-t flex justify-end"><button onClick={() => setIsRecipientModalOpen(false)} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">Confirmar Seleção</button></div>
-            </div>
-        </div>
-      )}
+      {templateDeleteId && <div className="fixed inset-0 z-[80] bg-slate-950/60 p-4 flex items-center justify-center"><div className="bg-white rounded-2xl p-6 max-w-md"><h3 className="font-bold text-lg">Arquivar template?</h3><p className="text-sm text-slate-500 mt-2">O histórico mantém a versão usada nas campanhas anteriores.</p><div className="flex justify-end gap-2 mt-6"><button onClick={() => setTemplateDeleteId(null)} className="px-4 py-2 border rounded-lg">Cancelar</button><button onClick={() => void archiveTemplate()} className="px-4 py-2 bg-red-600 text-white rounded-lg font-bold">Arquivar</button></div></div></div>}
     </div>
   );
 };
 
 export default EmailCampaigns;
-
-
-
 

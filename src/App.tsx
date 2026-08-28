@@ -867,11 +867,12 @@ export default function App() {
               )}
               {activeView === 'billing' && <BillingControl clients={clients} setClients={setClients} />}
               {activeView === 'emails' && (
-                <EmailCampaigns 
-                  clients={clients} groups={groups} staff={staff} 
+                <EmailCampaigns
+                  clients={clients} groups={groups} staff={staff}
                   templates={templates} setTemplates={setTemplates}
                   globalSettings={globalSettings}
                   history={campaignHistory} setHistory={setCampaignHistory}
+                  accessProfile={accessProfile}
                 />
               )}
               {activeView === 'insurance' && (

@@ -492,6 +492,47 @@ const ClientDetail: React.FC<ClientDetailProps> = ({ client, tasks, areaCosts, s
                         <input type="checkbox" checked={editedClient.hasManagementReports ?? false} onChange={e => {setEditedClient({...editedClient, hasManagementReports: e.target.checked}); setIsDirty(true);}} className="rounded text-blue-600 focus:ring-blue-500" />
                     </label>
                  </div>
+
+                 <div className="border-t border-slate-100 my-4"></div>
+
+                 <div>
+                   <p className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-2"><Shield size={14} className="text-slate-500"/> Consentimento de Marketing</p>
+                   <select
+                     value={editedClient.emailMarketingStatus || 'unknown'}
+                     onChange={e => {
+                       const nextStatus = e.target.value as Client['emailMarketingStatus'];
+                       const hasBasis = nextStatus === 'consented' || nextStatus === 'legitimate_interest';
+                       setEditedClient({
+                         ...editedClient,
+                         emailMarketingStatus: nextStatus,
+                         emailMarketingConsentAt: hasBasis
+                           ? (nextStatus === (client.emailMarketingStatus || 'unknown') && client.emailMarketingConsentAt
+                             ? client.emailMarketingConsentAt
+                             : new Date().toISOString())
+                           : null,
+                         emailMarketingConsentSource: hasBasis ? editedClient.emailMarketingConsentSource : null,
+                       });
+                       setIsDirty(true);
+                     }}
+                     className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm bg-white"
+                   >
+                     <option value="unknown">Desconhecido (não elegível para marketing)</option>
+                     <option value="consented">Consentimento registado</option>
+                     <option value="legitimate_interest">Interesse legítimo</option>
+                     <option value="opted_out">Oposição (não contactar)</option>
+                   </select>
+                   {(editedClient.emailMarketingStatus === 'consented' || editedClient.emailMarketingStatus === 'legitimate_interest') && (
+                     <input
+                       value={editedClient.emailMarketingConsentSource || ''}
+                       onChange={e => { setEditedClient({ ...editedClient, emailMarketingConsentSource: e.target.value }); setIsDirty(true); }}
+                       placeholder="Base do consentimento (ex.: formulário assinado, reunião)"
+                       className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm mt-2"
+                     />
+                   )}
+                   {editedClient.emailMarketingConsentAt && (
+                     <p className="text-[11px] text-slate-400 mt-1">Registado em {new Date(editedClient.emailMarketingConsentAt).toLocaleString('pt-PT')}.</p>
+                   )}
+                 </div>
                </div>
             </div>
 

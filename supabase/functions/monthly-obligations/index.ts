@@ -1,14 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { GoogleGenerativeAI } from "npm:@google/generative-ai";
-import nodemailer from "npm:nodemailer@6.9.15";
-
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-cron-secret",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { AppAuthorizationError, requireAppPermission } from "../_shared/authorization.ts";
+import {
+  buildEmailDocument,
+  cleanEmailHeader,
+  createEmailTransport,
+  emailCorsHeaders,
+  escapeEmailHtml,
+  getEmailSender,
+  htmlToReadableText,
+  mustEmailEnv,
+  normalizeEmailAddress,
+} from "../_shared/email.ts";
 
 type Automation = {
   id: string;
@@ -21,405 +25,254 @@ type Automation = {
   reply_to?: string | null;
   subject_hint: string;
   ai_instructions: string;
+  schedule_day?: number;
+  schedule_hour?: number;
+  requires_approval?: boolean;
+  campaign_type?: "service" | "marketing";
 };
 
-type Client = {
-  id: string;
-  name: string;
-  email: string;
-  phone?: string | null;
-  address?: string | null;
-  nif?: string | null;
-  sector?: string | null;
-  entityType?: string | null;
-  responsibleStaff?: string | null;
-  monthlyFee?: number | null;
-  turnover?: number | null;
-  status?: string | null;
-  contractRenewalDate?: string | null;
-};
+const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+  status,
+  headers: { ...emailCorsHeaders, "Content-Type": "application/json" },
+});
 
-type FeeGroup = {
-  id: string;
-  name: string;
-  clientIds: string[];
-};
-
-type Staff = {
-  id: string;
-  name: string;
-};
-
-function mustEnv(name: string): string {
-  const v = Deno.env.get(name);
-  if (!v) throw new Error(`Missing secret/env: ${name}`);
-  return v;
-}
-
-function parseBool(value: string | undefined, fallback: boolean): boolean {
-  if (value == null) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return fallback;
-  return ["1", "true", "yes", "on"].includes(normalized);
-}
-
-function stripHtmlToText(input: string): string {
-  return input
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function cleanHeaderValue(input: string): string {
-  return (input || "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function extractFirstJsonObject(text: string): any {
+const extractJson = (text: string): { subject: string; html: string } => {
   const cleaned = text.replace(/```(?:json)?/gi, "").trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("A IA não devolveu JSON válido.");
-  return JSON.parse(match[0]);
-}
+  const parsed = JSON.parse(match[0]);
+  const subject = String(parsed.subject || "").trim();
+  const html = String(parsed.html || "").trim();
+  if (!subject || !html) throw new Error("A IA devolveu conteúdo incompleto.");
+  return { subject, html };
+};
 
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function toNumber(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function renderTemplate(template: string, client: Client, responsibleName?: string): string {
-  // Replace {{var}} placeholders (same idea as your EmailCampaigns UI)
-  return template
-    .replaceAll("{{name}}", escapeHtml(client.name ?? ""))
-    .replaceAll("{{responsible_name}}", escapeHtml(responsibleName ?? ""))
-    .replaceAll("{{nif}}", escapeHtml(client.nif ?? ""))
-    .replaceAll("{{email}}", escapeHtml(client.email ?? ""))
-    .replaceAll("{{phone}}", escapeHtml(client.phone ?? ""))
-    .replaceAll("{{address}}", escapeHtml(client.address ?? ""))
-    .replaceAll("{{sector}}", escapeHtml(client.sector ?? ""))
-    .replaceAll("{{entityType}}", escapeHtml(client.entityType ?? ""))
-    .replaceAll("{{avenca_atual}}", client.monthlyFee != null ? String(client.monthlyFee) : "")
-    .replaceAll("{{turnover}}", client.turnover != null ? String(client.turnover) : "")
-    .replaceAll("{{status}}", escapeHtml(client.status ?? ""))
-    .replaceAll("{{contractRenewalDate}}", escapeHtml(client.contractRenewalDate ?? ""));
-}
-
-async function sendSmtpEmail(params: {
-  to: string;
-  subject: string;
-  html: string;
-  fromName: string;
-  fromEmail: string;
-  replyTo?: string | null;
-}): Promise<void> {
-  const smtpHost = mustEnv("SMTP_HOST");
-  const smtpUsername = mustEnv("SMTP_USERNAME");
-  const smtpPassword = mustEnv("SMTP_PASSWORD");
-  const smtpPortRaw = Deno.env.get("SMTP_PORT") ?? "465";
-  const smtpPort = Number.parseInt(smtpPortRaw, 10);
-  if (!Number.isInteger(smtpPort) || smtpPort <= 0) {
-    throw new Error("SMTP_PORT is invalid. Use a numeric value (example: 465).");
-  }
-
-  const smtpTls = parseBool(Deno.env.get("SMTP_TLS"), true);
-  if ([25, 587].includes(smtpPort)) {
-    throw new Error("SMTP port 25/587 is blocked in hosted Edge Functions. Configure SMTP_PORT=465 and SMTP_TLS=true.");
-  }
-
-  const envFromEmail = (Deno.env.get("SMTP_FROM_EMAIL") || smtpUsername).trim();
-  if (!envFromEmail.includes("@")) {
-    throw new Error("SMTP_FROM_EMAIL (or SMTP_USERNAME) must be a valid email.");
-  }
-
-  const envFromName = (Deno.env.get("SMTP_FROM_NAME") || "").trim();
-  const fromName =
-    params.fromName?.trim() ||
-    envFromName ||
-    envFromEmail.split("@")[0];
-  const from = {
-    name: cleanHeaderValue(fromName),
-    address: envFromEmail,
+const renderTemplate = (template: string, client: any, responsibleName: string, html: boolean): string => {
+  const safe = (value: unknown) => html ? escapeEmailHtml(String(value ?? "")) : String(value ?? "");
+  const replacements: Record<string, string> = {
+    name: safe(client.name),
+    responsible_name: safe(responsibleName),
+    nif: safe(client.nif),
+    email: safe(client.email),
+    phone: safe(client.phone),
+    address: safe(client.address),
+    sector: safe(client.sector),
+    entityType: safe(client.entity_type),
+    avenca_atual: client.monthly_fee == null ? "" : `${Number(client.monthly_fee).toFixed(2).replace(".", ",")} €`,
+    turnover: client.turnover == null ? "" : String(client.turnover),
+    status: safe(client.status),
+    contractRenewalDate: safe(client.contract_renewal_date),
   };
+  return Object.entries(replacements).reduce(
+    (result, [key, value]) => result.replaceAll(`{{${key}}}`, value),
+    template,
+  );
+};
 
-  let effectiveReplyTo = params.replyTo?.trim() || "";
-  if (!effectiveReplyTo && params.fromEmail?.trim() && params.fromEmail.trim().toLowerCase() !== envFromEmail.toLowerCase()) {
-    effectiveReplyTo = params.fromEmail.trim();
-  }
+const lisbonParts = () => Object.fromEntries(
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date()).filter((part) => part.type !== "literal").map((part) => [part.type, part.value]),
+);
 
-  const transport = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpTls,
-    auth: {
-      user: smtpUsername,
-      pass: smtpPassword,
-    },
-  });
+const authorize = async (req: Request) => {
+  const expected = Deno.env.get("CRON_SECRET")?.trim();
+  const supplied = req.headers.get("x-cron-secret")?.trim();
+  if (expected && supplied === expected) return;
+  await requireAppPermission(req, "emails", "create");
+};
 
+const notifyFailure = async (automation: Automation | null, message: string, runId: string | null) => {
+  const email = normalizeEmailAddress(automation?.admin_email || Deno.env.get("DEFAULT_ADMIN_EMAIL") || "mpr@mpr.pt");
+  if (!email) return;
+  const transport = createEmailTransport();
   try {
+    const html = buildEmailDocument({
+      html: `<h2>Falha na automação de email</h2><p><strong>Automação:</strong> ${escapeEmailHtml(automation?.name || "-")}</p><p><strong>Erro:</strong> ${escapeEmailHtml(message)}</p>${runId ? `<p><strong>Execução:</strong> ${escapeEmailHtml(runId)}</p>` : ""}`,
+    });
     await transport.sendMail({
-      from,
-      to: cleanHeaderValue(params.to),
-      subject: cleanHeaderValue(params.subject),
-      html: params.html,
-      text: stripHtmlToText(params.html) || "Mensagem",
-      replyTo: effectiveReplyTo || undefined,
+      to: email,
+      from: getEmailSender(Deno.env.get("DEFAULT_FROM_NAME") || "MPR"),
+      subject: cleanEmailHeader(`Erro na automação de email: ${automation?.name || "CMRMPR"}`),
+      html,
+      text: htmlToReadableText(html),
     });
   } finally {
     transport.close();
   }
-}
+};
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
-  const startedAt = new Date();
+  if (req.method === "OPTIONS") return new Response("ok", { headers: emailCorsHeaders });
   let runId: string | null = null;
-
+  let automation: Automation | null = null;
+  let supabase: ReturnType<typeof createClient> | null = null;
   try {
-    // 🔒 Protect the cron-triggered endpoint
-    const expected = mustEnv("CRON_SECRET");
-    const got = req.headers.get("x-cron-secret");
-    if (!got || got !== expected) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 401,
-      });
-    }
-
+    if (req.method !== "POST") throw new AppAuthorizationError("Método não permitido.", 405);
+    await authorize(req);
     const body = await req.json().catch(() => ({}));
-    const automationId: string | undefined = body.automation_id;
-    const runMonth: string = body.month ?? new Date().toISOString().slice(0, 7); // YYYY-MM
+    const force = body.force === true;
+    const parts = lisbonParts();
+    const runMonth = String(body.month || `${parts.year}-${parts.month}`);
 
-    // Supabase admin client (service role)
-    const SUPABASE_URL = mustEnv("SUPABASE_URL");
-    const SUPABASE_SERVICE_ROLE_KEY = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    supabase = createClient(mustEmailEnv("SUPABASE_URL"), mustEmailEnv("SUPABASE_SERVICE_ROLE_KEY"), {
       auth: { persistSession: false },
     });
 
-    // Load automation
-    let automation: Automation | null = null;
-    if (automationId) {
-      const { data, error } = await supabase
-        .from("email_automations")
-        .select("*")
-        .eq("id", automationId)
-        .maybeSingle();
-      if (error) throw error;
-      automation = data as Automation | null;
-    } else {
-      // fallback: first active automation
-      const { data, error } = await supabase
+    if (body.automation_id) {
+      const { data: selectedAutomation, error: automationError } = await supabase
         .from("email_automations")
         .select("*")
         .eq("is_active", true)
-        .order("created_at", { ascending: true })
-        .limit(1);
-      if (error) throw error;
-      automation = (data?.[0] ?? null) as Automation | null;
-    }
-
-    if (!automation) throw new Error("Automation not found (email_automations).");
-    if (!automation.is_active) throw new Error(`Automation "${automation.name}" is inactive.`);
-
-    // Create run record
-    {
-      const { data, error } = await supabase
+        .eq("id", body.automation_id)
+        .maybeSingle();
+      if (automationError) throw automationError;
+      automation = selectedAutomation as Automation | null;
+    } else {
+      const { data: activeAutomations, error: automationError } = await supabase
+        .from("email_automations")
+        .select("*")
+        .eq("is_active", true)
+        .order("created_at");
+      if (automationError) throw automationError;
+      const { data: completedRuns, error: completedRunsError } = await supabase
         .from("email_automation_runs")
-        .insert({
-          automation_id: automation.id,
-          run_month: runMonth,
-          started_at: startedAt.toISOString(),
-          status: "running",
-        })
-        .select("id")
-        .single();
-      if (error) throw error;
-      runId = data.id;
+        .select("automation_id")
+        .eq("run_month", runMonth)
+        .in("status", ["running", "draft", "queued", "success"]);
+      if (completedRunsError) throw completedRunsError;
+      const completedIds = new Set((completedRuns || []).map((run: any) => run.automation_id));
+      const currentDay = Number(parts.day);
+      const currentHour = Number(parts.hour);
+      automation = ((activeAutomations || []) as Automation[]).find((candidate) => {
+        if (completedIds.has(candidate.id)) return false;
+        const day = Number(candidate.schedule_day || 1);
+        const hour = Number(candidate.schedule_hour || 9);
+        return currentDay > day || (currentDay === day && currentHour >= hour);
+      }) || null;
+    }
+    if (!automation) return response({ ok: true, skipped: true, reason: "Nenhuma automação ativa." });
+
+    const currentDay = Number(parts.day);
+    const currentHour = Number(parts.hour);
+    if (!force && (currentDay < Number(automation.schedule_day || 1) || (currentDay === Number(automation.schedule_day || 1) && currentHour < Number(automation.schedule_hour || 9)))) {
+      return response({ ok: true, skipped: true, reason: "Fora da janela configurada." });
     }
 
-    // Load group
-    const { data: groupData, error: groupErr } = await supabase
+    const { data: previousRun, error: previousError } = await supabase
+      .from("email_automation_runs")
+      .select("id,status")
+      .eq("automation_id", automation.id)
+      .eq("run_month", runMonth)
+      .in("status", ["running", "draft", "queued", "success"])
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (previousError) throw previousError;
+    if (previousRun && !force) return response({ ok: true, skipped: true, reason: "Automação já executada neste mês.", runId: previousRun.id });
+
+    const { data: run, error: runError } = await supabase.from("email_automation_runs").insert({
+      automation_id: automation.id,
+      run_month: runMonth,
+      status: "running",
+    }).select("id").single();
+    if (runError) throw runError;
+    runId = run.id;
+
+    const { data: group, error: groupError } = await supabase
       .from("fee_groups")
-      .select("id,name,clientIds")
+      .select("id,name,client_ids")
       .eq("name", automation.client_group)
       .maybeSingle();
-    if (groupErr) throw groupErr;
+    if (groupError) throw groupError;
+    if (!group) throw new Error(`Grupo "${automation.client_group}" não encontrado.`);
+    const clientIds = Array.isArray(group.client_ids) ? group.client_ids : [];
+    if (!clientIds.length) throw new Error(`Grupo "${group.name}" sem clientes.`);
 
-    const group = groupData as FeeGroup | null;
-    if (!group) throw new Error(`Grupo "${automation.client_group}" não encontrado na tabela fee_groups.`);
-
-    const clientIds = Array.isArray(group.clientIds) ? group.clientIds : [];
-    if (clientIds.length === 0) throw new Error(`Grupo "${group.name}" não tem clientes (clientIds vazio).`);
-
-    // Load clients
-    const { data: clientsData, error: clientsErr } = await supabase
+    const { data: clients, error: clientsError } = await supabase
       .from("clients")
-      .select("id,name,email,phone,address,nif,sector,entityType,responsibleStaff,monthlyFee,turnover,status,contractRenewalDate")
+      .select("id,name,email,phone,address,nif,sector,entity_type,responsavel_interno_id,monthly_fee,turnover,status,contract_renewal_date")
       .in("id", clientIds);
-    if (clientsErr) throw clientsErr;
+    if (clientsError) throw clientsError;
+    if (!clients?.length) throw new Error("A automação não encontrou clientes.");
 
-    const clients = (clientsData ?? []) as Client[];
-    const invalid = clients.filter((c) => !c.email || !c.email.includes("@"));
-    if (invalid.length) {
-      throw new Error(`Há ${invalid.length} cliente(s) sem email válido. Corrija antes de enviar.`);
-    }
-
-    // Load staff (for {{responsible_name}})
-    const staffIds = Array.from(new Set(clients.map((c) => c.responsibleStaff).filter(Boolean))) as string[];
-    let staffMap = new Map<string, string>();
+    const staffIds = Array.from(new Set(clients.map((client: any) => client.responsavel_interno_id).filter(Boolean)));
+    const staffMap = new Map<string, string>();
     if (staffIds.length) {
-      const { data: staffData, error: staffErr } = await supabase
-        .from("staff")
-        .select("id,name")
-        .in("id", staffIds);
-      if (staffErr) throw staffErr;
-
-      (staffData ?? []).forEach((s: any) => staffMap.set(s.id, s.name));
+      const { data: staffRows, error: staffError } = await supabase.from("staff").select("id,name").in("id", staffIds);
+      if (staffError) throw staffError;
+      (staffRows || []).forEach((member: any) => staffMap.set(member.id, member.name));
     }
 
-    // Generate email template via Gemini (one template with variables)
-    const GEMINI_API_KEY = mustEnv("GEMINI_API_KEY");
-    const GEMINI_MODEL = mustEnv("GEMINI_MODEL");
-
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-
+    const model = new GoogleGenerativeAI(mustEmailEnv("GEMINI_API_KEY"))
+      .getGenerativeModel({ model: Deno.env.get("GEMINI_MODEL") || "gemini-2.0-flash" });
     const prompt = `
 És especialista em comunicação para um gabinete de contabilidade em Portugal.
+Cria um rascunho mensal referente a ${runMonth}.
+Assunto pretendido: ${automation.subject_hint}
+Instruções: ${automation.ai_instructions}
+Regras: responde apenas em JSON com {"subject":"...","html":"..."}; usa HTML simples; usa {{name}} e {{responsible_name}}; não inventes prazos, valores ou obrigações; escreve em português de Portugal; máximo 180 palavras.
+    `.trim();
+    const generated = extractJson((await model.generateContent(prompt)).response.text());
 
-Objetivo:
-Gerar um EMAIL MENSAL automático para clientes, referente ao mês ${runMonth}.
-
-Dicas de assunto (podes adaptar):
-${automation.subject_hint}
-
-Instruções (OBRIGATÓRIO cumprir):
-${automation.ai_instructions}
-
-Regras:
-- Responde APENAS em JSON.
-- O JSON deve ter:
-  {
-    "subject": "...",
-    "html": "..." 
-  }
-- Usa as variáveis {{name}} e {{responsible_name}} quando fizer sentido.
-- O campo "html" deve ser HTML simples compatível com email (sem CSS moderno).
-- Não inventes prazos legais se não estiverem nas instruções; se não houver informação suficiente, diz que é um resumo e recomenda validação.
-`.trim();
-
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const parsed = extractFirstJsonObject(text);
-
-    const subjectTemplate = String(parsed.subject ?? "").trim();
-    const htmlTemplate = String(parsed.html ?? "").trim();
-    if (!subjectTemplate || !htmlTemplate) {
-      throw new Error("IA devolveu JSON sem subject/html.");
-    }
-
-    // Send to clients (stop on first failure and notify admin)
-    let successes = 0;
-    const sentTo: string[] = [];
-
-    for (const client of clients) {
-      const responsibleName = client.responsibleStaff ? staffMap.get(client.responsibleStaff) : "";
-      const subject = renderTemplate(subjectTemplate, client, responsibleName);
-      const html = renderTemplate(htmlTemplate, client, responsibleName);
-
-      await sendSmtpEmail({
-        to: client.email,
-        subject,
-        html,
-        fromName: automation.from_name,
-        fromEmail: automation.from_email,
-        replyTo: automation.reply_to ?? null,
-      });
-
-      successes += 1;
-      sentTo.push(client.email);
-    }
-
-    // Mark run as success
-    if (runId) {
-      await supabase
-        .from("email_automation_runs")
-        .update({
-          finished_at: new Date().toISOString(),
-          status: "success",
-          successes,
-          failures: 0,
-          details: { sentTo },
-        })
-        .eq("id", runId);
-    }
-
-    return new Response(JSON.stringify({ ok: true, successes }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 200,
+    const recipients = clients.map((client: any) => {
+      const responsibleName = staffMap.get(client.responsavel_interno_id) || "";
+      return {
+        client_id: client.id,
+        name: client.name,
+        email: client.email,
+        subject: renderTemplate(generated.subject, client, responsibleName, false),
+        html: renderTemplate(generated.html, client, responsibleName, true),
+        metadata: { automation_id: automation!.id, run_month: runMonth },
+      };
     });
-  } catch (err: any) {
-    const msg = typeof err?.message === "string" ? err.message : String(err);
-    console.error("monthly-obligations error:", msg);
 
-    try {
-      // Best-effort: notify admin
-      const admin = Deno.env.get("DEFAULT_ADMIN_EMAIL") ?? "mpr@mpr.pt";
-      const fromName = Deno.env.get("DEFAULT_FROM_NAME") ?? "MPR";
-      const fromEmail = Deno.env.get("DEFAULT_FROM_EMAIL") ?? "no-reply@mpr.pt";
-
-      const subject = `Erro no envio automático (${new Date().toISOString().slice(0, 10)})`;
-      const html = `
-        <p>Olá,</p>
-        <p>Deu erro no envio automático deste mês.</p>
-        <p><strong>Erro:</strong> ${escapeHtml(msg)}</p>
-        ${runId ? `<p><strong>Run ID:</strong> ${escapeHtml(runId)}</p>` : ""}
-        <p>— Sistema</p>
-      `;
-
-      await sendSmtpEmail({ to: admin, subject, html, fromName, fromEmail });
-    } catch (notifyErr) {
-      console.error("Failed to notify admin:", notifyErr);
-    }
-
-    // Update run record if it exists
-    try {
-      const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-      const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-      if (runId && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-          auth: { persistSession: false },
-        });
-        await supabase
-          .from("email_automation_runs")
-          .update({
-            finished_at: new Date().toISOString(),
-            status: "error",
-            successes: 0,
-            failures: 1,
-            error: msg,
-          })
-          .eq("id", runId);
-      }
-    } catch (_e) {}
-
-    return new Response(JSON.stringify({ ok: false, error: msg }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 500,
+    const { data: campaign, error: campaignError } = await supabase.rpc("create_email_campaign", {
+      p_subject: generated.subject,
+      p_body: generated.html,
+      p_group_name: group.name,
+      p_campaign_type: automation.campaign_type || "service",
+      p_preheader: "",
+      p_signature_html: "",
+      p_from_name: automation.from_name,
+      p_from_email: automation.from_email,
+      p_reply_to: automation.reply_to || automation.from_email,
+      p_scheduled_at: new Date().toISOString(),
+      p_template_id: null,
+      p_idempotency_key: `automation:${automation.id}:${runMonth}`,
+      p_requires_approval: automation.requires_approval !== false,
+      p_recipients: recipients,
     });
+    if (campaignError) throw campaignError;
+
+    const runStatus = automation.requires_approval !== false ? "draft" : "queued";
+    await supabase.from("email_automation_runs").update({
+      finished_at: new Date().toISOString(),
+      status: runStatus,
+      successes: 0,
+      failures: Number(campaign.excluded_count || 0),
+      details: { campaign_id: campaign.id, eligible: campaign.eligible_count, excluded: campaign.excluded_count },
+    }).eq("id", runId);
+    await supabase.from("email_automations").update({ last_run_at: new Date().toISOString() }).eq("id", automation.id);
+
+    return response({ ok: true, campaign, runId, requiresApproval: automation.requires_approval !== false });
+  } catch (error: any) {
+    const message = String(error?.message || "Erro desconhecido.");
+    console.error("monthly-obligations:", message);
+    if (runId && supabase) {
+      await supabase.from("email_automation_runs").update({
+        finished_at: new Date().toISOString(),
+        status: "error",
+        failures: 1,
+        error: message.slice(0, 2000),
+      }).eq("id", runId).catch(() => undefined);
+    }
+    await notifyFailure(automation, message, runId).catch((notifyError) => console.error("automation notification:", notifyError));
+    return response({ error: message }, error instanceof AppAuthorizationError ? error.status : 500);
   }
 });

@@ -92,7 +92,7 @@ const Settings: React.FC<SettingsProps> = ({
 
       {/* Email Settings */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Mail size={18} /> Configuração de Email (Resend)</h3>
+        <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Mail size={18} /> Configuração de Email (SMTP)</h3>
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -104,9 +104,10 @@ const Settings: React.FC<SettingsProps> = ({
                 onChange={(e) => handleGlobalChange('fromName', e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
               />
+              <p className="text-[11px] text-slate-400 mt-1">Nome apresentado ao destinatário. O endereço de envio real é fixo, definido na configuração do servidor SMTP.</p>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Email do Remetente</label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Responder para (Reply-To)</label>
               <input
                 type="email"
                 placeholder="email@seudominio.com"
@@ -114,6 +115,7 @@ const Settings: React.FC<SettingsProps> = ({
                 onChange={(e) => handleGlobalChange('fromEmail', e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
               />
+              <p className="text-[11px] text-slate-400 mt-1">Não é o endereço de envio — é para onde vão as respostas dos destinatários.</p>
             </div>
           </div>
           <div>

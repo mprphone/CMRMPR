@@ -1,0 +1,17 @@
+[Unit]
+Description=CMRMPR - processar fila persistente de email
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/cmrmpr/email-worker.env
+ExecStart=/usr/bin/bash /home/ubuntu/programas/CMPRMPR/deploy/email-worker/cmrmpr-email-worker
+User=ubuntu
+Group=ubuntu
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp
+

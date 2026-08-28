@@ -328,6 +328,7 @@ const ClientList: React.FC<ClientListProps> = ({
       entityType: 'SOCIEDADE',
       sector: 'Geral',
       status: 'Ativo',
+      emailMarketingStatus: 'unknown',
       responsibleStaff: isResponsibleStaffLocked ? (ownStaffId || '') : '',
       monthlyFee: 0,
       saftCollectEnabled: true,
@@ -411,6 +412,10 @@ const ClientList: React.FC<ClientListProps> = ({
         contractRenewalDate: todayIso(),
       };
 
+      const previousMarketingStatus = baseClient.emailMarketingStatus || 'unknown';
+      const nextMarketingStatus = formData.emailMarketingStatus || 'unknown';
+      const hasMarketingBasis = nextMarketingStatus === 'consented' || nextMarketingStatus === 'legitimate_interest';
+
       const clientToSave: Client = {
         ...baseClient,
         ...formData,
@@ -429,6 +434,15 @@ const ClientList: React.FC<ClientListProps> = ({
           ? (baseClient.saftCollectEnabled !== false)
           : Boolean(formData.saftCollectEnabled),
         contractRenewalDate: formData.contractRenewalDate || baseClient.contractRenewalDate || todayIso(),
+        emailMarketingStatus: nextMarketingStatus,
+        emailMarketingConsentAt: hasMarketingBasis
+          ? (nextMarketingStatus === previousMarketingStatus && baseClient.emailMarketingConsentAt
+            ? baseClient.emailMarketingConsentAt
+            : new Date().toISOString())
+          : null,
+        emailMarketingConsentSource: hasMarketingBasis
+          ? (formData.emailMarketingConsentSource || '').trim() || null
+          : null,
       };
 
       const savedClient = await clientService.upsert(clientToSave);
@@ -798,6 +812,40 @@ const ClientList: React.FC<ClientListProps> = ({
                     <option value="Inativo">Inativo</option>
                   </select>
                 </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400">Consentimento de Marketing</label>
+                  <select
+                    className="w-full p-2 border rounded border-slate-200 bg-white"
+                    value={formData.emailMarketingStatus || 'unknown'}
+                    onChange={e => setFormData({ ...formData, emailMarketingStatus: e.target.value as Client['emailMarketingStatus'] })}
+                  >
+                    <option value="unknown">Desconhecido (não elegível para marketing)</option>
+                    <option value="consented">Consentimento registado</option>
+                    <option value="legitimate_interest">Interesse legítimo</option>
+                    <option value="opted_out">Oposição (não contactar)</option>
+                  </select>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Só clientes com consentimento ou interesse legítimo ficam elegíveis para campanhas de marketing. Emails de serviço não são afetados.
+                  </p>
+                </div>
+
+                {(formData.emailMarketingStatus === 'consented' || formData.emailMarketingStatus === 'legitimate_interest') && (
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-bold text-slate-400">Base do consentimento</label>
+                    <input
+                      className="w-full p-2 border rounded border-slate-200"
+                      value={formData.emailMarketingConsentSource || ''}
+                      onChange={e => setFormData({ ...formData, emailMarketingConsentSource: e.target.value })}
+                      placeholder="ex.: formulário assinado em 2026-08-28, consentimento verbal em reunião"
+                    />
+                    {formData.emailMarketingConsentAt && (
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Registado em {new Date(formData.emailMarketingConsentAt).toLocaleString('pt-PT')}.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-4">
