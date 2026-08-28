@@ -1,0 +1,25 @@
+[Unit]
+Description=Backup local CMRMPR and WAMPR data
+Requires=docker.service
+After=docker.service mprwa-backend.service
+ConditionPathExists=/mnt/bunker/CMRMPR/supabase-local/.env
+ConditionPathExists=/mnt/bunker/MPRWA/whatsapp.db
+# Sem isto, uma falha do backup só ficava visível para quem tivesse a app
+# aberta (painel de saúde) ou fosse consultar journalctl manualmente.
+OnFailure=cmrmpr-backup-alert@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cmrmpr-backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true

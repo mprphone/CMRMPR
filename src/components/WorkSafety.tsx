@@ -696,6 +696,7 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
                   <label className="block text-xs font-bold text-slate-500 mb-1">Anexo (Proposta/Contrato)</label>
                   <input
                     type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx"
                     onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
                     className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                   />

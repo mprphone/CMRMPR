@@ -197,9 +197,19 @@ export function calculateStaffStats(
     ? (allocatedHoursMonth / staff.capacityHoursPerMonth) * 100 
     : 0;
 
-  const totalCost = totalHoursAnnually * staff.hourlyCost;
-  
-  // Profitability of the Staff member (Revenue they manage vs their cost)
+  // Custo anual real do funcionário, não só a fração de horas estimadas em
+  // uso — o salário paga-se inteiro independentemente da utilização, por
+  // isso uma pessoa pouco utilizada não deve aparecer artificialmente
+  // rentável. Convenção portuguesa: salário base paga-se 14x/ano (12 meses +
+  // subsídio de férias + subsídio de natal, TSU incide sobre essas 14
+  // pagas); subsídio de alimentação só é pago 11x/ano (não no mês de férias).
+  const annualBaseSalary = staff.baseSalary * 14;
+  const annualSocialCharges = annualBaseSalary * (staff.socialChargesPercent / 100);
+  const annualMealAllowance = staff.mealAllowance * 11;
+  const annualOtherCosts = staff.otherMonthlyCosts * 12;
+  const totalCost = annualBaseSalary + annualSocialCharges + annualMealAllowance + annualOtherCosts;
+
+  // Profitability of the Staff member (Revenue they manage vs their real cost)
   const profit = totalRevenueAttrib - totalCost;
   const profitability = totalRevenueAttrib > 0 ? (profit / totalRevenueAttrib) * 100 : 0;
 

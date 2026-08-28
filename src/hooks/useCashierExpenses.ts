@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CashSessionExpense } from '../types';
 import { cashSessionExpenseService } from '../services';
 import { SessionExpense } from '../types/cashier';
-import { clearLegacySessionExpenses, loadLegacySessionExpenses, persistLegacySessionExpenses } from '../utils/cashierLegacyStorage';
+import { clearLegacySessionExpenses, loadLegacySessionExpenses } from '../utils/cashierLegacyStorage';
 
 const mapDbExpenseToSessionExpense = (expense: CashSessionExpense): SessionExpense => ({
   id: expense.id,
@@ -64,16 +64,8 @@ export const useCashierExpenses = () => {
       alert('Por favor, preencha um valor e uma descri??o v?lidos para a sa?da de caixa.');
       return;
     }
-    const fallbackExpense: SessionExpense = { id: crypto.randomUUID(), amount, description };
-    const saveFallbackExpense = () => {
-      const nextExpenses = [...sessionExpenses, fallbackExpense];
-      setSessionExpenses(nextExpenses);
-      persistLegacySessionExpenses(nextExpenses);
-    };
     if (!isSessionExpensesDbAvailable) {
-      saveFallbackExpense();
-      setIsExpenseModalOpen(false);
-      setNewExpense({ amount: '', description: '' });
+      alert('A base de dados SQL não está disponível. A saída não foi gravada; recarregue a página e tente novamente.');
       return;
     }
     try {
@@ -85,18 +77,13 @@ export const useCashierExpenses = () => {
     } catch (err) {
       console.error('Erro ao gravar sa?das de caixa em SQL:', err);
       setIsSessionExpensesDbAvailable(false);
-      saveFallbackExpense();
-      setIsExpenseModalOpen(false);
-      setNewExpense({ amount: '', description: '' });
-      alert('Sa?das guardadas localmente porque a tabela SQL ainda n?o est? dispon?vel.');
+      alert('A saída não foi gravada porque a base SQL não respondeu. Nenhum registo local foi criado.');
     }
   };
 
   const handleRemoveExpense = async (id: string) => {
     if (!isSessionExpensesDbAvailable) {
-      const nextExpenses = sessionExpenses.filter(expense => expense.id !== id);
-      setSessionExpenses(nextExpenses);
-      persistLegacySessionExpenses(nextExpenses);
+      alert('A base de dados SQL não está disponível. A saída não foi removida.');
       return;
     }
     try {
@@ -105,10 +92,7 @@ export const useCashierExpenses = () => {
     } catch (err) {
       console.error('Erro ao remover sa?das de caixa em SQL:', err);
       setIsSessionExpensesDbAvailable(false);
-      const nextExpenses = sessionExpenses.filter(expense => expense.id !== id);
-      setSessionExpenses(nextExpenses);
-      persistLegacySessionExpenses(nextExpenses);
-      alert('Sa?das removidas localmente porque a tabela SQL ainda n?o est? dispon?vel.');
+      alert('A saída não foi removida porque a base SQL não respondeu.');
     }
   };
 
@@ -123,6 +107,7 @@ export const useCashierExpenses = () => {
     newExpense,
     setNewExpense,
     sessionExpenses,
+    isSessionExpensesDbAvailable,
     totalSessionExpenses,
     handleAddExpense,
     handleRemoveExpense,

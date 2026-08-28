@@ -1,5 +1,6 @@
 import { WorkSafetyService, WorkSafetyProfileData } from '../types';
 import { ensureStoreClient } from './supabaseClient';
+import { createSignedAttachmentUrl, getAttachmentStoragePath, validateAttachmentFile } from './storageAttachmentService';
 
 const mapDbToWorkSafetyService = (p: any): WorkSafetyService => ({
   id: p.id,
@@ -12,7 +13,7 @@ const mapDbToWorkSafetyService = (p: any): WorkSafetyService => ({
   hasCommission: p.has_commission,
   isCommissionPaid: p.is_commission_paid,
   proposalStatus: p.proposal_status,
-  attachment_url: p.attachment_url,
+  attachment_url: getAttachmentStoragePath(p.attachment_url) || null,
   documentChecklist: p.document_checklist && typeof p.document_checklist === 'object' ? p.document_checklist : {},
   profileData: p.profile_data && typeof p.profile_data === 'object' ? (p.profile_data as WorkSafetyProfileData) : {},
   aiObligationsSummary: p.ai_obligations_summary || '',
@@ -28,7 +29,10 @@ const mapWorkSafetyServiceToDb = (p: Partial<WorkSafetyService>) => ({
   has_commission: p.hasCommission,
   is_commission_paid: p.isCommissionPaid,
   proposal_status: p.proposalStatus,
-  attachment_url: p.attachment_url,
+  // Normaliza para o caminho limpo no bucket: se o chamador reenviar o
+  // attachment_url tal como veio de uma leitura anterior (URL assinada com
+  // TTL de 15 min), evita gravar esse URL expirável na base de dados.
+  attachment_url: getAttachmentStoragePath(p.attachment_url) || p.attachment_url || null,
   document_checklist: p.documentChecklist || {},
   profile_data: p.profileData || {},
   ai_obligations_summary: p.aiObligationsSummary || null,
@@ -42,7 +46,13 @@ export const workSafetyService = {
       clients (id, name)
     `).order('service_date', { ascending: false });
     if (error) throw error;
-    return (data || []).map(mapDbToWorkSafetyService);
+    return Promise.all((data || []).map(async row => {
+      const service = mapDbToWorkSafetyService(row);
+      return {
+        ...service,
+        attachment_url: await createSignedAttachmentUrl(service.attachment_url),
+      };
+    }));
   },
   async upsert(service: Partial<WorkSafetyService>): Promise<WorkSafetyService> {
     const storeClient = ensureStoreClient();
@@ -73,7 +83,11 @@ export const workSafetyService = {
     }
 
     if (error) throw error;
-    return mapDbToWorkSafetyService(data);
+    const savedService = mapDbToWorkSafetyService(data);
+    return {
+      ...savedService,
+      attachment_url: await createSignedAttachmentUrl(savedService.attachment_url),
+    };
   },
   async delete(id: string): Promise<void> {
     const storeClient = ensureStoreClient();
@@ -81,6 +95,7 @@ export const workSafetyService = {
     if (error) throw error;
   },
   async uploadAttachment(file: File, serviceId: string): Promise<string> {
+    validateAttachmentFile(file);
     const storeClient = ensureStoreClient();
     const filePath = `sht/${serviceId}/${file.name}`;
     
@@ -95,10 +110,6 @@ export const workSafetyService = {
       throw uploadError;
     }
 
-    const { data } = storeClient.storage
-      .from('attachments')
-      .getPublicUrl(filePath);
-
-    return data.publicUrl;
+    return filePath;
   }
 };

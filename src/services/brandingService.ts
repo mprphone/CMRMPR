@@ -1,6 +1,6 @@
 import { ensureStoreClient } from './supabaseClient';
 
-const LOGO_STORAGE_BUCKET = 'attachments';
+const LOGO_STORAGE_BUCKET = 'public-assets';
 const LOGO_STORAGE_PATH = 'branding/app-logo';
 
 const buildLogoPublicUrl = (version?: string) => {

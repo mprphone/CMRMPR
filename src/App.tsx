@@ -1,21 +1,24 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Session } from '@supabase/supabase-js';
 import Sidebar from './components/Sidebar';
 import Login from './components/Login';
-import { DEFAULT_TASKS, DEFAULT_AREA_COSTS, DEFAULT_TURNOVER_BRACKETS, DEFAULT_STAFF } from './constants';
+import MfaChallenge from './components/MfaChallenge';
+import { DEFAULT_TASKS, DEFAULT_AREA_COSTS, DEFAULT_TURNOVER_BRACKETS } from './constants';
 import {
   Client, Staff, Task, GlobalSettings, FeeGroup, EmailTemplate, CampaignHistory, TurnoverBracket, QuoteHistory, InsurancePolicy, WorkSafetyService, CashPayment, CashAgreement, CashOperation
 } from './types';
 import {
   clientService, staffService, groupService, templateService, campaignHistoryService, turnoverBracketService, quoteHistoryService, insuranceService, workSafetyService, initSupabase, storeClient, cashPaymentService, cashAgreementService, cashOperationService, brandingService, appConfigService, taskCatalogService, APP_CONFIG_GLOBAL_SETTINGS_KEY,
-  atomicSyncImportedData
+  syncWamprData, accessControlService, systemHealthService
 } from './services';
 import { RefreshCcw, DownloadCloud, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { usePwaInstall } from './hooks/usePwaInstall';
+import { getAccessibleViews, hasAppPermission, UserAccessProfile } from './accessControl';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const ClientList = lazy(() => import('./components/ClientList'));
 const ClientDetail = lazy(() => import('./components/ClientDetail'));
+const BillingControl = lazy(() => import('./components/BillingControl'));
 const StaffTeam = lazy(() => import('./components/StaffTeam'));
 const StaffDetail = lazy(() => import('./components/StaffDetail'));
 const Tasks = lazy(() => import('./components/Tasks'));
@@ -35,15 +38,6 @@ const ViewLoadingFallback = () => (
   </div>
 );
 
-const isMissingAtomicSyncRpcError = (error: unknown) => {
-  const err = error as { code?: string; message?: string } | null;
-  return Boolean(
-    err &&
-    (err.code === 'PGRST202' ||
-      (err.message || '').includes('sync_imported_staff_and_clients_atomic'))
-  );
-};
-
 // Polyfill for crypto.randomUUID for non-secure contexts or older browsers
 const generateUUID = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -58,17 +52,17 @@ const generateUUID = () => {
 
 const areSettingsEqual = (a: GlobalSettings, b: GlobalSettings) => JSON.stringify(a) === JSON.stringify(b);
 const areTasksEqual = (a: Task[], b: Task[]) => JSON.stringify(a) === JSON.stringify(b);
+const isLegacySupabaseImportDisabled = String(import.meta.env.VITE_DISABLE_SUPABASE_IMPORT || '').toLowerCase() === 'true';
 
 const mergeRemoteGlobalSettings = (localSettings: GlobalSettings, remoteSettings: Partial<GlobalSettings>): GlobalSettings => ({
   ...localSettings,
   ...remoteSettings,
-  supabaseImportUrl: localSettings.supabaseImportUrl,
-  supabaseImportKey: localSettings.supabaseImportKey,
+  supabaseImportUrl: isLegacySupabaseImportDisabled ? '' : localSettings.supabaseImportUrl,
+  supabaseImportKey: isLegacySupabaseImportDisabled ? '' : localSettings.supabaseImportKey,
   supabaseStoreUrl: localSettings.supabaseStoreUrl,
   supabaseStoreKey: localSettings.supabaseStoreKey,
 });
 
-const PAULA_INSURANCE_ONLY_EMAIL = 'paula.ernestina@hotmail.com';
 const readJsonStorage = <T,>(key: string, fallback: T): T => {
   try {
     const rawValue = localStorage.getItem(key);
@@ -84,7 +78,10 @@ export default function App() {
   const [showInstallTip, setShowInstallTip] = useState(false);
   const [currentView, setCurrentView] = useState('dashboard');
   const [session, setSession] = useState<Session | null>(null);
-  const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
+  const [accessProfile, setAccessProfile] = useState<UserAccessProfile | null>(null);
+  const [isLoadingAccess, setIsLoadingAccess] = useState(true);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const [mfaState, setMfaState] = useState<'checking' | 'required' | 'satisfied'>('checking');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
@@ -96,6 +93,7 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState<string | null>(null);
   const [syncWarning, setSyncWarning] = useState<string | null>(null);
+  const [systemWarning, setSystemWarning] = useState<string | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [campaignHistory, setCampaignHistory] = useState<CampaignHistory[]>([]);
@@ -115,6 +113,10 @@ export default function App() {
   const realtimeTasksRefreshTimerRef = React.useRef<number | null>(null);
 
   const handleLogoUpload = async (file: File) => {
+    if (!canEditSettings) {
+      alert('Esta conta não tem permissão para alterar o logótipo.');
+      return;
+    }
     try {
       const remoteLogoUrl = await brandingService.uploadLogo(file);
       setLogo(remoteLogoUrl);
@@ -134,7 +136,7 @@ export default function App() {
   };
 
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>(() => {
-    return readJsonStorage('globalSettings', {
+    const settings = readJsonStorage('globalSettings', {
       supabaseImportUrl: import.meta.env.VITE_SUPABASE_URL_IMPORT || '',
       supabaseImportKey: import.meta.env.VITE_SUPABASE_KEY_IMPORT || '',
       supabaseStoreUrl: import.meta.env.VITE_SUPABASE_URL_CMR || '',
@@ -145,15 +147,22 @@ export default function App() {
       fromName: '',
       emailSignature: ''
     });
+    return isLegacySupabaseImportDisabled
+      ? { ...settings, supabaseImportUrl: '', supabaseImportKey: '' }
+      : settings;
   });
   const [isGlobalSettingsHydrated, setIsGlobalSettingsHydrated] = useState(false);
   const [isGlobalSettingsDbAvailable, setIsGlobalSettingsDbAvailable] = useState(true);
   const [isTaskCatalogHydrated, setIsTaskCatalogHydrated] = useState(false);
   const [isTaskCatalogDbAvailable, setIsTaskCatalogDbAvailable] = useState(true);
-  const currentUserEmail = (session?.user?.email || '').trim().toLowerCase();
-  const isPaulaInsuranceOnlyUser = currentUserEmail === PAULA_INSURANCE_ONLY_EMAIL;
-  const allowedViews = isPaulaInsuranceOnlyUser ? ['insurance'] : undefined;
-  const activeView = isPaulaInsuranceOnlyUser ? 'insurance' : currentView;
+  const allowedViews = React.useMemo(() => getAccessibleViews(accessProfile), [accessProfile]);
+  const isInsuranceScopedUser = accessProfile?.dataScope === 'insurance_own';
+  const activeView = allowedViews.includes(currentView) ? currentView : (allowedViews[0] || currentView);
+  const userRole: 'admin' | 'user' | null = accessProfile
+    ? (accessProfile.canViewFinancial ? 'admin' : 'user')
+    : null;
+  const canEditSettings = hasAppPermission(accessProfile, 'settings', 'edit');
+  const canViewSettings = hasAppPermission(accessProfile, 'settings', 'view');
 
   useEffect(() => {
     initSupabase(globalSettings);
@@ -183,37 +192,124 @@ export default function App() {
   }, []);
 
   // Auth listener
+  const verifiedSessionUserIdRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (!storeClient) return;
 
     const { data: { subscription } } = storeClient.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) {
-        void fetchData();
-      } else {
-        setIsLoadingData(false);
+      const nextUserId = session?.user?.id ?? null;
+      // Só reinicia a verificação de MFA quando o utilizador da sessão muda
+      // de facto (novo login/logout). Qualquer outro evento do Supabase
+      // Auth para a MESMA sessão (refresh de token automático, o browser a
+      // voltar a ficar visível/em foco, etc.) não deve voltar a mostrar o
+      // ecrã "A verificar a segurança da sessão..." nem desmontar a app —
+      // isso já foi verificado e perdia formulários/ecrãs abertos.
+      if (nextUserId !== verifiedSessionUserIdRef.current) {
+        verifiedSessionUserIdRef.current = nextUserId;
+        setMfaState(session ? 'checking' : 'checking');
       }
-      if (session?.user?.email === 'mpr@mpr.pt') {
-        setUserRole('admin');
-      } else if (session) {
-        setUserRole('user');
-      } else {
-        setUserRole(null);
+      if (!session) {
+        setAccessProfile(null);
+        setAccessError(null);
+        setIsLoadingAccess(false);
+        setIsLoadingData(false);
       }
     });
 
     // Check for initial session
     storeClient.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) {
-        void fetchData();
-      } else {
+      verifiedSessionUserIdRef.current = session?.user?.id ?? null;
+      setMfaState(session ? 'checking' : 'checking');
+      if (!session) {
+        setIsLoadingAccess(false);
         setIsLoadingData(false);
       }
     });
 
     return () => subscription.unsubscribe();
   }, [storeClient]);
+
+  useEffect(() => {
+    if (!session || !storeClient) return;
+    let cancelled = false;
+    storeClient.auth.mfa.getAuthenticatorAssuranceLevel()
+      .then(({ data, error }) => {
+        if (error) throw error;
+        if (!cancelled) {
+          setMfaState(data.nextLevel === 'aal2' && data.currentLevel !== 'aal2' ? 'required' : 'satisfied');
+        }
+      })
+      .catch(error => {
+        console.error('Erro ao verificar MFA:', error);
+        if (!cancelled) setMfaState('required');
+      });
+    return () => { cancelled = true; };
+  }, [session?.access_token, storeClient]);
+
+  useEffect(() => {
+    if (!session || mfaState !== 'satisfied') return;
+    let cancelled = false;
+
+    const loadAccessAndData = async () => {
+      setIsLoadingAccess(true);
+      setAccessError(null);
+      try {
+        const profile = await accessControlService.getMyProfile();
+        if (!profile?.active) {
+          throw new Error('Esta conta não tem acesso ativo ao CMR. Contacte um administrador.');
+        }
+        if (cancelled) return;
+        setAccessProfile(profile);
+        const views = getAccessibleViews(profile);
+        if (views.length === 0) {
+          throw new Error('Esta conta não tem módulos autorizados. Contacte um administrador.');
+        }
+        setCurrentView(previous => views.includes(previous) ? previous : views[0]);
+        await fetchData();
+      } catch (error: any) {
+        if (cancelled) return;
+        setAccessProfile(null);
+        setAccessError(error?.message || 'Não foi possível validar as permissões desta conta.');
+        setIsLoadingData(false);
+      } finally {
+        if (!cancelled) setIsLoadingAccess(false);
+      }
+    };
+
+    void loadAccessAndData();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, mfaState]);
+
+  useEffect(() => {
+    if (!session || !accessProfile || !canViewSettings || mfaState !== 'satisfied') {
+      setSystemWarning(null);
+      return;
+    }
+    let cancelled = false;
+    const checkHealth = async () => {
+      try {
+        const health = await systemHealthService.get();
+        if (!cancelled) {
+          setSystemWarning(health.warnings.length > 0
+            ? `${health.warnings[0]} Consulte Configurações → Estado e proteção dos dados.`
+            : null);
+        }
+      } catch (error) {
+        console.error('Erro ao verificar o estado do sistema:', error);
+        if (!cancelled) setSystemWarning('Não foi possível verificar o backup e a ligação ao WAPRO. Consulte Configurações.');
+      }
+    };
+    void checkHealth();
+    const timer = window.setInterval(() => void checkHealth(), 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [session?.access_token, accessProfile?.updatedAt, canViewSettings, mfaState]);
 
   useEffect(() => {
     if (!session) return;
@@ -285,7 +381,7 @@ export default function App() {
   }, [tasks]);
 
   useEffect(() => {
-    if (!session || !isGlobalSettingsHydrated || !isGlobalSettingsDbAvailable) return;
+    if (!session || !canEditSettings || !isGlobalSettingsHydrated || !isGlobalSettingsDbAvailable) return;
     if (skipNextGlobalSettingsSaveRef.current) {
       skipNextGlobalSettingsSaveRef.current = false;
       return;
@@ -315,7 +411,7 @@ export default function App() {
     }, 700);
 
     return () => window.clearTimeout(timer);
-  }, [session, globalSettings, isGlobalSettingsHydrated, isGlobalSettingsDbAvailable]);
+  }, [session, canEditSettings, globalSettings, isGlobalSettingsHydrated, isGlobalSettingsDbAvailable]);
 
   useEffect(() => {
     if (!session || !isTaskCatalogHydrated || !isTaskCatalogDbAvailable) return;
@@ -472,17 +568,13 @@ export default function App() {
   }, [session, storeClient, isGlobalSettingsHydrated, isTaskCatalogHydrated]);
 
   useEffect(() => {
-    if (!isPaulaInsuranceOnlyUser) return;
-    if (currentView !== 'insurance') {
-      setCurrentView('insurance');
-    }
-    if (selectedClient) {
+    if (!accessProfile) return;
+    if (!allowedViews.includes(currentView) && allowedViews[0]) {
+      setCurrentView(allowedViews[0]);
       setSelectedClient(null);
-    }
-    if (selectedStaff) {
       setSelectedStaff(null);
     }
-  }, [isPaulaInsuranceOnlyUser, currentView, selectedClient, selectedStaff]);
+  }, [accessProfile, allowedViews, currentView]);
 
   const fetchData = async () => {
     setIsLoadingData(true);
@@ -527,7 +619,7 @@ export default function App() {
     ]);
 
     setClients(clientsData);
-    setStaff(staffData.length > 0 ? staffData : DEFAULT_STAFF);
+    setStaff(staffData);
     setGroups(groupsData);
     setTemplates(templatesData);
     setCampaignHistory(campaignHistoryData);
@@ -569,93 +661,17 @@ export default function App() {
   };
 
   const handleFullSync = async () => {
+    if (!accessProfile?.canSyncWampr) {
+      alert('Esta conta não tem permissão para executar a sincronização WAPRO → CMR.');
+      return;
+    }
     setIsSyncing(true);
     try {
-      console.log("--- INÍCIO DA SINCRONIZAÇÃO ---");
-      // 1. Staff
-      const externalStaff = await staffService.importExternalStaff();
-      console.log("DEBUG: Staff importado (primeiros 3):", externalStaff.slice(0, 3));
-      // 2. Clientes
-      const externalClients = await clientService.importExternalClients();
-      console.log("DEBUG: Clientes importados (primeiros 3):", externalClients.slice(0, 3));
-      const unmatchedRefs = new Set<string>();
-      const clientsWithStaffId = externalClients.map(client => {
-        const rawResponsible = (client.responsibleStaff || '').trim();
-
-        let responsibleStaffAction: 'set' | 'clear' | 'keep' = 'keep';
-        let responsibleStaff: string = client.responsibleStaff || '';
-
-        if (!rawResponsible) {
-          responsibleStaffAction = 'clear';
-          responsibleStaff = '';
-        } else {
-          const responsible = externalStaff.find(s => s.id === rawResponsible);
-          if (responsible) {
-            responsibleStaffAction = 'set';
-            responsibleStaff = responsible.id;
-          } else {
-            responsibleStaffAction = 'keep';
-            unmatchedRefs.add(rawResponsible);
-            responsibleStaff = rawResponsible;
-          }
-        }
-
-        return {
-          ...client,
-          responsibleStaff,
-          responsibleStaffAction
-        } as any;
-      });
-
-      const staffPayload = externalStaff.map(member => ({
-          id: member.id,
-          name: member.name,
-          email: member.email,
-          phone: member.phone,
-          role: member.role,
-        }));
-      const clientPayload = clientsWithStaffId.map(client => ({
-          nif: client.nif,
-          name: client.name,
-          email: client.email || '',
-          phone: client.phone || '',
-          address: client.address || '',
-          entity_type: client.entityType || 'SOCIEDADE',
-          sector: client.sector || 'Geral',
-          status: client.status || 'Ativo',
-          responsavel_interno_id: client.responsibleStaff || null,
-          responsavel_action: client.responsibleStaffAction || 'keep',
-        }));
-
-      try {
-        await atomicSyncImportedData(staffPayload, clientPayload);
-      } catch (syncError) {
-        if (!isMissingAtomicSyncRpcError(syncError)) throw syncError;
-
-        console.warn('RPC de sincronizacao atomica em falta; a usar fallback nao atomico.', syncError);
-        await staffService.bulkUpsert(externalStaff);
-        await clientService.bulkUpsert(clientsWithStaffId);
-      }
-
-      if (externalClients.length > 0) {
-        // Map responsible staff from import to staff ID (ONLY when it's a valid staff UUID).
-        // Rules:
-        // - If import has empty responsible -> CLEAR (null)
-        // - If import has a valid staff UUID that exists -> SET (uuid)
-        // - If import has something else (name/code) -> KEEP existing (do not overwrite)
-        let successMessage = `Sucesso! ${externalClients.length} clientes processados.`;
-        if (unmatchedRefs.size > 0) {
-          successMessage += ` Atenção: os seguintes responsáveis vindos da origem não foram reconhecidos e foram ignorados (mantive o responsável atual no CRM): ${Array.from(unmatchedRefs).join(', ')}`;
-        }
-        setSyncSuccess(successMessage);
-        setTimeout(() => setSyncSuccess(null), 15000); // Longer timeout to read the message
-      } else {
-        setSyncSuccess(`Sucesso! Nenhum cliente novo para sincronizar.`);
-        setTimeout(() => setSyncSuccess(null), 5000);
-      }
-      
-      // 3. RECARREGAR APÓS O COMMIT ATÓMICO
-      console.log("--- FIM DA SINCRONIZAÇÃO, A RECARREGAR DADOS ---");
+      const result = await syncWamprData();
+      const clientsProcessed = Number(result?.counts?.clients || 0);
+      const staffProcessed = Number(result?.counts?.staff || 0);
+      setSyncSuccess(`Sincronização direta concluída: ${clientsProcessed} clientes e ${staffProcessed} funcionários processados.`);
+      setTimeout(() => setSyncSuccess(null), 10000);
       await fetchData();
     } catch (err: any) {
       alert("Falha na sincronização: " + err.message);
@@ -668,25 +684,70 @@ export default function App() {
     return <Login />;
   }
 
+  if (mfaState === 'checking') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="bg-white border border-slate-200 p-8 rounded-2xl shadow-sm text-center">
+          <RefreshCcw className="mx-auto text-blue-500 mb-4 animate-spin" size={36} />
+          <p className="font-bold text-slate-800">A verificar a segurança da sessão...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (mfaState === 'required') {
+    return <MfaChallenge onVerified={() => setMfaState('satisfied')} />;
+  }
+
+  if (isLoadingAccess) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="bg-white border border-slate-200 p-8 rounded-2xl shadow-sm text-center">
+          <RefreshCcw className="mx-auto text-blue-500 mb-4 animate-spin" size={36} />
+          <p className="font-bold text-slate-800">A validar permissões...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (accessError || !accessProfile) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="max-w-lg bg-white border border-red-100 p-8 rounded-2xl shadow-sm text-center">
+          <AlertTriangle className="mx-auto text-red-500 mb-4" size={36} />
+          <h2 className="text-lg font-bold text-slate-800">Acesso não autorizado</h2>
+          <p className="text-sm text-slate-500 mt-2">{accessError || 'Não foi possível validar esta conta.'}</p>
+          <button
+            onClick={() => void storeClient?.auth.signOut()}
+            className="mt-6 bg-slate-900 text-white px-5 py-2 rounded-lg text-sm font-bold"
+          >
+            Voltar ao início de sessão
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex min-h-screen flex-col bg-gray-100">
       <Sidebar 
         currentView={activeView} 
         onChangeView={(view) => {
-          if (allowedViews && !allowedViews.includes(view)) return;
+          if (!allowedViews.includes(view)) return;
           setCurrentView(view);
           setSelectedClient(null);
           setSelectedStaff(null);
         }}
         logo={logo} onLogoUpload={handleLogoUpload}
-        userRole={userRole}
+        canUploadLogo={canEditSettings}
         allowedViews={allowedViews}
+        userEmail={session.user.email}
       />
 
-      <main className="flex-1 ml-64 p-8">
+      <main className="flex-1 p-3 md:p-6">
         <div className="w-full max-w-[1800px] mx-auto">
-          {!isPaulaInsuranceOnlyUser && (
-            <div className="flex justify-end mb-6 gap-2">
+          {!isInsuranceScopedUser && activeView !== 'clients' && activeView !== 'insurance' && activeView !== 'billing' && (
+            <div className="mb-4 flex justify-end gap-2">
               {!isInstalled && (
                 <div className="relative">
                   <button
@@ -710,14 +771,16 @@ export default function App() {
                   )}
                 </div>
               )}
-              <button 
-                onClick={handleFullSync}
-                disabled={isSyncing}
-                className="flex items-center gap-2 text-[10px] font-black text-blue-600 bg-blue-50 px-4 py-2 rounded-xl border border-blue-100 hover:bg-blue-100 uppercase shadow-sm"
-              >
-                {isSyncing ? <RefreshCcw size={14} className="animate-spin"/> : <DownloadCloud size={14}/>}
-                Sincronizar Agora
-              </button>
+              {accessProfile.canSyncWampr && (
+                <button
+                  onClick={handleFullSync}
+                  disabled={isSyncing}
+                  className="flex items-center gap-2 text-[10px] font-black text-blue-600 bg-blue-50 px-4 py-2 rounded-xl border border-blue-100 hover:bg-blue-100 uppercase shadow-sm"
+                >
+                  {isSyncing ? <RefreshCcw size={14} className="animate-spin"/> : <DownloadCloud size={14}/>}
+                  Sincronizar Agora
+                </button>
+              )}
               <button onClick={fetchData} className="p-2 bg-white border border-slate-100 rounded-xl text-slate-400 hover:text-blue-600 transition-colors">
                 <RefreshCcw size={14} />
               </button>
@@ -736,6 +799,12 @@ export default function App() {
             </div>
           )}
 
+          {systemWarning && (
+            <div className="mb-4 p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold flex items-center gap-2">
+              <AlertTriangle size={16} /> {systemWarning}
+            </div>
+          )}
+
           {/* Fallback se a lista estiver vazia */}
           {isLoadingData && !isSyncing ? (
             <div className="bg-white border-2 border-dashed border-slate-200 p-12 rounded-3xl text-center">
@@ -745,12 +814,12 @@ export default function App() {
                 A ligar ao servidor de gestão para obter a informação mais recente.
               </p>
             </div>
-          ) : clients.length === 0 && !isSyncing && !isPaulaInsuranceOnlyUser && (
+          ) : clients.length === 0 && !isSyncing && !isInsuranceScopedUser && (
             <div className="bg-white border-2 border-dashed border-slate-200 p-12 rounded-3xl text-center">
               <AlertTriangle className="mx-auto text-amber-500 mb-4" size={40} />
               <h3 className="text-lg font-bold text-slate-800">Ainda não há clientes visíveis</h3>
               <p className="text-slate-500 text-sm mt-2 max-w-md mx-auto">
-                Se já sincronizou os seus clientes, clique no botão de recarregar. Se o problema persistir, verifique as suas configurações de ligação ao Supabase.
+                Se os clientes já existem no WAPRO, clique em recarregar. Se o problema persistir, confirme a sincronização local WAPRO → CMR.
               </p>
               <button onClick={fetchData} className="mt-6 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2 mx-auto">
                 <RefreshCcw size={14} /> Tentar recarregar dados
@@ -759,7 +828,7 @@ export default function App() {
           )}
 
           <Suspense fallback={<ViewLoadingFallback />}>
-          {!isPaulaInsuranceOnlyUser && selectedClient ? (
+          {!isInsuranceScopedUser && selectedClient ? (
             <ClientDetail
               client={selectedClient} 
               onBack={() => setSelectedClient(null)} 
@@ -769,7 +838,7 @@ export default function App() {
               userRole={userRole}
               insurancePolicies={insurancePolicies}
             />
-          ) : !isPaulaInsuranceOnlyUser && selectedStaff ? (
+          ) : !isInsuranceScopedUser && selectedStaff ? (
             <StaffDetail
               staffMember={selectedStaff}
               onBack={() => setSelectedStaff(null)}
@@ -788,8 +857,15 @@ export default function App() {
                   staff={staff} groups={groups} tasks={tasks} areaCosts={areaCosts}
                   onSelectClient={setSelectedClient}
                   onSyncClientsRequest={handleFullSync}
+                  canSyncWampr={accessProfile.canSyncWampr}
+                  canViewFinancial={accessProfile.canViewFinancial}
+                  canCreateClients={hasAppPermission(accessProfile, 'clients', 'create')}
+                  isSyncingClients={isSyncing}
+                  ownStaffId={accessProfile.staffId}
+                  isResponsibleStaffLocked={accessProfile.dataScope === 'assigned'}
                 />
               )}
+              {activeView === 'billing' && <BillingControl clients={clients} setClients={setClients} />}
               {activeView === 'emails' && (
                 <EmailCampaigns 
                   clients={clients} groups={groups} staff={staff} 
@@ -802,8 +878,8 @@ export default function App() {
                 <Insurance
                   policies={insurancePolicies} setPolicies={setInsurancePolicies}
                   clients={clients}
-                  forcedAgent={isPaulaInsuranceOnlyUser ? 'Paula' : undefined}
-                  viewerEmail={currentUserEmail}
+                  forcedAgent={isInsuranceScopedUser ? accessProfile.insuranceAgent || undefined : undefined}
+                  canViewCommissions={accessProfile.canViewCommissions}
                 />
               )}
               {activeView === 'sht' && (
@@ -867,6 +943,11 @@ export default function App() {
                   turnoverBrackets={turnoverBrackets} setTurnoverBrackets={setTurnoverBrackets}
                   globalSettings={globalSettings} setGlobalSettings={setGlobalSettings}
                   logo={logo}
+                  clients={clients}
+                  groups={groups}
+                  staff={staff}
+                  currentAccessProfile={accessProfile}
+                  onCurrentAccessProfileChanged={setAccessProfile}
                 />
               )}
             </>

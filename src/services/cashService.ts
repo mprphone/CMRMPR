@@ -98,6 +98,23 @@ export const cashPaymentService = {
     const { error } = await storeClient.rpc('bulk_upsert_cash_payments', { payments_data: toSave });
     if (error) throw error;
   },
+  async applyChanges(payments: Partial<CashPayment>[], deleteIds: string[]): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const toSave = payments.map(p => ({
+      id: p.id,
+      client_id: p.clientId,
+      payment_year: p.paymentYear,
+      payment_month: p.paymentMonth,
+      amount_paid: p.amountPaid,
+      paid_at: p.paidAt,
+      payment_method: p.paymentMethod,
+    }));
+    const { error } = await storeClient.rpc('apply_cash_payment_changes', {
+      payments_data: toSave,
+      delete_ids: deleteIds,
+    });
+    if (error) throw error;
+  },
   async deleteMany(ids: string[]): Promise<void> {
     const storeClient = ensureStoreClient();
     const { error } = await storeClient.from('cash_payments').delete().in('id', ids);
@@ -196,46 +213,26 @@ export const cashOperationService = {
   },
   async create(operation: Partial<CashOperation>, paymentIds: string[], sessionExpenseIds: string[] = []): Promise<CashOperation> {
     const storeClient = ensureStoreClient();
-    const payload = {
-      p_deposited_amount: operation.depositedAmount,
-      p_spent_amount: operation.spentAmount,
-      p_spent_description: operation.spentDescription,
-      p_report_details: operation.reportDetails,
-      p_payment_ids: paymentIds,
-      p_mbway_deposited_amount: operation.mbWayDepositedAmount,
-      p_adjustment_amount: operation.adjustmentAmount,
-    };
+    // Sem fallback não-atómico: a documentação garante que o fecho de caixa é
+    // sempre uma única transação SQL. Um fallback em dois passos (criar a
+    // operação e só depois ligar as despesas de sessão) podia deixar
+    // despesas já "contabilizadas" num relatório fechado mas ainda editáveis
+    // se o segundo passo falhasse — pior do que simplesmente bloquear o
+    // fecho quando a RPC atómica não está disponível.
+    const { data, error } = await storeClient
+      .rpc('close_cash_register_atomic', {
+        p_deposited_amount: operation.depositedAmount,
+        p_spent_amount: operation.spentAmount,
+        p_spent_description: operation.spentDescription,
+        p_report_details: operation.reportDetails,
+        p_payment_ids: paymentIds,
+        p_mbway_deposited_amount: operation.mbWayDepositedAmount,
+        p_adjustment_amount: operation.adjustmentAmount,
+        p_session_expense_ids: sessionExpenseIds,
+      })
+      .single();
 
-    try {
-      const { data, error } = await storeClient
-        .rpc('close_cash_register_atomic', {
-          ...payload,
-          p_session_expense_ids: sessionExpenseIds,
-        })
-        .single();
-
-      if (error) throw error;
-      return mapDbToCashOperation(data);
-    } catch (err: any) {
-      // Fallback for environments where the atomic RPC is not deployed yet.
-      const schemaError = /function .*close_cash_register_atomic.* does not exist|schema cache/i;
-      if (!schemaError.test(err?.message || '')) throw err;
-
-      const { data, error } = await storeClient.rpc('create_cash_operation', payload).single();
-      if (error) throw error;
-      const row = data as { id: string };
-
-      if (sessionExpenseIds.length > 0) {
-        const { error: attachError } = await storeClient
-          .from('cash_session_expenses')
-          .update({ cash_operation_id: row.id })
-          .in('id', sessionExpenseIds)
-          .is('cash_operation_id', null);
-
-        if (attachError) throw attachError;
-      }
-
-      return mapDbToCashOperation(data);
-    }
+    if (error) throw error;
+    return mapDbToCashOperation(data);
   }
 };

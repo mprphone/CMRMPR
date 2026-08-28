@@ -16,13 +16,18 @@ const Login: React.FC = () => {
     try {
       const supabase = ensureStoreClient();
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim().toLowerCase(),
         password,
       });
       if (error) throw error;
       // The onAuthStateChange listener in App.tsx will handle the redirect.
     } catch (err: any) {
-      setError(err.message || 'Ocorreu um erro ao fazer login.');
+      const message = String(err?.message || '');
+      setError(
+        message.toLowerCase().includes('invalid login credentials')
+          ? 'Email ou palavra-passe incorretos.'
+          : message || 'Ocorreu um erro ao iniciar sessão.'
+      );
     } finally {
       setLoading(false);
     }
@@ -31,7 +36,7 @@ const Login: React.FC = () => {
   return (
     <div className="flex items-center justify-center min-h-screen bg-slate-100">
       <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-xl shadow-lg">
-        <h2 className="text-2xl font-bold text-center text-slate-800">AccounTech CRM Login</h2>
+        <h2 className="text-2xl font-bold text-center text-slate-800">AccounTech CMR</h2>
         <form onSubmit={handleLogin} className="space-y-6">
           <div>
             <label className="text-sm font-bold text-slate-600 block mb-2">Email</label>
@@ -44,7 +49,7 @@ const Login: React.FC = () => {
             />
           </div>
           <div className="relative">
-            <label className="text-sm font-bold text-slate-600 block mb-2">Password</label>
+            <label className="text-sm font-bold text-slate-600 block mb-2">Palavra-passe</label>
             <input
               type={showPassword ? 'text' : 'password'}
               value={password}

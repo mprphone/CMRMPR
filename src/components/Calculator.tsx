@@ -27,7 +27,8 @@ const normalizeItem = (item: QuoteItem): QuoteItem => ({
   frequency: item.frequency > 0 ? item.frequency : 1,
 });
 
-const PDF_PUBLIC_LOGO_CANDIDATES = ['/logo-mpr.png', '/logo.png', '/mpr-logo.png'];
+const PDF_PUBLIC_LOGO_CANDIDATES = ['logo-mpr.png', 'logo.png', 'mpr-logo.png']
+  .map((fileName) => `${import.meta.env.BASE_URL || '/'}${fileName}`);
 const MPR_OFFICIAL_ADDRESS = 'Rua Nossa Senhora da Ajuda 107F, 4815-364 Moreira de Cónegos';
 const MPR_OFFICIAL_EMAIL = 'mpr@mpr.pt';
 const MPR_OFFICIAL_PHONE = '253089591';

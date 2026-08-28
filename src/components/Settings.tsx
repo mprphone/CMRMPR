@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { GlobalSettings, TurnoverBracket, TaskArea } from '../types';
-import { Database, Mail, DollarSign, TrendingUp, Trash2, Save, RefreshCcw } from 'lucide-react';
+import { Client, FeeGroup, GlobalSettings, Staff, TurnoverBracket } from '../types';
+import { Mail, DollarSign, TrendingUp, Trash2, Save, RefreshCcw } from 'lucide-react';
 import { turnoverBracketService } from '../services';
+import { UserAccessProfile } from '../accessControl';
+import UserAccessManager from './UserAccessManager';
+import MfaSecurity from './MfaSecurity';
+import SystemHealthPanel from './SystemHealthPanel';
 
 interface SettingsProps {
   areaCosts: Record<string, number>;
@@ -11,9 +15,18 @@ interface SettingsProps {
   globalSettings: GlobalSettings;
   setGlobalSettings: (settings: GlobalSettings) => void;
   logo: string;
+  clients: Client[];
+  groups: FeeGroup[];
+  staff: Staff[];
+  currentAccessProfile: UserAccessProfile;
+  onCurrentAccessProfileChanged: (profile: UserAccessProfile) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ globalSettings, setGlobalSettings, areaCosts, setAreaCosts, logo, turnoverBrackets, setTurnoverBrackets }) => {
+const Settings: React.FC<SettingsProps> = ({
+  globalSettings, setGlobalSettings, areaCosts, setAreaCosts, logo,
+  turnoverBrackets, setTurnoverBrackets, clients, groups, staff,
+  currentAccessProfile, onCurrentAccessProfileChanged,
+}) => {
   const [isSavingBrackets, setIsSavingBrackets] = useState(false);
   const handleGlobalChange = (field: keyof GlobalSettings, value: string | number) => {
     setGlobalSettings({ ...globalSettings, [field]: value });
@@ -62,6 +75,20 @@ const Settings: React.FC<SettingsProps> = ({ globalSettings, setGlobalSettings, 
         <h2 className="text-2xl font-bold text-slate-800">Configurações Gerais</h2>
         <p className="text-sm text-slate-500">Ajuste os parâmetros da aplicação.</p>
       </div>
+
+      <MfaSecurity />
+
+      <SystemHealthPanel />
+
+      {currentAccessProfile.canManageUsers && (
+        <UserAccessManager
+          currentProfile={currentAccessProfile}
+          clients={clients}
+          groups={groups}
+          staff={staff}
+          onCurrentProfileChanged={onCurrentAccessProfileChanged}
+        />
+      )}
 
       {/* Email Settings */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">

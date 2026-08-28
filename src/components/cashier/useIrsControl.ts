@@ -327,15 +327,23 @@ export const useIrsControl = (currentYear: number) => {
   }, [currentYear]);
 
   const handleIrsDeliveredToggle = useCallback((clientId: string) => {
+    if (!isDbAvailable) {
+      alert('A base de dados SQL não está disponível. A alteração não foi gravada.');
+      return;
+    }
     const existing = irsControlMap.get(`${clientId}-${currentYear}`);
     if (existing?.deliveryCloseId) {
       alert('Este registo já está fechado numa entrega de dinheiro.');
       return;
     }
     upsertIrsRecord(clientId, previous => ({ ...previous, delivered: !previous.delivered }));
-  }, [currentYear, irsControlMap, upsertIrsRecord]);
+  }, [currentYear, irsControlMap, isDbAvailable, upsertIrsRecord]);
 
   const handleIrsPaidToggle = useCallback((clientId: string) => {
+    if (!isDbAvailable) {
+      alert('A base de dados SQL não está disponível. A alteração não foi gravada.');
+      return;
+    }
     const existing = irsControlMap.get(`${clientId}-${currentYear}`);
     const nextPaid = !existing?.paid;
     if (existing?.deliveryCloseId) {
@@ -364,9 +372,10 @@ export const useIrsControl = (currentYear: number) => {
       amount: 0,
       paymentMethod: 'Numerário',
     }));
-  }, [currentYear, irsControlMap, upsertIrsRecord]);
+  }, [currentYear, irsControlMap, isDbAvailable, upsertIrsRecord]);
 
   const handleIrsAmountChange = useCallback((clientId: string, value: string) => {
+    if (!isDbAvailable) return;
     const existing = irsControlMap.get(`${clientId}-${currentYear}`);
     if (existing?.deliveryCloseId) return;
     const parsedAmount = Number(value.replace(',', '.'));
@@ -374,24 +383,27 @@ export const useIrsControl = (currentYear: number) => {
       ...previous,
       amount: Number.isFinite(parsedAmount) ? parsedAmount : 0,
     }));
-  }, [currentYear, irsControlMap, upsertIrsRecord]);
+  }, [currentYear, irsControlMap, isDbAvailable, upsertIrsRecord]);
 
   const handleIrsAttachmentCountChange = useCallback((clientId: string, value: string) => {
+    if (!isDbAvailable) return;
     const parsedCount = Number(value.replace(',', '.'));
     upsertIrsRecord(clientId, previous => ({
       ...previous,
       attachmentCount: Number.isFinite(parsedCount) ? Math.max(0, Math.trunc(parsedCount)) : 0,
     }));
-  }, [upsertIrsRecord]);
+  }, [isDbAvailable, upsertIrsRecord]);
 
   const handleIrsNotesChange = useCallback((clientId: string, notes: string) => {
+    if (!isDbAvailable) return;
     upsertIrsRecord(clientId, previous => ({
       ...previous,
       notes,
     }));
-  }, [upsertIrsRecord]);
+  }, [isDbAvailable, upsertIrsRecord]);
 
   const handleIrsSettlementAmountChange = useCallback((clientId: string, amount: number) => {
+    if (!isDbAvailable) return;
     upsertIrsRecord(clientId, previous => ({
       ...previous,
       irsSettlementAmount: signIrsSettlementAmount(
@@ -399,26 +411,32 @@ export const useIrsControl = (currentYear: number) => {
         previous.irsSettlementDirection
       ),
     }));
-  }, [upsertIrsRecord]);
+  }, [isDbAvailable, upsertIrsRecord]);
 
   const handleIrsSettlementDirectionChange = useCallback((clientId: string, direction: IrsSettlementDirection) => {
+    if (!isDbAvailable) return;
     upsertIrsRecord(clientId, previous => ({
       ...previous,
       irsSettlementDirection: direction,
       irsSettlementAmount: signIrsSettlementAmount(Math.abs(previous.irsSettlementAmount || 0), direction),
     }));
-  }, [upsertIrsRecord]);
+  }, [isDbAvailable, upsertIrsRecord]);
 
   const handleIrsPaymentMethodChange = useCallback((clientId: string, paymentMethod: 'Numerário' | 'MB Way') => {
+    if (!isDbAvailable) return;
     const existing = irsControlMap.get(`${clientId}-${currentYear}`);
     if (existing?.deliveryCloseId) return;
     upsertIrsRecord(clientId, previous => ({
       ...previous,
       paymentMethod,
     }));
-  }, [currentYear, irsControlMap, upsertIrsRecord]);
+  }, [currentYear, irsControlMap, isDbAvailable, upsertIrsRecord]);
 
   const handleCloseDelivery = useCallback(() => {
+    if (!isDbAvailable) {
+      alert('A base de dados SQL não está disponível. O fecho de entrega não foi gravado.');
+      return;
+    }
     if (pendingDeliveryRecords.length === 0) {
       alert('Não existem valores pendentes para fecho.');
       return;
@@ -449,9 +467,10 @@ export const useIrsControl = (currentYear: number) => {
       },
       ...prev,
     ]);
-  }, [currentYear, pendingDeliveryRecords, pendingDeliveryTotal]);
+  }, [currentYear, isDbAvailable, pendingDeliveryRecords, pendingDeliveryTotal]);
 
   return {
+    isDbAvailable,
     irsControlMap,
     pendingDeliveryTotal,
     pendingDeliveryCount: pendingDeliveryRecords.length,

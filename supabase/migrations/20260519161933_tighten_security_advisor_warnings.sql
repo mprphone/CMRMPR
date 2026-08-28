@@ -102,9 +102,26 @@ alter function public.set_app_config_updated_at() set search_path = public;
 alter function public.set_app_tasks_updated_at() set search_path = public;
 alter function public.set_saft_dossier_data_updated_at() set search_path = public;
 alter function public.set_saft_sync_queue_updated_at() set search_path = public;
-alter function public.update_group_proposed_fees(uuid, jsonb) set search_path = public;
-alter function public.bulk_upsert_clients(client_sync_type[]) set search_path = public;
-alter function public.bulk_upsert_clients(jsonb) set search_path = public;
-alter function public.bulk_upsert_cash_payments(cash_payment_sync_type[]) set search_path = public;
+
+do $$
+declare
+  target record;
+begin
+  for target in
+    select p.oid::regprocedure as identity
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in (
+        'update_group_proposed_fees',
+        'bulk_upsert_clients',
+        'bulk_upsert_cash_payments'
+      )
+  loop
+    execute format('alter function %s set search_path = public', target.identity);
+  end loop;
+end;
+$$;
+
 alter function public.set_cash_payment_agreements_updated_at() set search_path = public;
 alter function public.create_cash_operation(numeric, numeric, text, jsonb, uuid[], numeric, numeric) set search_path = public;

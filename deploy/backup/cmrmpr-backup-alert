@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Disparado por systemd (OnFailure=) quando cmrmpr-backup.service falha.
+# Não depende de nenhum serviço externo específico: regista sempre no
+# journal com prioridade alta e avisa sessões locais; opcionalmente envia
+# um webhook se configurado. Isto é o que faltava para o backup não poder
+# falhar durante dias sem que ninguém seja avisado fora da aplicação.
+set -Eeuo pipefail
+
+readonly UNIT_NAME="${1:-cmrmpr-backup.service}"
+readonly ALERT_ENV='/mnt/bunker/CMRMPR/backups/.alert.env'
+readonly MESSAGE="[CMRMPR] Falha em $UNIT_NAME em $(date -u +%Y-%m-%dT%H:%M:%SZ). Ver: journalctl -u $UNIT_NAME --since today"
+
+logger -p daemon.crit -t cmrmpr-backup "$MESSAGE"
+
+if command -v wall >/dev/null 2>&1; then
+  wall "$MESSAGE" || true
+fi
+
+# Ficheiro opcional, 0600, só root: CMRMPR_ALERT_WEBHOOK_URL=https://...
+# (ex.: um webhook do Slack/Teams/ntfy.sh/healthchecks.io). Sem este
+# ficheiro, o script continua a registar no journal/wall e termina com
+# sucesso — nunca falha por falta de configuração de alerta externo.
+if [[ -r "$ALERT_ENV" ]]; then
+  # shellcheck disable=SC1090
+  source "$ALERT_ENV"
+fi
+
+if [[ -n "${CMRMPR_ALERT_WEBHOOK_URL:-}" ]] && command -v curl >/dev/null 2>&1; then
+  curl -fsS -m 10 -X POST "$CMRMPR_ALERT_WEBHOOK_URL" \
+    -H 'Content-Type: application/json' \
+    -d "$(printf '{"text":"%s"}' "$MESSAGE")" \
+    >/dev/null 2>&1 || logger -p daemon.err -t cmrmpr-backup "Falha ao enviar webhook de alerta."
+fi

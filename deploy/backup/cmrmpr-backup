@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+
+readonly BACKUP_ROOT='/mnt/bunker/CMRMPR/backups'
+readonly STACK_DIR='/mnt/bunker/CMRMPR/supabase-local'
+readonly WAMPR_DB='/mnt/bunker/MPRWA/whatsapp.db'
+readonly CMR_REPO='/home/ubuntu/programas/CMPRMPR'
+readonly WAMPR_REPO='/home/ubuntu/programas/mprWA'
+readonly WEB_ROOT='/var/www/cmrmpr'
+readonly DB_CONTAINER='supabase-db'
+readonly RETENTION_DAYS="${CMRMPR_BACKUP_RETENTION_DAYS:-30}"
+readonly MIN_FREE_KB=2097152
+
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+destination="$BACKUP_ROOT/$timestamp"
+
+record_backup_health() {
+  local health_status="$1"
+  local health_message="$2"
+  docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 \
+    -v health_status="$health_status" \
+    -v health_timestamp="$timestamp" \
+    -v health_backup_id="$(basename "$destination")" \
+    -v health_message="$health_message" >/dev/null <<'SQL' || true
+insert into public.app_config(key, value)
+values (
+  'system_backup_health',
+  jsonb_build_object(
+    'status', :'health_status',
+    'checkedAt', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+    'backupStartedAt', :'health_timestamp',
+    'backupId', :'health_backup_id',
+    'message', nullif(:'health_message', '')
+  )
+)
+on conflict (key) do update
+set value = excluded.value,
+    updated_at = now();
+SQL
+}
+
+on_backup_error() {
+  local exit_code="$1"
+  local line_number="$2"
+  trap - ERR
+  record_backup_health 'error' "Falha do backup na linha $line_number (código $exit_code)."
+  exit "$exit_code"
+}
+
+trap 'on_backup_error "$?" "$LINENO"' ERR
+
+install -d -m 700 "$BACKUP_ROOT"
+exec 9>"$BACKUP_ROOT/.backup.lock"
+flock -n 9 || { echo 'Another CMRMPR backup is already running.' >&2; exit 1; }
+
+# Pastas ".partial-*" de execuções anteriores que falharam a meio nunca eram
+# limpas (a sweep de retenção abaixo só olha para pastas completas), podendo
+# acumular indefinidamente e esgotar o espaço livre. Com o flock acima só
+# pode existir uma execução de cada vez, por isso qualquer ".partial-*" com
+# mais de 60 minutos é seguramente de uma execução já terminada (com
+# sucesso, cujo "mv" já a renomeou, ou falhada).
+find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '.partial-*' -mmin +60 -exec rm -rf -- {} +
+
+available_kb=$(df -Pk "$BACKUP_ROOT" | awk 'NR == 2 { print $4 }')
+if (( available_kb < MIN_FREE_KB )); then
+  echo "Insufficient free space in $BACKUP_ROOT (${available_kb} KiB)." >&2
+  exit 1
+fi
+
+staging="$BACKUP_ROOT/.partial-$timestamp-$$"
+install -d -m 700 "$staging"
+
+docker inspect "$DB_CONTAINER" >/dev/null
+docker exec "$DB_CONTAINER" pg_isready -U postgres -d postgres >/dev/null
+record_backup_health 'running' ''
+
+docker exec "$DB_CONTAINER" pg_dumpall -U postgres --globals-only >"$staging/postgres-globals.sql"
+docker exec "$DB_CONTAINER" pg_dump -U postgres -d postgres --format=custom >"$staging/supabase.dump"
+docker exec -i "$DB_CONTAINER" pg_restore --list <"$staging/supabase.dump" >"$staging/supabase.dump.list"
+
+sqlite3 "$WAMPR_DB" ".backup '$staging/wampr-whatsapp.db'"
+sqlite_integrity=$(sqlite3 "$staging/wampr-whatsapp.db" 'PRAGMA integrity_check;')
+if [[ "$sqlite_integrity" != 'ok' ]]; then
+  echo "WAMPR SQLite integrity check failed: $sqlite_integrity" >&2
+  exit 1
+fi
+
+tar -C "$STACK_DIR/volumes" -czf "$staging/supabase-storage.tar.gz" storage
+tar -C "$STACK_DIR/volumes" -czf "$staging/edge-functions.tar.gz" functions
+tar -C "$WEB_ROOT" -czf "$staging/frontend-dist.tar.gz" .
+tar -C "$CMR_REPO" -czf "$staging/cmrmpr-source.tar.gz" \
+  --exclude='./.git' --exclude='./node_modules' --exclude='./dist' --exclude='./.env' .
+tar -C "$WAMPR_REPO" -czf "$staging/wampr-source.tar.gz" \
+  --exclude='./.git' --exclude='./node_modules' --exclude='./dist' --exclude='./release' \
+  --exclude='./logs' --exclude='./uploads' --exclude='./whatsapp.db' --exclude='./.env' .
+install -m 600 "$STACK_DIR/.env" "$staging/supabase.env"
+install -m 600 "$WAMPR_REPO/.env" "$staging/wampr.env"
+install -m 600 "$STACK_DIR/docker-compose.yml" "$staging/docker-compose.yml"
+install -m 600 "$STACK_DIR/docker-compose.cmrmpr.yml" "$staging/docker-compose.cmrmpr.yml"
+install -m 600 /etc/nginx/sites-available/cmr.mpr.pt "$staging/nginx-cmr.mpr.pt.conf"
+
+{
+  echo "created_at=$timestamp"
+  echo "sqlite_integrity=$sqlite_integrity"
+  echo "clients=$(docker exec "$DB_CONTAINER" psql -U postgres -d postgres -Atc 'select count(*) from public.clients')"
+  echo "staff=$(docker exec "$DB_CONTAINER" psql -U postgres -d postgres -Atc 'select count(*) from public.staff')"
+  echo "auth_users=$(docker exec "$DB_CONTAINER" psql -U postgres -d postgres -Atc 'select count(*) from auth.users')"
+  echo "storage_objects=$(docker exec "$DB_CONTAINER" psql -U postgres -d postgres -Atc 'select count(*) from storage.objects')"
+  echo "wampr_customers=$(sqlite3 "$staging/wampr-whatsapp.db" 'select count(*) from customers;')"
+  echo "wampr_users=$(sqlite3 "$staging/wampr-whatsapp.db" 'select count(*) from users;')"
+} >"$staging/manifest.txt"
+
+(
+  cd "$staging"
+  sha256sum cmrmpr-source.tar.gz edge-functions.tar.gz frontend-dist.tar.gz \
+    nginx-cmr.mpr.pt.conf postgres-globals.sql supabase-storage.tar.gz supabase.dump \
+    supabase.env wampr.env wampr-source.tar.gz wampr-whatsapp.db >SHA256SUMS
+  chmod 600 ./*
+)
+
+mv "$staging" "$destination"
+
+# Cifra o backup em repouso quando é dada uma chave pública GPG (recomendado:
+# contém o dump completo do PostgreSQL, o SQLite do WhatsApp e credenciais em
+# claro de supabase.env/wampr.env). Sem CMRMPR_BACKUP_GPG_RECIPIENT definido,
+# o comportamento mantém-se o de antes (pasta em claro, só protegida por
+# permissões Unix 0600/0700).
+if [[ -n "${CMRMPR_BACKUP_GPG_RECIPIENT:-}" ]] && command -v gpg >/dev/null 2>&1; then
+  tar -C "$BACKUP_ROOT" -cf - "$(basename "$destination")" \
+    | gpg --batch --yes --trust-model always \
+        --recipient "$CMRMPR_BACKUP_GPG_RECIPIENT" \
+        --output "$destination.tar.gpg" --encrypt
+  chmod 600 "$destination.tar.gpg"
+  rm -rf "$destination"
+fi
+
+if [[ "$BACKUP_ROOT" == '/mnt/bunker/CMRMPR/backups' && "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+  find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
+    -name '20??????T??????Z' -mtime "+$RETENTION_DAYS" -exec rm -rf -- {} +
+  find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type f \
+    -name '20??????T??????Z.tar.gpg' -mtime "+$RETENTION_DAYS" -exec rm -f -- {} +
+fi
+
+record_backup_health 'success' ''
+
+echo "CMRMPR backup completed: $destination"

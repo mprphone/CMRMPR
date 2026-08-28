@@ -139,22 +139,16 @@ const getParseIrsFunctionConfig = (): { url: string; key: string } => {
   throw new Error("Configuração Supabase em falta para chamar parse-irs-pdf.");
 };
 
-const callParseIrsPdfNoAuth = async (body: Record<string, unknown>): Promise<any> => {
-  const { url, key } = getParseIrsFunctionConfig();
-  const endpoint = `${String(url).replace(/\/+$/, "")}/functions/v1/parse-irs-pdf`;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(String(data?.error || data?.message || `HTTP ${response.status}`));
+const callParseIrsPdf = async (body: Record<string, unknown>): Promise<any> => {
+  getParseIrsFunctionConfig();
+  const storeClient = ensureStoreClient();
+  const { data, error } = await invokeWithJwtRefreshRetry(storeClient, 'parse-irs-pdf', body);
+  if (error) {
+    if (error.context && typeof error.context.json === 'function') {
+      const functionError = await error.context.json().catch(() => null);
+      if (functionError?.error) throw new Error(functionError.error);
+    }
+    throw error;
   }
   return data;
 };
@@ -162,7 +156,7 @@ const callParseIrsPdfNoAuth = async (body: Record<string, unknown>): Promise<any
 export const parseIrsPdfNifsWithAI = async (
   firstPageText: string
 ): Promise<IrsPdfAiParseResult> => {
-  const data = await callParseIrsPdfNoAuth({ firstPageText });
+  const data = await callParseIrsPdf({ firstPageText });
   if (!data || typeof data !== "object") {
     throw new Error("A IA devolveu uma resposta vazia para o PDF.");
   }
@@ -189,7 +183,7 @@ export const parseIrsPdfNifsFromPdfWithAI = async (
   }
   const pdfBase64 = btoa(binary);
 
-  const data = await callParseIrsPdfNoAuth({
+  const data = await callParseIrsPdf({
     pdfBase64,
     mimeType: file.type || "application/pdf",
     fileName: file.name || "",

@@ -1,10 +1,9 @@
-import React, { useMemo } from 'react';
-import { Client, Task, Staff, TaskArea, StaffStats } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Client, Task, Staff, TaskArea } from '../types';
 import { calculateClientProfitability, calculateStaffStats } from '../services/calculator';
-import { generateNotifications } from '../services/notificationService';
-import AlertsPanel from './AlertsPanel';
+import { ensureStoreClient } from '../services/supabaseClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { TrendingUp, AlertTriangle, DollarSign, UserCheck, Award, ThumbsDown } from 'lucide-react';
+import { TrendingUp, AlertTriangle, DollarSign, UserCheck, Wallet, BadgeEuro } from 'lucide-react';
 
 interface DashboardProps {
   clients: Client[];
@@ -13,10 +12,32 @@ interface DashboardProps {
   staff: Staff[];
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff }) => {
-  const notifications = useMemo(() => generateNotifications(clients, tasks, areaCosts, staff), [clients, tasks, areaCosts, staff]);
+const money = new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' });
+const cleanNif = (value: unknown) => String(value ?? '').replace(/\D/g, '');
 
-  const { metrics, staffMetrics, topClients, bottomClients } = useMemo(() => {
+interface PendingBalanceRow {
+  nif: string;
+  total_pendente: number;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff }) => {
+  const [pendingBalances, setPendingBalances] = useState<PendingBalanceRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const client = ensureStoreClient();
+        const { data } = await client.rpc('get_visible_primavera_pending_balances');
+        if (!cancelled && Array.isArray(data)) setPendingBalances(data as PendingBalanceRow[]);
+      } catch {
+        // Painel meramente informativo — uma falha aqui não deve impedir o resto do dashboard.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const { metrics, staffMetrics, topRevenueClients, topDebts } = useMemo(() => {
     let totalRev = 0;
     let totalCost = 0;
     let profitable = 0;
@@ -26,42 +47,48 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
     const activeClients = clients.filter(c => c.status !== 'Inativo');
 
     const clientData = activeClients.map(c => {
-      // Pass the staff list and global cost to calculation
       const analysis = calculateClientProfitability(c, tasks, areaCosts as Record<TaskArea, number>, staff);
       totalRev += analysis.totalAnnualRevenue;
       totalCost += analysis.totalAnnualCost;
-      
+
       if (analysis.profitability < 15) risk++;
       else profitable++;
 
       return {
         name: c.name,
-        margin: analysis.profitability
+        nif: c.nif,
+        // Avença mensal configurada, não a estimativa anual (essa já está
+        // nos cartões do topo) — evita inflar clientes ainda por faturar.
+        monthlyFee: Number(c.monthlyFee || 0),
       };
-    }).sort((a, b) => a.margin - b.margin);
+    });
 
-    const topClients = [...clientData].sort((a, b) => b.margin - a.margin).slice(0, 5).reverse();
-    const bottomClients = clientData.slice(0, 5).reverse();
+    const topRevenueClients = [...clientData].sort((a, b) => b.monthlyFee - a.monthlyFee).slice(0, 8);
+
+    const balanceByNif = new Map(pendingBalances.map(row => [cleanNif(row.nif), Number(row.total_pendente || 0)]));
+    const topDebts = activeClients
+      .map(c => ({ name: c.name, debt: balanceByNif.get(cleanNif(c.nif)) ?? 0 }))
+      .filter(entry => entry.debt > 0.005)
+      .sort((a, b) => b.debt - a.debt)
+      .slice(0, 8);
 
     const staffPerformance = staff
+      .filter(s => (s.status || 'Ativo') !== 'Inativo')
       .map(s => calculateStaffStats(s, activeClients, tasks))
       .sort((a, b) => b.profitability - a.profitability);
 
-    return { 
+    return {
       metrics: { totalRev, totalCost, profitable, risk },
       staffMetrics: staffPerformance,
-      topClients,
-      bottomClients
+      topRevenueClients,
+      topDebts,
     };
-  }, [clients, tasks, areaCosts, staff]);
+  }, [clients, tasks, areaCosts, staff, pendingBalances]);
 
   const totalMarginPercent = metrics.totalRev > 0 ? ((metrics.totalRev - metrics.totalCost) / metrics.totalRev) * 100 : 0;
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Notifications Area */}
-      <AlertsPanel notifications={notifications} />
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* KPI Cards */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
@@ -120,65 +147,99 @@ const Dashboard: React.FC<DashboardProps> = ({ clients, tasks, areaCosts, staff 
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Charts */}
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <Award size={20} className="text-green-500" /> Top 5 Clientes Mais Rentáveis
+            <Wallet size={20} className="text-red-500" /> Maiores Dívidas (Primavera)
           </h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={topClients} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" domain={[0, 'dataMax + 10']} tickFormatter={(value) => `${value}%`} />
-                <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 12}} />
-                <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} cursor={{ fill: '#f1f5f9' }} />
-                <Bar dataKey="margin" name="Margem" fill="#22c55e" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {topDebts.length === 0 ? (
+            <p className="text-sm text-slate-400 py-8 text-center">Sem dívidas pendentes registadas.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {topDebts.map(entry => (
+                <li key={entry.name} className="flex items-center justify-between py-2.5">
+                  <span className="text-sm font-medium text-slate-700 truncate pr-3">{entry.name}</span>
+                  <span className="text-sm font-bold text-red-600 whitespace-nowrap">{money.format(entry.debt)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-            <ThumbsDown size={20} className="text-red-500" /> Top 5 Clientes Menos Rentáveis
+            <BadgeEuro size={20} className="text-green-600" /> Top Clientes por Avença Mensal
           </h3>
-          <div className="h-64">
+          {topRevenueClients.length === 0 ? (
+            <p className="text-sm text-slate-400 py-8 text-center">Sem avenças configuradas.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {topRevenueClients.map(entry => {
+                const maxFee = topRevenueClients[0].monthlyFee || 1;
+                const widthPercent = Math.max(4, (entry.monthlyFee / maxFee) * 100);
+                return (
+                  <li key={entry.name} className="py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium text-slate-700 truncate">{entry.name}</span>
+                      <span className="text-sm font-bold text-green-700 whitespace-nowrap">{money.format(entry.monthlyFee)}</span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 w-full rounded-full bg-slate-100">
+                      <div className="h-1.5 rounded-full bg-green-500" style={{ width: `${widthPercent}%` }} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* Staff Performance */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+            <UserCheck size={20} className="text-blue-600" /> Rentabilidade por Funcionário
+          </h3>
+          <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={bottomClients} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <BarChart data={staffMetrics} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" domain={['dataMin - 10', 40]} tickFormatter={(value) => `${value}%`} />
-                <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 12}} />
+                <XAxis type="number" domain={['dataMin - 10', 'dataMax + 10']} tickFormatter={(value) => `${value}%`} />
+                <YAxis dataKey="staffName" type="category" width={100} tick={{ fontSize: 12 }} />
                 <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} cursor={{ fill: '#f1f5f9' }} />
-                <Bar dataKey="margin" name="Margem" radius={[0, 4, 4, 0]}>
-                  {bottomClients.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.margin < 0 ? '#ef4444' : '#f97316'} />
+                <Bar dataKey="profitability" name="Rentabilidade" radius={[0, 4, 4, 0]}>
+                  {staffMetrics.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.profitability < 20 ? '#ef4444' : '#22c55e'} />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
-      </div>
 
-      {/* Staff Performance Chart */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-        <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-          <UserCheck size={20} className="text-blue-600" /> Rentabilidade por Funcionário
-        </h3>
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={staffMetrics} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" domain={['dataMin - 10', 'dataMax + 10']} tickFormatter={(value) => `${value}%`} />
-              <YAxis dataKey="staffName" type="category" width={100} tick={{fontSize: 12}} />
-              <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} cursor={{ fill: '#f1f5f9' }} />
-              <Bar dataKey="profitability" name="Rentabilidade" radius={[0, 4, 4, 0]}>
-                {staffMetrics.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.profitability < 20 ? '#ef4444' : '#22c55e'} />
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+            <UserCheck size={20} className="text-blue-600" /> Funcionários — Valor e Nº de Empresas
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-[10px] font-bold uppercase text-slate-400 border-b border-slate-100">
+                <tr>
+                  <th className="py-2 pr-2">Funcionário</th>
+                  <th className="py-2 pr-2 text-right">Nº Empresas</th>
+                  <th className="py-2 text-right">Receita Gerida</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {staffMetrics.map(entry => (
+                  <tr key={entry.staffName}>
+                    <td className="py-2 pr-2 font-medium text-slate-700">{entry.staffName}</td>
+                    <td className="py-2 pr-2 text-right text-slate-600">{entry.clientCount}</td>
+                    <td className="py-2 text-right font-bold text-slate-800">{money.format(entry.totalRevenue)}</td>
+                  </tr>
                 ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

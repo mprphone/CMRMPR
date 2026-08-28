@@ -61,6 +61,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     newExpense,
     setNewExpense,
     sessionExpenses,
+    isSessionExpensesDbAvailable,
     totalSessionExpenses,
     handleAddExpense,
     handleRemoveExpense,
@@ -563,8 +564,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     const toUpsert = Array.from<Partial<CashPayment>>(pendingChanges.values()).filter(p => p.amountPaid !== -1);
 
     try {
-      if (toDelete.length > 0) await cashPaymentService.deleteMany(toDelete);
-      if (toUpsert.length > 0) await cashPaymentService.bulkUpsert(toUpsert);
+      await cashPaymentService.applyChanges(toUpsert, toDelete);
 
       const updatedPayments = await cashPaymentService.getAll();
       setCashPayments(updatedPayments);
@@ -586,14 +586,14 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   }, [pendingChanges, setCashPayments, toast]);
 
   useEffect(() => {
-    // Auto-save on unmount
-    return () => {
-      if (pendingChanges.size > 0) {
-        console.log("A gravar alterações pendentes ao sair...");
-        handleSaveChanges(true);
-      }
+    if (pendingChanges.size === 0) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
     };
-  }, [pendingChanges, handleSaveChanges]);
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
+  }, [pendingChanges.size]);
 
   const handleReloadFromServer = async () => {
     try {
@@ -608,6 +608,10 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
   };
 
   const handleCloseRegisterClick = async () => {
+    if (!isSessionExpensesDbAvailable) {
+      toast.error('A base SQL não está disponível. Recarregue a página antes de fechar a caixa.');
+      return;
+    }
     let paymentsForProcessing = cashPayments;
     if (pendingChanges.size > 0) {
       const updatedPayments = await handleSaveChanges(true);
@@ -632,6 +636,10 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
     const deposit = parseFloat(depositAmount) || 0;
     const adjustment = parseFloat(adjustmentAmount) || 0;
     const mbWayDeposit = parseFloat(mbWayDepositAmount) || 0;
+    if (deposit < 0 || mbWayDeposit < 0) {
+      toast.warning('Os valores depositados não podem ser negativos. Use o campo de acertos para justificar diferenças.');
+      return;
+    }
 
     setCloseRegisterPayments(allPaymentsToProcess);
     setCloseRegisterSummary({
@@ -772,10 +780,10 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="text-sm mx-auto">
             <thead className="text-xs text-slate-500 uppercase bg-slate-50">
               <tr>
-                <th className="px-4 py-2 text-left">Cliente</th>
+                <th className="px-4 py-2 text-left max-w-xs">Cliente</th>
                 {months.map(m => <th key={m} className="p-1 text-center w-16">{m}</th>)}
               </tr>
             </thead>
@@ -980,10 +988,15 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
         <div className="flex justify-between items-center mb-4">
           <h3 className="font-bold text-slate-800 flex items-center gap-2"><DollarSign size={18} /> Saídas de Caixa (Sessão Atual)</h3>
-          <button onClick={() => setIsExpenseModalOpen(true)} className="bg-orange-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-orange-600 font-bold text-sm">
+          <button disabled={!isSessionExpensesDbAvailable} onClick={() => setIsExpenseModalOpen(true)} className="bg-orange-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-orange-600 font-bold text-sm disabled:opacity-50">
             <Plus size={16} /> Adicionar Saída
           </button>
         </div>
+        {!isSessionExpensesDbAvailable && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs font-bold text-red-700">
+            Base SQL indisponível: nenhuma saída será gravada localmente e o fecho de caixa está bloqueado. Recarregue a página.
+          </div>
+        )}
         <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
           {sessionExpenses.length === 0 ? (
             <p className="text-sm text-slate-400 italic text-center py-4">Nenhuma saída de caixa nesta sessão.</p>
@@ -1017,11 +1030,11 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><Banknote size={14}/> Depósito (Numerário)</label>
-            <input type="number" value={depositAmount} onChange={e => { setIsDepositAmountEdited(true); setDepositAmount(e.target.value); }} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
+            <input type="number" min="0" step="0.01" value={depositAmount} onChange={e => { setIsDepositAmountEdited(true); setDepositAmount(e.target.value); }} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><CreditCard size={14}/> Depósito (MB Way)</label>
-            <input type="number" value={mbWayDepositAmount} onChange={e => { setIsMbWayDepositAmountEdited(true); setMbWayDepositAmount(e.target.value); }} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
+            <input type="number" min="0" step="0.01" value={mbWayDepositAmount} onChange={e => { setIsMbWayDepositAmountEdited(true); setMbWayDepositAmount(e.target.value); }} className="w-full px-3 py-2 border rounded-lg text-sm" placeholder="0.00" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1"><DollarSign size={14} /> Gastos de Caixa (€)</label>
@@ -1037,7 +1050,7 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
                 <RefreshCcw size={14} /> Recarregar dados
               </button>
             )}
-            <button onClick={handleCloseRegisterClick} disabled={isSaving || (cashInHand + mbWayInHand === 0 && sessionExpenses.length === 0)} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50">
+            <button onClick={handleCloseRegisterClick} disabled={!isSessionExpensesDbAvailable || isSaving || (cashInHand + mbWayInHand === 0 && sessionExpenses.length === 0)} className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-black transition-all shadow-lg disabled:opacity-50">
               {isSaving ? <RefreshCcw size={18} className="animate-spin" /> : <Check size={18} />} Finalizar e Gerar Relatório
             </button>
           </div>

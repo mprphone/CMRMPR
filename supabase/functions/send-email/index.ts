@@ -204,6 +204,18 @@ serve(async (req) => {
       });
     }
 
+    const { data: canSendEmail, error: permissionError } = await supabase.rpc("app_has_permission", {
+      p_module: "emails",
+      p_action: "create",
+    });
+    if (permissionError) throw permissionError;
+    if (canSendEmail !== true) {
+      return new Response(JSON.stringify({ error: "Esta conta não tem permissão para enviar emails." }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { to, from, replyTo, subject, html } = (await req.json()) as SendEmailBody;
     if (!to || !subject || !html) {
       return new Response(JSON.stringify({ error: "Missing required fields: to, subject, html" }), {
@@ -222,11 +234,10 @@ serve(async (req) => {
     }
 
     const smtpTls = parseBool(Deno.env.get("SMTP_TLS"), true);
-
-    // On hosted Supabase Edge Functions, 25/587 are blocked. Use 465.
-    if ([25, 587].includes(smtpPort)) {
-      throw new Error("SMTP port 25/587 is blocked in hosted Edge Functions. Configure SMTP_PORT=465 and SMTP_TLS=true.");
-    }
+    // Nota: as portas 25/587 já não são bloqueadas aqui — essa restrição só
+    // fazia sentido no Supabase Cloud hospedado (egress bloqueado nessas
+    // portas). No self-hosted local, um relay SMTP em 587/STARTTLS (comum em
+    // Postfix) é uma configuração válida; defina SMTP_TLS=false para 587/25.
 
     const smtpFromEmail = (Deno.env.get("SMTP_FROM_EMAIL") || smtpUsername).trim();
     if (!smtpFromEmail.includes("@")) {

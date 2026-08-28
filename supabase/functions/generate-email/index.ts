@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { GoogleGenerativeAI } from "npm:@google/generative-ai";
+import { AppAuthorizationError, requireAppPermission } from "../_shared/authorization.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -22,6 +23,10 @@ serve(async (req) => {
   }
 
   try {
+    if (req.method !== "POST") {
+      throw new AppAuthorizationError("Método não permitido.", 405);
+    }
+    await requireAppPermission(req, "emails", "create");
     const { topic, tone } = await req.json().catch(() => ({}));
     if (!topic || !tone) {
       return new Response(JSON.stringify({ error: "Topic and tone are required." }), {
@@ -102,7 +107,7 @@ Responda APENAS em formato JSON com a seguinte estrutura:
 
     return new Response(JSON.stringify({ error: errorMessage }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: 500,
+      status: error instanceof AppAuthorizationError ? error.status : 500,
     });
   }
 });

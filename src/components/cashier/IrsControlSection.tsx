@@ -7,6 +7,7 @@ import { IrsControlRecord, IrsDeliveryClose, IrsSettlementDirection } from './us
 import { parseIrsPdfNifsFromPdfWithAI, parseIrsPdfNifsWithAI } from '../../services/geminiService';
 
 interface IrsControlSectionProps {
+  isDbAvailable: boolean;
   currentYear: number;
   setCurrentYear: React.Dispatch<React.SetStateAction<number>>;
   irsGroup?: FeeGroup;
@@ -312,6 +313,7 @@ const validateIrsPdfData = (
 };
 
 const IrsControlSection: React.FC<IrsControlSectionProps> = ({
+  isDbAvailable,
   currentYear,
   setCurrentYear,
   irsGroup,
@@ -559,6 +561,12 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
       <input ref={pdfFileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfSelected} />
 
+      {!isDbAvailable && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs font-bold text-red-700">
+          Base SQL indisponível: nenhuma alteração do Controlo IRS será gravada. Recarregue a página.
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-bold text-slate-800">Control IRS</h3>
         <div className="flex items-center gap-4">
@@ -620,7 +628,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
             <button
               type="button"
               onClick={onCloseDelivery}
-              disabled={pendingDeliveryCount === 0}
+              disabled={pendingDeliveryCount === 0 || !isDbAvailable}
               className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40"
             >
               Fechar Entrega de Dinheiro
@@ -786,7 +794,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                             step="1"
                             value={attachmentCount > 0 ? attachmentCount.toString() : ''}
                             onChange={(e) => onAttachmentCountChange(client.id, e.target.value)}
-                            className="w-20 px-2 py-1.5 border rounded-lg text-sm text-center"
+                            disabled={!isDbAvailable}
+                            className="w-20 px-2 py-1.5 border rounded-lg text-sm text-center disabled:bg-slate-100 disabled:text-slate-400"
                             placeholder={suggestedAttachmentCount > 0 ? suggestedAttachmentCount.toString() : '0'}
                           />
                         </td>
@@ -797,7 +806,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                               onChange={(e) => {
                                 onSettlementDirectionChange(client.id, e.target.value as IrsSettlementDirection);
                               }}
-                              className={`w-full px-2 py-1.5 border rounded-lg text-xs font-bold bg-white ${
+                              disabled={!isDbAvailable}
+                              className={`w-full px-2 py-1.5 border rounded-lg text-xs font-bold bg-white disabled:bg-slate-100 disabled:text-slate-400 ${
                                 settlementDirection === 'A pagar'
                                   ? 'text-red-700 border-red-200'
                                   : settlementDirection === 'Nulo'
@@ -814,7 +824,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                               min="0"
                               step="0.01"
                               value={Math.abs(settlementAmount) || ''}
-                              disabled={settlementDirection === 'Nulo'}
+                              disabled={settlementDirection === 'Nulo' || !isDbAvailable}
                               onChange={(e) => {
                                 const nextAbsolute = Math.max(0, Number((e.target.value || '').replace(',', '.')) || 0);
                                 onSettlementAmountChange(client.id, nextAbsolute);
@@ -828,7 +838,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                           <button
                             type="button"
                             onClick={() => onToggleDelivered(client.id)}
-                            className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${delivered ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-green-50'}`}
+                            disabled={!isDbAvailable}
+                            className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center disabled:opacity-40 ${delivered ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-green-50'}`}
                           >
                             <Check size={14} />
                           </button>
@@ -837,7 +848,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                           <button
                             type="button"
                             onClick={() => onTogglePaid(client.id)}
-                            className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center ${paid ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-blue-50'}`}
+                            disabled={!isDbAvailable}
+                            className={`w-8 h-8 rounded-md border mx-auto flex items-center justify-center disabled:opacity-40 ${paid ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 text-slate-400 hover:bg-blue-50'}`}
                           >
                             <Check size={14} />
                           </button>
@@ -845,7 +857,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                         <td className="px-3 py-2">
                           <select
                             value={paymentMethod}
-                            disabled={!paid || isClosed}
+                            disabled={!paid || isClosed || !isDbAvailable}
                             onChange={(e) => onPaymentMethodChange(client.id, e.target.value as 'Numerário' | 'MB Way')}
                             className="w-full px-2 py-1.5 border rounded-lg text-sm disabled:bg-slate-100 disabled:text-slate-400"
                           >
@@ -859,7 +871,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                             min="0"
                             step="0.01"
                             value={amount > 0 ? amount.toString() : ''}
-                            disabled={!paid || isClosed}
+                            disabled={!paid || isClosed || !isDbAvailable}
                             onChange={(e) => onAmountChange(client.id, e.target.value)}
                             className="w-full px-3 py-1.5 border rounded-lg text-right disabled:bg-slate-100 disabled:text-slate-400"
                             placeholder={paid ? '0.00' : '-'}
@@ -870,7 +882,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                             type="text"
                             value={notes}
                             onChange={(e) => onNotesChange(client.id, e.target.value)}
-                            className="w-full px-3 py-1.5 border rounded-lg"
+                            disabled={!isDbAvailable}
+                            className="w-full px-3 py-1.5 border rounded-lg disabled:bg-slate-100 disabled:text-slate-400"
                             placeholder="Ex: oferta, motivo..."
                           />
                         </td>
@@ -1033,7 +1046,8 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                     onChange={(e) => {
                       onSettlementDirectionChange(floatingClient.id, e.target.value as IrsSettlementDirection);
                     }}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                    disabled={!isDbAvailable}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white disabled:bg-slate-100 disabled:text-slate-400"
                   >
                     <option value="A pagar">A pagar</option>
                     <option value="Nulo">Nulo</option>
@@ -1044,7 +1058,7 @@ const IrsControlSection: React.FC<IrsControlSectionProps> = ({
                     min="0"
                     step="0.01"
                     value={Math.abs(Number(floatingRecord?.irsSettlementAmount || 0)) || ''}
-                    disabled={floatingSettlementDirection === 'Nulo'}
+                    disabled={floatingSettlementDirection === 'Nulo' || !isDbAvailable}
                     onChange={(e) => {
                       const nextAbsolute = Math.max(0, Number((e.target.value || '').replace(',', '.')) || 0);
                       onSettlementAmountChange(floatingClient.id, nextAbsolute);

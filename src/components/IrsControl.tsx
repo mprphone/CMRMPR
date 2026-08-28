@@ -998,6 +998,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
   }, [clientsById, importFichaInfoMap, irsGroupClients]);
 
   const {
+    isDbAvailable: isIrsControlDbAvailable,
     irsControlMap,
     pendingDeliveryTotal,
     pendingDeliveryCount,
@@ -1017,6 +1018,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
   return (
     <div className="space-y-6 animate-fade-in">
       <IrsControlSection
+        isDbAvailable={isIrsControlDbAvailable}
         currentYear={currentYear}
         setCurrentYear={setCurrentYear}
         irsGroup={irsGroup}

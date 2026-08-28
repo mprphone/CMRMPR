@@ -38,7 +38,8 @@ export const DEFAULT_STAFF: Staff[] = [
     otherMonthlyCosts: 100,
     capacityHoursPerMonth: 140,
     hourlyCost: 35.00, // Pre-calculated approx
-    assignedAreas: [TaskArea.CONTABILIDADE, TaskArea.FISCALIDADE]
+    assignedAreas: [TaskArea.CONTABILIDADE, TaskArea.FISCALIDADE],
+    status: 'Ativo'
   },
   { 
     id: 's2', 
@@ -51,7 +52,8 @@ export const DEFAULT_STAFF: Staff[] = [
     otherMonthlyCosts: 50,
     capacityHoursPerMonth: 160,
     hourlyCost: 20.00,
-    assignedAreas: [TaskArea.CONTABILIDADE]
+    assignedAreas: [TaskArea.CONTABILIDADE],
+    status: 'Ativo'
   },
   { 
     id: 's3', 
@@ -64,7 +66,8 @@ export const DEFAULT_STAFF: Staff[] = [
     otherMonthlyCosts: 50,
     capacityHoursPerMonth: 150,
     hourlyCost: 28.00,
-    assignedAreas: [TaskArea.RH]
+    assignedAreas: [TaskArea.RH],
+    status: 'Ativo'
   },
   { 
     id: 's4', 
@@ -77,7 +80,8 @@ export const DEFAULT_STAFF: Staff[] = [
     otherMonthlyCosts: 30,
     capacityHoursPerMonth: 160,
     hourlyCost: 15.00,
-    assignedAreas: [TaskArea.ADMINISTRATIVO]
+    assignedAreas: [TaskArea.ADMINISTRATIVO],
+    status: 'Ativo'
   },
 ];
 

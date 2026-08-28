@@ -56,6 +56,7 @@ export interface Staff {
   capacityHoursPerMonth: number;
   hourlyCost: number;
   assignedAreas: TaskArea[];
+  status: 'Ativo' | 'Inativo';
 }
 
 export interface FeeGroup {
@@ -227,9 +228,9 @@ export interface InsurancePolicy {
   clientId?: string;
   clientName?: string; // For display
   policyHolder?: string;
-  agent?: 'MPR' | 'Paula';
+  agent?: string;
   mediatorPartner?: 'Finiconde' | 'Neoseguros' | 'Outra' | string;
-  internalResponsible?: 'MPR' | 'Paula';
+  internalResponsible?: string;
   policyDate: string;
   renewalDate?: string;
   policyNumber?: string;

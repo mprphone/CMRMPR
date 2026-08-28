@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Client, Staff, Task, FeeGroup } from '../types';
 import { clientService, saftDossierService } from '../services';
-import { Search, Plus, X, CloudCheck, RefreshCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Plus, X, CloudCheck, RefreshCcw, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 
 interface ClientListProps {
   clients: Client[];
@@ -12,6 +12,14 @@ interface ClientListProps {
   onSelectClient: (client: Client) => void;
   groups: FeeGroup[];
   onSyncClientsRequest: () => Promise<void>;
+  canSyncWampr: boolean;
+  canViewFinancial: boolean;
+  canCreateClients: boolean;
+  isSyncingClients: boolean;
+  /** Colaborador do próprio utilizador, quando o âmbito de dados é "assigned". */
+  ownStaffId: string | null;
+  /** Quando true, o "Responsável" de um cliente novo/editado tem de ser o próprio utilizador (âmbito "assigned"). */
+  isResponsibleStaffLocked: boolean;
 }
 
 type SortableKeys = 'nif' | 'name' | 'email' | 'phone' | 'entityType' | 'employeeCount' | 'documentCount' | 'monthlyFee' | 'status';
@@ -58,7 +66,11 @@ const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(em
 
 const todayIso = () => new Date().toISOString().split('T')[0];
 
-const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onSelectClient, groups, onSyncClientsRequest }) => {
+const ClientList: React.FC<ClientListProps> = ({
+  clients, setClients, staff, onSelectClient, groups, onSyncClientsRequest,
+  canSyncWampr, canViewFinancial, canCreateClients, isSyncingClients,
+  ownStaffId, isResponsibleStaffLocked,
+}) => {
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [groupFilter, setGroupFilter] = useState('all');
@@ -316,7 +328,7 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
       entityType: 'SOCIEDADE',
       sector: 'Geral',
       status: 'Ativo',
-      responsibleStaff: '',
+      responsibleStaff: isResponsibleStaffLocked ? (ownStaffId || '') : '',
       monthlyFee: 0,
       saftCollectEnabled: true,
       contractRenewalDate: todayIso(),
@@ -424,76 +436,95 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
       setIsModalOpen(false);
       setRefreshTick(value => value + 1);
     } catch (err: any) {
-      alert('Erro ao sincronizar cliente com Supabase: ' + (err?.message || 'erro desconhecido'));
+      alert('Erro ao gravar o cliente no servidor local: ' + (err?.message || 'erro desconhecido'));
     } finally {
       setIsSaving(false);
     }
   };
 
-  const SortableHeader = ({ children, sortKey }: { children: React.ReactNode; sortKey: SortableKeys }) => {
+  const SortableHeader = ({ children, sortKey, className = '' }: { children: React.ReactNode; sortKey: SortableKeys; className?: string }) => {
     const isSorted = sortConfig.key === sortKey;
     return (
-      <th className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => requestSort(sortKey)}>
-        <div className="flex items-center gap-1">
+      <th className={`${className} px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-600`}>
+        <button type="button" className="inline-flex items-center gap-1 hover:text-slate-900" onClick={() => requestSort(sortKey)}>
           {children}
           {isSorted ? (
-            sortConfig.direction === 'ascending' ? <ChevronUp size={14} /> : <ChevronDown size={14} />
+            sortConfig.direction === 'ascending' ? <ChevronUp size={12} /> : <ChevronDown size={12} />
           ) : (
-            <ChevronUp size={14} className="text-slate-300" />
+            <ChevronUp size={12} className="text-slate-300" />
           )}
-        </div>
+        </button>
       </th>
     );
   };
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex flex-col gap-4">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-            <div className="flex items-center gap-3">
-              <h2 className="text-xl font-bold text-slate-800">Carteira de Clientes</h2>
-              <div className="flex items-center gap-1 text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
-                <CloudCheck size={12} /> SUPABASE SYNC
-              </div>
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-bold md:text-2xl">Clientes</h1>
+              <span className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-100">
+                <CloudCheck size={12} /> CMR · Base local
+              </span>
             </div>
-
-            <div className="flex gap-3 w-full sm:w-auto">
-              <button onClick={onSyncClientsRequest} className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-700 flex items-center gap-2">
-                <RefreshCcw size={16} /> <span className="hidden sm:inline">Sincronizar</span>
-              </button>
-              <button
-                onClick={handleQueueSaftSync}
-                disabled={isQueueingSaftSync}
-                className="bg-slate-800 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-slate-900 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {isQueueingSaftSync ? <RefreshCcw size={16} className="animate-spin" /> : <CloudCheck size={16} />}
-                <span className="hidden sm:inline">Fazer Recolha SAFT</span>
-              </button>
-              <button onClick={openNewClientModal} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
-                <Plus size={16} /> <span className="hidden sm:inline">Novo</span>
-              </button>
-            </div>
+            <p className="mt-1 text-xs text-slate-200 md:text-sm">Gestão e análise da carteira de clientes MPR.</p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
-            <div className="relative lg:col-span-2">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
+          <div className="flex flex-wrap items-center gap-2">
+            {canSyncWampr && (
+              <button
+                type="button"
+                onClick={onSyncClientsRequest}
+                disabled={isSyncingClients}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed md:text-sm"
+              >
+                <RefreshCcw size={16} className={isSyncingClients ? 'animate-spin' : undefined} />
+                {isSyncingClients ? 'A atualizar...' : 'Atualizar do WAPRO'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleQueueSaftSync}
+              disabled={isQueueingSaftSync}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60 md:text-sm"
+            >
+              {isQueueingSaftSync ? <RefreshCcw size={16} className="animate-spin" /> : <CloudCheck size={16} />}
+              Recolha SAF-T
+            </button>
+            {canCreateClients && (
+              <button
+                type="button"
+                onClick={openNewClientModal}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-500 md:text-sm"
+              >
+                <Plus size={16} /> Novo cliente
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="grid grid-cols-1 gap-2 border-b border-slate-200 p-3 md:grid-cols-2 xl:grid-cols-6">
+            <div className="relative md:col-span-2">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input
                 type="text"
-                placeholder="Pesquisar por nome, NIF, email, telefone..."
+                placeholder="Nome, NIF, email ou telefone..."
                 value={searchInput}
                 onChange={e => setSearchInput(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className="w-full rounded-md border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-emerald-300 focus:bg-white focus:ring-2 focus:ring-emerald-100"
               />
             </div>
 
-            <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium bg-white">
+            <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
               <option value="all">Todos os Grupos</option>
               {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
             </select>
 
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium bg-white">
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
               <option value="all">Todos os Estados</option>
               <option value="Ativo">Ativo</option>
               <option value="Em Análise">Em Análise</option>
@@ -502,51 +533,54 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
               <option value="Inativo">Inativo</option>
             </select>
 
-            <select value={responsibleFilter} onChange={e => setResponsibleFilter(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium bg-white">
-              <option value="all">Todos os Responsáveis</option>
-              {staff.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <select value={entityTypeFilter} onChange={e => setEntityTypeFilter(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium bg-white">
+            <select value={entityTypeFilter} onChange={e => setEntityTypeFilter(e.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
               <option value="all">Todos os Tipos</option>
               {uniqueEntityTypes.map(type => <option key={type} value={type}>{type}</option>)}
             </select>
 
-            <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} className="px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium bg-white">
-              <option value={10}>10 por página</option>
-              <option value={25}>25 por página</option>
-              <option value={50}>50 por página</option>
-              <option value={100}>100 por página</option>
+            <select value={responsibleFilter} onChange={e => setResponsibleFilter(e.target.value)} className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+              <option value="all">Todos os Responsáveis</option>
+              {staff.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
             </select>
+        </div>
 
-            <div className="flex items-center justify-end text-xs text-slate-500">
-              {isLoadingPage ? 'A carregar página...' : `${totalClients} cliente(s) encontrados`}
-            </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>{isLoadingPage ? 'A carregar clientes...' : `${totalClients} cliente(s)`}</span>
+            <span className="font-semibold text-emerald-700">Ligação local ativa</span>
           </div>
+          <label className="flex items-center gap-2">
+            <span>Mostrar</span>
+            <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <span>por página</span>
+          </label>
         </div>
 
         {pageError && (
-          <div className="mx-6 mt-4 mb-0 p-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs font-medium">
+          <div className="m-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-700">
             {pageError}
           </div>
         )}
 
-        <div className="overflow-x-auto mt-4">
-          <table className="w-full text-sm text-left text-slate-600">
-            <thead className="text-xs text-slate-500 uppercase bg-slate-50 font-bold">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1220px] table-fixed">
+            <thead className="bg-slate-100/80">
               <tr>
-                <SortableHeader sortKey="nif">NIF</SortableHeader>
-                <SortableHeader sortKey="name">Nome</SortableHeader>
-                <th className="px-4 py-3">Email / Telefone</th>
-                <SortableHeader sortKey="entityType">Tipo</SortableHeader>
-                <SortableHeader sortKey="employeeCount">Nº Func.</SortableHeader>
-                <SortableHeader sortKey="documentCount">Nº Docs</SortableHeader>
-                <th className="px-4 py-3">Responsável</th>
-                <th className="px-4 py-3 text-center">Recolha SAFT</th>
-                <th className="px-4 py-3 text-center">Estado SAFT</th>
-                <th className="px-4 py-3 text-right">Ações</th>
+                <SortableHeader sortKey="nif" className="w-[8%]">NIF</SortableHeader>
+                <SortableHeader sortKey="name" className="w-[23%]">Nome</SortableHeader>
+                <th className="w-[17%] px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-600">Email / Telefone</th>
+                <SortableHeader sortKey="entityType" className="w-[10%]">Tipo</SortableHeader>
+                <SortableHeader sortKey="employeeCount" className="w-[7%]">Nº Func.</SortableHeader>
+                <SortableHeader sortKey="documentCount" className="w-[7%]">Nº Docs</SortableHeader>
+                <th className="w-[11%] px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-600">Responsável</th>
+                <th className="w-[7%] px-3 py-3 text-center text-[11px] font-semibold uppercase text-slate-600">Recolha SAF-T</th>
+                <th className="w-[7%] px-3 py-3 text-center text-[11px] font-semibold uppercase text-slate-600">Estado SAF-T</th>
+                <th className="w-[5%] px-3 py-3 text-right text-[11px] font-semibold uppercase text-slate-600">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -556,42 +590,56 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
                 const hasSaftData = Boolean(saftStatus?.hasData);
 
                 return (
-                  <tr key={client.id} className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 py-4 font-mono text-xs">{client.nif}</td>
-                    <td className="px-4 py-4 font-bold text-slate-800">{client.name}</td>
-                    <td className="px-4 py-4">
-                      <div className="text-slate-600">{client.email}</div>
-                      <div className="text-xs text-slate-400">{client.phone}</div>
+                  <tr key={client.id} onClick={() => onSelectClient(client)} className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50">
+                    <td className="px-3 py-3 font-mono text-xs text-slate-700">{client.nif || '--'}</td>
+                    <td className="px-3 py-3 text-sm text-slate-900">
+                      <div className="truncate font-semibold" title={client.name}>{client.name}</div>
+                      <div className="truncate text-xs text-slate-500">{client.sector || 'Geral'}</div>
                     </td>
-                    <td className="px-4 py-4 text-xs uppercase">{client.entityType}</td>
-                    <td className="px-4 py-4 text-center font-medium">{client.employeeCount}</td>
-                    <td className="px-4 py-4 text-center font-medium">{client.documentCount}</td>
-                    <td className="px-4 py-4 text-xs">{(client as any).responsibleStaffName}</td>
-                    <td className="px-4 py-4 text-center">
+                    <td className="px-3 py-3 text-xs">
+                      <div className="truncate text-slate-700" title={client.email || '--'}>{client.email || '--'}</div>
+                      <div className="font-mono text-slate-500">{client.phone || '--'}</div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-blue-800">
+                        {client.entityType || 'Sem tipo'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-center text-xs font-semibold text-slate-700">{client.employeeCount}</td>
+                    <td className="px-3 py-3 text-center text-xs font-semibold text-slate-700">{client.documentCount}</td>
+                    <td className="px-3 py-3 text-xs text-slate-700">{(client as any).responsibleStaffName}</td>
+                    <td className="px-3 py-3 text-center" onClick={event => event.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={client.saftCollectEnabled !== false}
                         onChange={event => handleToggleSaftCollect(client, event.target.checked)}
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        aria-label={`Recolha SAF-T de ${client.name}`}
                       />
                     </td>
-                    <td className="px-4 py-4 text-center">
+                    <td className="px-3 py-3 text-center">
                       {hasSaftData ? (
                         <span
-                          className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700"
+                          className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
                           title={`Última recolha: ${formatDateTime(saftStatus?.syncedAt)}`}
                         >
                           Com dados
                         </span>
                       ) : (
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
                           Sem dados
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-4 text-right">
-                      <button onClick={() => onSelectClient(client)} className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold border border-blue-100 transition-colors">
-                        Detalhes
+                    <td className="px-3 py-3 text-right" onClick={event => event.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => onSelectClient(client)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                        title="Ver detalhes"
+                        aria-label={`Ver detalhes de ${client.name}`}
+                      >
+                        <Eye size={14} />
                       </button>
                     </td>
                   </tr>
@@ -599,35 +647,38 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
               })}
               {!isLoadingPage && processedClients.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-6 py-12 text-center text-slate-400 italic">Nenhum cliente encontrado para os filtros selecionados.</td>
+                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-500">Nenhum cliente encontrado para os filtros atuais.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
 
-        <div className="p-4 border-t border-slate-100 flex items-center justify-between">
-          <div className="text-xs text-slate-500">
-            Página {page} de {totalPages}
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-3 py-2 text-xs text-slate-600">
+          <span>
+            A mostrar {totalClients === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalClients)} de {totalClients}
+          </span>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={() => setPage(prev => Math.max(1, prev - 1))}
               disabled={page <= 1 || isLoadingPage}
-              className="px-3 py-1.5 text-xs border rounded-lg bg-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronLeft size={14} /> Anterior
             </button>
+            <span className="min-w-[90px] text-center font-semibold">Página {page} de {totalPages}</span>
             <button
+              type="button"
               onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
               disabled={page >= totalPages || isLoadingPage}
-              className="px-3 py-1.5 text-xs border rounded-lg bg-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1.5 font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Seguinte <ChevronRight size={14} />
             </button>
           </div>
         </div>
-      </div>
+      </section>
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -704,7 +755,7 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
                   />
                 </div>
 
-                <div>
+                {canViewFinancial && <div>
                   <label className="text-xs font-bold text-slate-400">Avença Mensal</label>
                   <input
                     type="number"
@@ -713,18 +764,24 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
                     value={formData.monthlyFee || 0}
                     onChange={e => setFormData({ ...formData, monthlyFee: parseFloat(e.target.value) || 0 })}
                   />
-                </div>
+                </div>}
 
                 <div>
                   <label className="text-xs font-bold text-slate-400">Responsável</label>
                   <select
-                    className="w-full p-2 border rounded border-slate-200 bg-white"
+                    className="w-full p-2 border rounded border-slate-200 bg-white disabled:bg-slate-100 disabled:text-slate-500"
                     value={formData.responsibleStaff || ''}
+                    disabled={isResponsibleStaffLocked}
                     onChange={e => setFormData({ ...formData, responsibleStaff: e.target.value })}
                   >
                     <option value="">Não Atribuído</option>
                     {staff.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
                   </select>
+                  {isResponsibleStaffLocked && (
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      O seu nível de acesso só permite criar clientes atribuídos a si próprio.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -746,7 +803,7 @@ const ClientList: React.FC<ClientListProps> = ({ clients, setClients, staff, onS
               <div className="flex justify-end gap-2 pt-4">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-slate-500">Cancelar</button>
                 <button type="submit" disabled={isSaving} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold disabled:opacity-50">
-                  {isSaving ? <RefreshCcw className="animate-spin" size={16} /> : 'Salvar no Supabase'}
+                    {isSaving ? <RefreshCcw className="animate-spin" size={16} /> : 'Guardar'}
                 </button>
               </div>
             </form>

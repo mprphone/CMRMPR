@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:local": "bash scripts/build-local-production.sh",
     "preview": "vite preview",
+    "verify:public": "node scripts/verify-public-deployment.mjs",
     "saft:sync": "node scripts/sync-saft-dossier.mjs",
     "saft:sync:headed": "node scripts/sync-saft-dossier.mjs --headed",
     "saft:sync:debug": "node scripts/sync-saft-dossier.mjs --headed --debug"
@@ -14,7 +16,7 @@
   "dependencies": {
     "@supabase/supabase-js": "latest",
     "lucide-react": "^0.555.0",
-    "pdfjs-dist": "^5.6.205",
+    "pdfjs-dist": "5.5.207",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "recharts": "^3.5.1"

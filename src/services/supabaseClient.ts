@@ -5,8 +5,9 @@ export let importClient: SupabaseClient | null = null;
 export let storeClient: SupabaseClient | null = null;
 
 export const initSupabase = (settings: GlobalSettings) => {
-  const iUrl = import.meta.env.VITE_SUPABASE_URL_IMPORT || settings.supabaseImportUrl;
-  const iKey = import.meta.env.VITE_SUPABASE_KEY_IMPORT || settings.supabaseImportKey;
+  const importDisabled = String(import.meta.env.VITE_DISABLE_SUPABASE_IMPORT || '').toLowerCase() === 'true';
+  const iUrl = importDisabled ? '' : (import.meta.env.VITE_SUPABASE_URL_IMPORT || settings.supabaseImportUrl);
+  const iKey = importDisabled ? '' : (import.meta.env.VITE_SUPABASE_KEY_IMPORT || settings.supabaseImportKey);
   const sUrl = import.meta.env.VITE_SUPABASE_URL_CMR || settings.supabaseStoreUrl;
   const sKey = import.meta.env.VITE_SUPABASE_KEY_CMR || settings.supabaseStoreKey;
 
@@ -61,4 +62,17 @@ export const atomicSyncImportedData = async (
     clients_data: clientsData,
   });
   if (error) throw error;
+};
+
+export const syncWamprData = async (): Promise<{
+  snapshotId?: string;
+  counts?: { clients?: number; staff?: number };
+}> => {
+  const client = ensureStoreClient();
+  const { data, error } = await client.functions.invoke('sync-wampr', {
+    body: { mode: 'pull', reason: 'manual_ui' },
+  });
+  if (error) throw error;
+  if (!data?.success) throw new Error(data?.error || 'Falha ao sincronizar dados do WAMPR.');
+  return data;
 };

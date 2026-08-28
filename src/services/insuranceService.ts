@@ -1,5 +1,6 @@
 import { InsurancePolicy, InsuranceCommissionSettlement } from '../types';
 import { ensureStoreClient } from './supabaseClient';
+import { createSignedAttachmentUrl, getAttachmentStoragePath, validateAttachmentFile } from './storageAttachmentService';
 
 const LEGACY_MEDIATOR_PARTNERS = ['Finiconde', 'Nepseguros', 'Neoseguros'];
 
@@ -33,7 +34,7 @@ const mapDbToInsurancePolicy = (p: any): InsurancePolicy => ({
   commissionPaid: p.commission_paid,
   hasReceipt: Boolean(p.has_receipt),
   status: p.status || 'Proposta',
-  attachment_url: p.attachment_url,
+  attachment_url: getAttachmentStoragePath(p.attachment_url) || null,
   communicationType: p.communication_type,
   notes: p.notes || '',
   policyTier: p.policy_tier,
@@ -63,7 +64,9 @@ const mapInsurancePolicyToDb = (p: Partial<InsurancePolicy>) => ({
   commission_paid: p.commissionPaid,
   has_receipt: p.hasReceipt ?? false,
   status: p.status,
-  attachment_url: p.attachment_url,
+  // Normaliza para o caminho limpo no bucket: evita gravar na BD um URL
+  // assinado (com TTL de 15 min) reenviado a partir de uma leitura anterior.
+  attachment_url: getAttachmentStoragePath(p.attachment_url) || p.attachment_url || null,
   communication_type: p.communicationType,
   notes: p.notes || null,
   policy_tier: p.policyTier,
@@ -79,54 +82,65 @@ const mapDbToInsuranceCommissionSettlement = (row: any): InsuranceCommissionSett
   createdAt: row.created_at,
 });
 
+const fetchClientNamesByIds = async (
+  storeClient: ReturnType<typeof ensureStoreClient>,
+  clientIds: Array<string | null | undefined>
+): Promise<Map<string, string>> => {
+  const uniqueIds = Array.from(new Set(clientIds.filter((id): id is string => Boolean(id))));
+  if (uniqueIds.length === 0) return new Map();
+  const { data, error } = await storeClient.from('clients').select('id, name').in('id', uniqueIds);
+  if (error) throw error;
+  return new Map((data || []).map((row: any) => [row.id, row.name]));
+};
+
 export const insuranceService = {
   async getAll(): Promise<InsurancePolicy[]> {
     const storeClient = ensureStoreClient();
-    const { data, error } = await storeClient.from('insurance_policies').select(`
-      *,
-      clients (id, name)
-    `).order('policy_date', { ascending: false });
+    // As comissões/prémios são mascarados na origem por get_visible_insurance_policies
+    // (RPC) consoante can_view_commissions; um select direto à tabela já não
+    // devolve essas colunas (ver migração 20260826142500).
+    const { data, error } = await storeClient.rpc('get_visible_insurance_policies');
     if (error) throw error;
-    return (data || []).map(mapDbToInsurancePolicy);
+    const rows = (data || []) as any[];
+    const clientNameById = await fetchClientNamesByIds(storeClient, rows.map(row => row.client_id));
+    const sorted = [...rows].sort((a, b) => String(b.policy_date || '').localeCompare(String(a.policy_date || '')));
+    return Promise.all(sorted.map(async row => {
+      const policy = mapDbToInsurancePolicy({
+        ...row,
+        clients: row.client_id ? { name: clientNameById.get(row.client_id) } : undefined,
+      });
+      return {
+        ...policy,
+        attachment_url: await createSignedAttachmentUrl(policy.attachment_url),
+      };
+    }));
   },
   async upsert(policy: Partial<InsurancePolicy>): Promise<InsurancePolicy> {
     const storeClient = ensureStoreClient();
     const payload = mapInsurancePolicyToDb(policy);
-    let { data, error } = await storeClient
-      .from('insurance_policies')
-      .upsert(payload)
-      .select('*, clients (id, name)')
-      .single();
+    // RPC com privilégio elevado — ver o mesmo raciocínio em clientService.upsert
+    // (colunas de comissão sem SELECT direto quebram um upsert direto na tabela).
+    const { error } = await storeClient.rpc('upsert_insurance_policy', { p_policy: payload });
+    if (error) throw error;
 
-    if (error) {
-      const schemaError = /column .*document_checklist.* does not exist|column .*policy_holder.* does not exist|column .*agent.* does not exist|column .*mediator_partner.* does not exist|column .*internal_responsible.* does not exist|column .*has_receipt.* does not exist|column .*renewal_date.* does not exist|column .*company.* does not exist|column .*branch.* does not exist|column .*net_premium_value.* does not exist|column .*notes.* does not exist|schema cache/i;
-      if (schemaError.test(error.message || '')) {
-        const fallbackPayload = { ...payload } as any;
-        delete fallbackPayload.document_checklist;
-        delete fallbackPayload.policy_holder;
-        delete fallbackPayload.agent;
-        delete fallbackPayload.mediator_partner;
-        delete fallbackPayload.internal_responsible;
-        delete fallbackPayload.has_receipt;
-        delete fallbackPayload.renewal_date;
-        delete fallbackPayload.company;
-        delete fallbackPayload.branch;
-        delete fallbackPayload.net_premium_value;
-        delete fallbackPayload.notes;
-
-        const retry = await storeClient
-          .from('insurance_policies')
-          .upsert(fallbackPayload)
-          .select('*, clients (id, name)')
-          .single();
-
-        data = retry.data;
-        error = retry.error;
-      }
+    const { data, error: readError } = await storeClient
+      .rpc('get_visible_insurance_policy_by_id', { p_policy_id: payload.id })
+      .maybeSingle();
+    if (readError) throw readError;
+    if (!data) {
+      throw new Error('A apólice foi gravada, mas deixou de estar visível com o seu nível de acesso atual.');
     }
 
-    if (error) throw error;
-    return mapDbToInsurancePolicy(data);
+    const row = data as any;
+    const clientNameById = await fetchClientNamesByIds(storeClient, [row?.client_id]);
+    const savedPolicy = mapDbToInsurancePolicy({
+      ...row,
+      clients: row?.client_id ? { name: clientNameById.get(row.client_id) } : undefined,
+    });
+    return {
+      ...savedPolicy,
+      attachment_url: await createSignedAttachmentUrl(savedPolicy.attachment_url),
+    };
   },
   async getCommissionSettlementsByPeriod(periodStart: string, periodEnd: string): Promise<InsuranceCommissionSettlement[]> {
     const storeClient = ensureStoreClient();
@@ -201,6 +215,7 @@ export const insuranceService = {
     if (error) throw error;
   },
   async uploadAttachment(file: File, policyId: string): Promise<string> {
+    validateAttachmentFile(file);
     const storeClient = ensureStoreClient();
     const filePath = `policies/${policyId}/${file.name}`;
     
@@ -215,10 +230,6 @@ export const insuranceService = {
       throw uploadError;
     }
 
-    const { data } = storeClient.storage
-      .from('attachments')
-      .getPublicUrl(filePath);
-
-    return data.publicUrl;
+    return filePath;
   }
 };

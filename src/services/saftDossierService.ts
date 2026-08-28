@@ -1,5 +1,6 @@
 import { SaftDossierAttachment, SaftDossierData } from '../types';
 import { ensureStoreClient } from './supabaseClient';
+import { createSignedAttachmentUrl } from './storageAttachmentService';
 
 const mapDbToSaftDossierData = (db: any): SaftDossierData => ({
   attachments: Array.isArray(db.attachments) ? (db.attachments as SaftDossierAttachment[]) : [],
@@ -34,7 +35,14 @@ export const saftDossierService = {
 
     if (error) throw error;
     if (!data) return null;
-    return mapDbToSaftDossierData(data);
+    const dossier = mapDbToSaftDossierData(data);
+    return {
+      ...dossier,
+      attachments: await Promise.all(dossier.attachments.map(async attachment => ({
+        ...attachment,
+        publicUrl: await createSignedAttachmentUrl(attachment.storagePath || attachment.publicUrl),
+      }))),
+    };
   },
   async getStatusByClientNifs(clientNifs: string[]): Promise<Record<string, { hasData: boolean; syncedAt: string }>> {
     const normalized = Array.from(

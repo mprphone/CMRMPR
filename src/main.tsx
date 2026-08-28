@@ -19,8 +19,12 @@ root.render(
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((error) => {
-      console.error('Falha ao registar service worker:', error);
-    });
+    const appBase = import.meta.env.BASE_URL || '/';
+    navigator.serviceWorker.register(`${appBase}sw.js`, {
+      scope: appBase,
+      updateViaCache: 'none',
+    }).then((registration) => registration.update()).catch((error) => {
+        console.error('Falha ao registar service worker:', error);
+      });
   });
 }

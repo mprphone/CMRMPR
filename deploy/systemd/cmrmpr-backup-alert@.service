@@ -1,0 +1,10 @@
+[Unit]
+Description=Alerta de falha para %I
+
+[Service]
+Type=oneshot
+# %i (não %I): o valor vem de "%n" no OnFailure= do serviço de origem, já
+# como string literal correta ("cmrmpr-backup.service"). %I desescapa a
+# instância como se fosse um caminho — como esse nome tem hífen, o "-"
+# era trocado por "/", corrompendo a mensagem para "cmrmpr/backup.service".
+ExecStart=/usr/local/sbin/cmrmpr-backup-alert %i

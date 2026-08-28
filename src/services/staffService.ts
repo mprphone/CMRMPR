@@ -13,7 +13,8 @@ const mapDbToStaff = (s: any): Staff => ({
   otherMonthlyCosts: Number(s.other_monthly_costs || 0),
   capacityHoursPerMonth: Number(s.capacity_hours_per_month || 160),
   hourlyCost: Number(s.hourly_cost || 0),
-  assignedAreas: s.assigned_areas || []
+  assignedAreas: s.assigned_areas || [],
+  status: s.status === 'Inativo' ? 'Inativo' : 'Ativo'
 });
 
 const mapStaffToDb = (s: Staff) => ({
@@ -28,13 +29,14 @@ const mapStaffToDb = (s: Staff) => ({
   other_monthly_costs: s.otherMonthlyCosts,
   capacity_hours_per_month: s.capacityHoursPerMonth,
   hourly_cost: s.hourlyCost,
-  assigned_areas: s.assignedAreas
+  assigned_areas: s.assignedAreas,
+  status: s.status || 'Ativo'
 });
 
 export const staffService = {
   async getAll(): Promise<Staff[]> {
     const storeClient = ensureStoreClient();
-    const { data, error } = await storeClient.from('staff').select('*');
+    const { data, error } = await storeClient.rpc('get_visible_staff');
     if (error) throw error;
     return (data || []).map(mapDbToStaff);
   },
@@ -61,8 +63,24 @@ export const staffService = {
   },
   async upsert(member: Staff): Promise<Staff> {
     const storeClient = ensureStoreClient();
-    const { data, error } = await storeClient.from('staff').upsert(mapStaffToDb(member)).select().single();
+    // RPC com privilégio elevado — ver o mesmo raciocínio em clientService.upsert
+    // (colunas financeiras sem SELECT direto quebram um upsert direto na tabela).
+    const { error } = await storeClient.rpc('upsert_staff_member', { p_staff: mapStaffToDb(member) });
     if (error) throw error;
+    // maybeSingle (não single): a gravação já está concluída neste ponto —
+    // ver o mesmo raciocínio em clientService.upsert.
+    const { data, error: readError } = await storeClient
+      .rpc('get_visible_staff_by_id', { p_staff_id: member.id })
+      .maybeSingle();
+    if (readError) throw readError;
+    if (!data) {
+      throw new Error('O colaborador foi gravado, mas deixou de estar visível com o seu nível de acesso atual.');
+    }
     return mapDbToStaff(data);
-  }
+  },
+  async delete(id: string): Promise<void> {
+    const storeClient = ensureStoreClient();
+    const { error } = await storeClient.from('staff').delete().eq('id', id);
+    if (error) throw error;
+  },
 };
