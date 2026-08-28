@@ -420,3 +420,6 @@ verify_jwt = false
 
 [functions.check-email-bounces]
 verify_jwt = false
+
+[functions.email-open-track]
+verify_jwt = false

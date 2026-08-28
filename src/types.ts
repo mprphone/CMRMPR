@@ -205,6 +205,8 @@ export interface CampaignRecipientResult {
   max_attempts?: number;
   provider_message_id?: string | null;
   updated_at?: string;
+  opened_at?: string | null;
+  open_count?: number;
 }
 
 export interface CampaignHistory {

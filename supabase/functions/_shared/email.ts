@@ -61,6 +61,7 @@ export const buildEmailDocument = (params: {
   preheader?: string | null;
   unsubscribeUrl?: string | null;
   campaignType?: string | null;
+  openTrackingUrl?: string | null;
 }): string => {
   const content = ensureParagraphSpacing(params.html);
   const footer = params.campaignType === "marketing" && params.unsubscribeUrl
@@ -68,6 +69,9 @@ export const buildEmailDocument = (params: {
         Recebeu esta comunicação por existir uma relação ou autorização registada.
         <a href="${escapeEmailHtml(params.unsubscribeUrl)}" style="color:#475569;text-decoration:underline;">Deixar de receber comunicações de marketing</a>.
       </div>`
+    : "";
+  const trackingPixel = params.openTrackingUrl
+    ? `<img src="${escapeEmailHtml(params.openTrackingUrl)}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px;" />`
     : "";
 
   return `<!doctype html>
@@ -90,6 +94,7 @@ export const buildEmailDocument = (params: {
       </table>
     </td></tr>
   </table>
+  ${trackingPixel}
 </body>
 </html>`;
 };

@@ -81,11 +81,13 @@ serve(async (req) => {
       }
 
       const unsubscribeUrl = `${publicBaseUrl}/email-unsubscribe?token=${encodeURIComponent(delivery.unsubscribe_token)}`;
+      const openTrackingUrl = `${publicBaseUrl}/email-open-track?token=${encodeURIComponent(delivery.unsubscribe_token)}`;
       const finalHtml = buildEmailDocument({
         html: delivery.rendered_html,
         preheader: delivery.preheader,
         unsubscribeUrl,
         campaignType: delivery.campaign_type,
+        openTrackingUrl,
       });
       const sender = getEmailSender(delivery.from_name);
       const replyTo = normalizeEmailAddress(delivery.reply_to || delivery.from_email || "");

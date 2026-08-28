@@ -132,7 +132,7 @@ export const campaignHistoryService = {
     const storeClient = ensureStoreClient();
     const { data, error } = await storeClient
       .from('email_campaign_recipients')
-      .select('id,client_id,recipient_name,email,status,exclusion_reason,attempts,max_attempts,provider_message_id,last_error,updated_at')
+      .select('id,client_id,recipient_name,email,status,exclusion_reason,attempts,max_attempts,provider_message_id,last_error,updated_at,opened_at,open_count')
       .eq('campaign_id', campaignId)
       .order('created_at');
     if (error) throw error;
@@ -149,6 +149,8 @@ export const campaignHistoryService = {
         max_attempts: row.max_attempts,
         provider_message_id: row.provider_message_id,
         updated_at: row.updated_at,
+        opened_at: row.opened_at,
+        open_count: row.open_count,
       }));
     }
 
