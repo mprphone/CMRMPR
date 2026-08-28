@@ -782,11 +782,11 @@ const Cashier: React.FC<CashierProps> = ({ clients, groups, cashPayments, setCas
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="text-sm mx-auto">
+          <table className="w-full text-sm">
             <thead className="text-xs text-slate-500 uppercase bg-slate-50">
               <tr>
-                <th className="px-4 py-2 text-left max-w-xs">Cliente</th>
-                {months.map(m => <th key={m} className="p-1 text-center w-16">{m}</th>)}
+                <th className="px-4 py-2 text-left">Cliente</th>
+                {months.map(m => <th key={m} className="p-1 text-center w-[7%]">{m}</th>)}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
