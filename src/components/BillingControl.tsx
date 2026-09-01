@@ -457,13 +457,13 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
-              <tr><th className="px-4 py-3">Cliente</th><th className="px-3 py-3">NIF</th><th className="px-3 py-3">Tipo</th><th className="px-3 py-3 text-right">Mensalidade</th><th className="px-3 py-3 text-right">Faturado</th><th className="px-3 py-3 text-right">Diferença</th><th className="px-3 py-3 text-right">Em falta este mês</th><th className="px-3 py-3 text-right">Dívida Acumulada</th><th className="px-3 py-3">Documentos</th><th className="px-4 py-3">Estado</th><th className="px-3 py-3">Ações</th></tr>
+              <tr><th className="px-4 py-3">NIF</th><th className="px-3 py-3">Cliente</th><th className="px-3 py-3">Tipo</th><th className="px-3 py-3 text-right">Mensalidade</th><th className="px-3 py-3 text-right">Faturado</th><th className="px-3 py-3 text-right">Diferença</th><th className="px-3 py-3 text-right">Em falta este mês</th><th className="px-3 py-3 text-right">Dívida Acumulada</th><th className="px-3 py-3">Documentos</th><th className="px-4 py-3">Estado</th><th className="px-3 py-3">Ações</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visibleRows.map(row => (
                 <tr key={row.client.id} className="hover:bg-slate-50/70">
-                  <td className="px-4 py-3 font-bold text-slate-900">{row.client.name}</td>
-                  <td className="px-3 py-3 font-mono text-[10px] text-slate-400">{row.client.nif}</td>
+                  <td className="px-4 py-3 font-mono text-[10px] text-slate-400">{row.client.nif}</td>
+                  <td className="px-3 py-3 font-bold text-slate-900">{row.client.name}</td>
                   <td className="px-3 py-3 text-slate-600">{row.client.entityType}</td>
                   <td className="px-3 py-3 text-right font-semibold text-slate-700">{row.expected > 0 ? money.format(row.expected) : '—'}</td>
                   <td className="px-3 py-3 text-right font-bold text-slate-900">{money.format(row.actual)}</td>
