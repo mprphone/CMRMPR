@@ -462,14 +462,14 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
             <tbody className="divide-y divide-slate-100">
               {visibleRows.map(row => (
                 <tr key={row.client.id} className="hover:bg-slate-50/70">
-                  <td className="px-4 py-3 font-mono text-[10px] text-slate-400">{row.client.nif}</td>
-                  <td className="px-3 py-3 font-bold text-slate-900">{row.client.name}</td>
-                  <td className="px-3 py-3 text-slate-600">{row.client.entityType}</td>
-                  <td className="px-3 py-3 text-right font-semibold text-slate-700">{row.expected > 0 ? money.format(row.expected) : '—'}</td>
-                  <td className="px-3 py-3 text-right font-bold text-slate-900">{money.format(row.actual)}</td>
-                  <td className={`px-3 py-3 text-right font-bold ${Math.abs(row.difference) <= 0.02 ? 'text-emerald-700' : 'text-amber-700'}`}>{row.expected > 0 ? money.format(row.difference) : '—'}</td>
-                  <td className={`px-3 py-3 text-right font-bold ${row.debt > 0.02 ? 'text-red-700' : 'text-slate-400'}`}>{row.expected > 0 ? (row.debt > 0.02 ? money.format(row.debt) : '—') : '—'}</td>
-                  <td className="px-3 py-3 text-right">
+                  <td className="px-4 py-1.5 font-mono text-[10px] text-slate-400">{row.client.nif}</td>
+                  <td className="px-3 py-1.5 font-bold text-slate-900">{row.client.name}</td>
+                  <td className="px-3 py-1.5 text-slate-600">{row.client.entityType}</td>
+                  <td className="px-3 py-1.5 text-right font-semibold text-slate-700">{row.expected > 0 ? money.format(row.expected) : '—'}</td>
+                  <td className="px-3 py-1.5 text-right font-bold text-slate-900">{money.format(row.actual)}</td>
+                  <td className={`px-3 py-1.5 text-right font-bold ${Math.abs(row.difference) <= 0.02 ? 'text-emerald-700' : 'text-amber-700'}`}>{row.expected > 0 ? money.format(row.difference) : '—'}</td>
+                  <td className={`px-3 py-1.5 text-right font-bold ${row.debt > 0.02 ? 'text-red-700' : 'text-slate-400'}`}>{row.expected > 0 ? (row.debt > 0.02 ? money.format(row.debt) : '—') : '—'}</td>
+                  <td className="px-3 py-1.5 text-right">
                     {(() => {
                       const balance = pendingBalances.get(cleanNif(row.client.nif));
                       if (!debtSyncedAt) return <span className="text-slate-300">·</span>;
@@ -481,15 +481,17 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
                       );
                     })()}
                   </td>
-                  <td className="max-w-[260px] px-3 py-3 text-slate-500">{row.documents.length ? row.documents.map(document => document.ref).join(', ') : 'Sem documento'}</td>
-                  <td className="px-4 py-3"><span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold ${statusMeta[row.status].classes}`}>{statusMeta[row.status].label}</span></td>
-                  <td className="px-3 py-3">
+                  <td className="max-w-[260px] px-3 py-1.5 text-slate-500">{row.documents.length ? row.documents.map(document => document.ref).join(', ') : 'Sem documento'}</td>
+                  <td className="px-4 py-1.5"><span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold ${statusMeta[row.status].classes}`}>{statusMeta[row.status].label}</span></td>
+                  <td className="px-3 py-1.5">
                     <button
                       type="button"
                       onClick={() => openEditModal(row.client)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                      title="Editar"
+                      aria-label="Editar"
+                      className="inline-flex items-center justify-center rounded-lg border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50"
                     >
-                      <Pencil size={12} /> Editar
+                      <Pencil size={13} />
                     </button>
                   </td>
                 </tr>
@@ -499,12 +501,12 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
             {visibleRows.length > 0 && (
               <tfoot className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-900">
                 <tr>
-                  <td className="px-4 py-3" colSpan={3}>Total ({visibleRows.length} cliente{visibleRows.length === 1 ? '' : 's'})</td>
-                  <td className="px-3 py-3 text-right">{money.format(visibleTotals.expected)}</td>
-                  <td className="px-3 py-3 text-right">{money.format(visibleTotals.actual)}</td>
-                  <td className={`px-3 py-3 text-right ${Math.abs(visibleTotals.difference) <= 0.02 ? 'text-emerald-700' : 'text-amber-700'}`}>{money.format(visibleTotals.difference)}</td>
-                  <td className={`px-3 py-3 text-right ${visibleTotals.debt > 0.02 ? 'text-red-700' : 'text-slate-400'}`}>{money.format(visibleTotals.debt)}</td>
-                  <td className={`px-3 py-3 text-right ${visibleTotals.pendingBalance > 0.02 ? 'text-red-700' : 'text-slate-400'}`}>{money.format(visibleTotals.pendingBalance)}</td>
+                  <td className="px-4 py-1.5" colSpan={3}>Total ({visibleRows.length} cliente{visibleRows.length === 1 ? '' : 's'})</td>
+                  <td className="px-3 py-1.5 text-right">{money.format(visibleTotals.expected)}</td>
+                  <td className="px-3 py-1.5 text-right">{money.format(visibleTotals.actual)}</td>
+                  <td className={`px-3 py-1.5 text-right ${Math.abs(visibleTotals.difference) <= 0.02 ? 'text-emerald-700' : 'text-amber-700'}`}>{money.format(visibleTotals.difference)}</td>
+                  <td className={`px-3 py-1.5 text-right ${visibleTotals.debt > 0.02 ? 'text-red-700' : 'text-slate-400'}`}>{money.format(visibleTotals.debt)}</td>
+                  <td className={`px-3 py-1.5 text-right ${visibleTotals.pendingBalance > 0.02 ? 'text-red-700' : 'text-slate-400'}`}>{money.format(visibleTotals.pendingBalance)}</td>
                   <td colSpan={3}></td>
                 </tr>
               </tfoot>
