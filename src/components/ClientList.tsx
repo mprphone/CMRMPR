@@ -474,7 +474,7 @@ const ClientList: React.FC<ClientListProps> = ({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-3 text-white shadow-sm md:p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">

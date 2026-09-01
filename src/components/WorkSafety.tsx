@@ -455,7 +455,7 @@ const WorkSafety: React.FC<WorkSafetyProps> = ({ services, setServices, clients 
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-3 text-white shadow-sm md:p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-xl font-bold md:text-2xl">Segurança e Higiene no Trabalho (SHT)</h1>

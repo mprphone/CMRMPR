@@ -12,11 +12,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-      /* Reduz a escala geral da app em ~10%: a generalidade dos utilitários
-         Tailwind (espaçamento, texto, arredondamentos) usa unidades rem,
-         relativas a este tamanho de letra da raiz — mexer só aqui encolhe
-         tudo proporcionalmente sem editar cada componente um a um. */
-      html { font-size: 90%; }
+      /* Tamanho de letra normal: o valor anterior (90%) encolhia também o
+         espaçamento (rem-based) e deixava o texto pequeno demais. O aspeto
+         mais compacto vem agora de reduzir preenchimentos/margens nos
+         próprios ecrãs, não de encolher tudo pela raiz. */
+      html { font-size: 100%; }
       body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
       /* Custom Scrollbar */
       ::-webkit-scrollbar { width: 8px; height: 8px; }

@@ -1017,7 +1017,7 @@ const IrsControl: React.FC<IrsControlProps> = ({ clients, setClients, groups, se
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-3 text-white shadow-sm md:p-4">
         <h1 className="text-xl font-bold md:text-2xl">Controlo IRS</h1>
         <p className="mt-1 text-xs text-slate-200 md:text-sm">Entregas, pagamentos e liquidações de IRS por cliente.</p>
       </section>

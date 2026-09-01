@@ -744,7 +744,7 @@ export default function App() {
         userEmail={session.user.email}
       />
 
-      <main className="flex-1 p-3 md:p-6">
+      <main className="flex-1 p-2 md:p-4">
         <div className="w-full max-w-[1800px] mx-auto">
           {!isInsuranceScopedUser && activeView !== 'clients' && activeView !== 'insurance' && activeView !== 'billing' && (
             <div className="mb-4 flex justify-end gap-2">

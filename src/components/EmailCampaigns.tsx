@@ -619,7 +619,7 @@ const EmailCampaigns: React.FC<EmailCampaignsProps> = ({
     <div className="space-y-5 animate-fade-in pb-10">
       {toast && <div role="status" className={`fixed top-20 right-5 z-[80] max-w-md rounded-xl px-4 py-3 shadow-xl border text-sm font-medium ${toast.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>{toast.message}</div>}
 
-      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-4 text-white shadow-sm md:p-5">
+      <section className="rounded-2xl border border-slate-700/20 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-900 p-3 text-white shadow-sm md:p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-xl font-bold md:text-2xl">Comunicações por Email</h1>
