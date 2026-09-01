@@ -585,13 +585,14 @@ const ClientList: React.FC<ClientListProps> = ({
           <table className="w-full min-w-[1220px] table-fixed">
             <thead className="bg-slate-100/80">
               <tr>
-                <SortableHeader sortKey="nif" className="w-[8%]">NIF</SortableHeader>
-                <SortableHeader sortKey="name" className="w-[23%]">Nome</SortableHeader>
-                <th className="w-[17%] px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-600">Email / Telefone</th>
-                <SortableHeader sortKey="entityType" className="w-[10%]">Tipo</SortableHeader>
-                <SortableHeader sortKey="employeeCount" className="w-[7%]">Nº Func.</SortableHeader>
-                <SortableHeader sortKey="documentCount" className="w-[7%]">Nº Docs</SortableHeader>
-                <th className="w-[11%] px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-600">Responsável</th>
+                <SortableHeader sortKey="nif" className="w-[7%]">NIF</SortableHeader>
+                <SortableHeader sortKey="name" className="w-[20%]">Nome</SortableHeader>
+                <th className="w-[12%] px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-600">Email</th>
+                <th className="w-[9%] px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-600">Telefone</th>
+                <SortableHeader sortKey="entityType" className="w-[9%]">Tipo</SortableHeader>
+                <SortableHeader sortKey="employeeCount" className="w-[6%]">Nº Func.</SortableHeader>
+                <SortableHeader sortKey="documentCount" className="w-[6%]">Nº Docs</SortableHeader>
+                <th className="w-[10%] px-3 py-3 text-left text-[11px] font-semibold uppercase text-slate-600">Responsável</th>
                 <th className="w-[7%] px-3 py-3 text-center text-[11px] font-semibold uppercase text-slate-600">Recolha SAF-T</th>
                 <th className="w-[7%] px-3 py-3 text-center text-[11px] font-semibold uppercase text-slate-600">Estado SAF-T</th>
                 <th className="w-[5%] px-3 py-3 text-right text-[11px] font-semibold uppercase text-slate-600">Ações</th>
@@ -605,24 +606,23 @@ const ClientList: React.FC<ClientListProps> = ({
 
                 return (
                   <tr key={client.id} onClick={() => onSelectClient(client)} className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50">
-                    <td className="px-3 py-3 font-mono text-xs text-slate-700">{client.nif || '--'}</td>
-                    <td className="px-3 py-3 text-sm text-slate-900">
+                    <td className="px-3 py-1.5 font-mono text-xs text-slate-700">{client.nif || '--'}</td>
+                    <td className="px-3 py-1.5 text-sm text-slate-900">
                       <div className="truncate font-semibold" title={client.name}>{client.name}</div>
-                      <div className="truncate text-xs text-slate-500">{client.sector || 'Geral'}</div>
                     </td>
-                    <td className="px-3 py-3 text-xs">
+                    <td className="px-3 py-1.5 text-xs">
                       <div className="truncate text-slate-700" title={client.email || '--'}>{client.email || '--'}</div>
-                      <div className="font-mono text-slate-500">{client.phone || '--'}</div>
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-1.5 text-xs font-mono text-slate-500">{client.phone || '--'}</td>
+                    <td className="px-3 py-1.5">
                       <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-blue-800">
                         {client.entityType || 'Sem tipo'}
                       </span>
                     </td>
-                    <td className="px-3 py-3 text-center text-xs font-semibold text-slate-700">{client.employeeCount}</td>
-                    <td className="px-3 py-3 text-center text-xs font-semibold text-slate-700">{client.documentCount}</td>
-                    <td className="px-3 py-3 text-xs text-slate-700">{(client as any).responsibleStaffName}</td>
-                    <td className="px-3 py-3 text-center" onClick={event => event.stopPropagation()}>
+                    <td className="px-3 py-1.5 text-center text-xs font-semibold text-slate-700">{client.employeeCount}</td>
+                    <td className="px-3 py-1.5 text-center text-xs font-semibold text-slate-700">{client.documentCount}</td>
+                    <td className="px-3 py-1.5 text-xs text-slate-700">{(client as any).responsibleStaffName}</td>
+                    <td className="px-3 py-1.5 text-center" onClick={event => event.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={client.saftCollectEnabled !== false}
@@ -631,7 +631,7 @@ const ClientList: React.FC<ClientListProps> = ({
                         aria-label={`Recolha SAF-T de ${client.name}`}
                       />
                     </td>
-                    <td className="px-3 py-3 text-center">
+                    <td className="px-3 py-1.5 text-center">
                       {hasSaftData ? (
                         <span
                           className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
@@ -645,7 +645,7 @@ const ClientList: React.FC<ClientListProps> = ({
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-right" onClick={event => event.stopPropagation()}>
+                    <td className="px-3 py-1.5 text-right" onClick={event => event.stopPropagation()}>
                       <button
                         type="button"
                         onClick={() => onSelectClient(client)}
@@ -661,7 +661,7 @@ const ClientList: React.FC<ClientListProps> = ({
               })}
               {!isLoadingPage && processedClients.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-500">Nenhum cliente encontrado para os filtros atuais.</td>
+                  <td colSpan={11} className="px-4 py-10 text-center text-sm text-slate-500">Nenhum cliente encontrado para os filtros atuais.</td>
                 </tr>
               )}
             </tbody>
