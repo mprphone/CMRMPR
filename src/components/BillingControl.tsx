@@ -32,7 +32,7 @@ const monthBounds = (month: string) => {
 const ENTITY_TYPE_OPTIONS = ['SOCIEDADE', 'INDEPENDENTE', 'PARTICULAR'];
 
 const aggregateDocuments = (lines: PrimaveraBillingLine[]) => {
-  const documents = new Map<string, { ref: string; date: string; type: string; nif: string; net: number; descriptions: Set<string> }>();
+  const documents = new Map<string, { ref: string; date: string; type: string; nif: string; customerName: string; net: number; descriptions: Set<string> }>();
   for (const line of lines) {
     const nif = cleanNif(line.customerTaxId);
     const key = `${nif}|${line.documentDate}|${line.invoiceRef}`;
@@ -41,6 +41,7 @@ const aggregateDocuments = (lines: PrimaveraBillingLine[]) => {
       date: line.documentDate,
       type: line.documentType,
       nif,
+      customerName: line.customerName || '',
       net: 0,
       descriptions: new Set<string>(),
     };
@@ -90,7 +91,7 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
 
   const eligibleClients = useMemo(() => clients.filter(isSubscriptionClient), [clients]);
 
-  const { rows, unmatchedDocuments } = useMemo(() => {
+  const { rows, unmatchedDocuments, missingClients } = useMemo(() => {
     const documents = aggregateDocuments(lines);
     const byNif = new Map<string, typeof documents>();
     for (const document of documents) {
@@ -100,6 +101,9 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
       byNif.set(document.nif, current);
     }
     const eligibleNifs = new Set(eligibleClients.map(client => cleanNif(client.nif)));
+    // Todos os clientes do CMR (não só os elegíveis para avença) — para
+    // distinguir "não é população de avença" de "nem existe cá o cliente".
+    const allCmrNifs = new Set(clients.map(client => cleanNif(client.nif)));
     const result: BillingRow[] = eligibleClients.map(client => {
       const expected = Number(client.monthlyFee || 0);
       const clientDocuments = byNif.get(cleanNif(client.nif)) || [];
@@ -118,11 +122,28 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
     });
     const order: Record<BillingStatus, number> = { missing: 0, duplicate: 1, different: 2, unconfigured: 3, correct: 4 };
     result.sort((left, right) => order[left.status] - order[right.status] || left.client.name.localeCompare(right.client.name, 'pt-PT'));
+
+    const unmatched = documents.filter(document => document.nif && !eligibleNifs.has(document.nif));
+    const missingByNif = new Map<string, { nif: string; customerName: string; net: number; refs: string[] }>();
+    const explained: typeof unmatched = [];
+    for (const document of unmatched) {
+      if (allCmrNifs.has(document.nif)) {
+        explained.push(document); // existe no CMR, só não é população de avença
+        continue;
+      }
+      const current = missingByNif.get(document.nif) || { nif: document.nif, customerName: document.customerName, net: 0, refs: [] };
+      current.net += document.net;
+      current.refs.push(document.ref);
+      if (!current.customerName && document.customerName) current.customerName = document.customerName;
+      missingByNif.set(document.nif, current);
+    }
+
     return {
       rows: result,
-      unmatchedDocuments: documents.filter(document => document.nif && !eligibleNifs.has(document.nif)),
+      unmatchedDocuments: explained,
+      missingClients: [...missingByNif.values()].sort((a, b) => b.net - a.net),
     };
-  }, [eligibleClients, lines]);
+  }, [eligibleClients, clients, lines]);
 
   const visibleRows = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('pt-PT');
@@ -136,6 +157,17 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
     (['correct', 'missing', 'different', 'duplicate', 'unconfigured'] as BillingStatus[])
       .map(status => [status, rows.filter(row => row.status === status).length]),
   ) as Record<BillingStatus, number>, [rows]);
+
+  // Somas da lista visível (respeita pesquisa/filtro de estado), para
+  // confrontar diretamente com os totais do Primavera.
+  const visibleTotals = useMemo(() => visibleRows.reduce((acc, row) => {
+    acc.expected += row.expected;
+    acc.actual += row.actual;
+    acc.difference += row.difference;
+    acc.debt += row.debt;
+    acc.pendingBalance += pendingBalances.get(cleanNif(row.client.nif))?.totalPendente || 0;
+    return acc;
+  }, { expected: 0, actual: 0, difference: 0, debt: 0, pendingBalance: 0 }), [visibleRows, pendingBalances]);
 
   const buildBalanceMap = (balances: PrimaveraPendingBalance[]) => {
     const byNif = new Map<string, PrimaveraPendingBalance>();
@@ -425,12 +457,13 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
-              <tr><th className="px-4 py-3">Cliente</th><th className="px-3 py-3">Tipo</th><th className="px-3 py-3 text-right">Mensalidade</th><th className="px-3 py-3 text-right">Faturado</th><th className="px-3 py-3 text-right">Diferença</th><th className="px-3 py-3 text-right">Em falta este mês</th><th className="px-3 py-3 text-right">Dívida Acumulada</th><th className="px-3 py-3">Documentos</th><th className="px-4 py-3">Estado</th><th className="px-3 py-3">Ações</th></tr>
+              <tr><th className="px-4 py-3">Cliente</th><th className="px-3 py-3">NIF</th><th className="px-3 py-3">Tipo</th><th className="px-3 py-3 text-right">Mensalidade</th><th className="px-3 py-3 text-right">Faturado</th><th className="px-3 py-3 text-right">Diferença</th><th className="px-3 py-3 text-right">Em falta este mês</th><th className="px-3 py-3 text-right">Dívida Acumulada</th><th className="px-3 py-3">Documentos</th><th className="px-4 py-3">Estado</th><th className="px-3 py-3">Ações</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {visibleRows.map(row => (
                 <tr key={row.client.id} className="hover:bg-slate-50/70">
-                  <td className="px-4 py-3"><p className="font-bold text-slate-900">{row.client.name}</p><p className="mt-0.5 font-mono text-[10px] text-slate-400">{row.client.nif}</p></td>
+                  <td className="px-4 py-3 font-bold text-slate-900">{row.client.name}</td>
+                  <td className="px-3 py-3 font-mono text-[10px] text-slate-400">{row.client.nif}</td>
                   <td className="px-3 py-3 text-slate-600">{row.client.entityType}</td>
                   <td className="px-3 py-3 text-right font-semibold text-slate-700">{row.expected > 0 ? money.format(row.expected) : '—'}</td>
                   <td className="px-3 py-3 text-right font-bold text-slate-900">{money.format(row.actual)}</td>
@@ -461,16 +494,51 @@ const BillingControl: React.FC<BillingControlProps> = ({ clients, setClients }) 
                   </td>
                 </tr>
               ))}
-              {!visibleRows.length && <tr><td colSpan={10} className="px-4 py-10 text-center text-slate-400">{source ? 'Nenhum cliente neste filtro.' : 'Escolha o mês e sincronize com o Primavera.'}</td></tr>}
+              {!visibleRows.length && <tr><td colSpan={11} className="px-4 py-10 text-center text-slate-400">{source ? 'Nenhum cliente neste filtro.' : 'Escolha o mês e sincronize com o Primavera.'}</td></tr>}
             </tbody>
+            {visibleRows.length > 0 && (
+              <tfoot className="border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-slate-900">
+                <tr>
+                  <td className="px-4 py-3" colSpan={3}>Total ({visibleRows.length} cliente{visibleRows.length === 1 ? '' : 's'})</td>
+                  <td className="px-3 py-3 text-right">{money.format(visibleTotals.expected)}</td>
+                  <td className="px-3 py-3 text-right">{money.format(visibleTotals.actual)}</td>
+                  <td className={`px-3 py-3 text-right ${Math.abs(visibleTotals.difference) <= 0.02 ? 'text-emerald-700' : 'text-amber-700'}`}>{money.format(visibleTotals.difference)}</td>
+                  <td className={`px-3 py-3 text-right ${visibleTotals.debt > 0.02 ? 'text-red-700' : 'text-slate-400'}`}>{money.format(visibleTotals.debt)}</td>
+                  <td className={`px-3 py-3 text-right ${visibleTotals.pendingBalance > 0.02 ? 'text-red-700' : 'text-slate-400'}`}>{money.format(visibleTotals.pendingBalance)}</td>
+                  <td colSpan={3}></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </section>
 
+      {source && missingClients.length > 0 && (
+        <section className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-800">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="font-bold">{missingClients.length} NIF(s) faturado(s) no Primavera sem cliente correspondente no CMR</p>
+              <p className="mt-1 text-red-700">Estes clientes foram faturados este mês mas não têm ficha no CMR — pode faltar criá-los ou o NIF pode estar diferente.</p>
+            </div>
+          </div>
+          <div className="mt-3 divide-y divide-red-100 rounded-lg border border-red-100 bg-white">
+            {missingClients.map(item => (
+              <div key={item.nif} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-slate-800">{item.customerName || 'Nome desconhecido'}</p>
+                  <p className="font-mono text-[10px] text-slate-400">{item.nif} · {item.refs.join(', ')}</p>
+                </div>
+                <span className="shrink-0 font-bold text-red-700">{money.format(item.net)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       {source && unmatchedDocuments.length > 0 && (
         <section className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-800">
           <CircleDollarSign size={18} className="mt-0.5 shrink-0" />
-          <div><p className="font-bold">{unmatchedDocuments.length} documento(s) fora da população de avenças</p><p className="mt-1 text-blue-700">Inclui particulares, empresas de outros tipos ou NIFs ainda não ligados ao CMR. Não são tratados como falhas de faturação.</p></div>
+          <div><p className="font-bold">{unmatchedDocuments.length} documento(s) fora da população de avenças</p><p className="mt-1 text-blue-700">Inclui particulares ou empresas de outros tipos já existentes no CMR. Não são tratados como falhas de faturação.</p></div>
         </section>
       )}
       {source && counts.correct === eligibleClients.length && <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700"><CheckCircle2 size={15} /> Todas as avenças configuradas coincidem com a faturação.</div>}
